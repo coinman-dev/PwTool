@@ -29,10 +29,19 @@ setsid timeout -k 5 120 dbus-run-session -- bash -c '
 PID=$!
 wait $PID
 RC=$?
-# kill what is left in the process group (D-Bus activated services)
+# kill what is left: the process group, and D-Bus activated services that
+# detached from it (recognized by the private runtime directory)
 kill -TERM -- -$PID 2>/dev/null
+leftovers() {
+  for p in $(pgrep -u "$(id -u)" .); do
+    if { tr '\0' '\n' < /proc/$p/environ; } 2>/dev/null | grep -qx "XDG_RUNTIME_DIR=$RT"; then echo $p; fi
+  done
+}
+sleep 0.3
+L=$(leftovers); [ -n "$L" ] && kill -TERM $L 2>/dev/null
 sleep 0.3
 kill -KILL -- -$PID 2>/dev/null
+L=$(leftovers); [ -n "$L" ] && kill -KILL $L 2>/dev/null
 grep -v "^dbus-daemon\|^$\|^qt\.qpa\." "$LOG"
 # the document portal leaves its FUSE mount behind
 if [ -e "$RT/doc" ] || grep -q " $RT/doc " /proc/mounts; then
