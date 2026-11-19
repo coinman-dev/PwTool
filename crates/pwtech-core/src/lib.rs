@@ -9,10 +9,12 @@
 //!
 //! Licence: GPL-2.0-or-later, like the original.
 
+pub mod config;
 pub mod crypt_text;
 pub mod crypto;
 pub mod generate;
 pub mod language;
+pub mod language_file;
 pub mod lzo;
 pub mod mp_passw_gen;
 pub mod passw;
