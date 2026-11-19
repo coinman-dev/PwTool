@@ -50,9 +50,9 @@ pub async fn msg_box(
     let (labels, results): (Vec<String>, Vec<MsgResult>) = match buttons {
         MsgButtons::Ok => (vec![trl("OK")], vec![MsgResult::Ok]),
         MsgButtons::OkCancel => (vec![trl("OK"), trl("Cancel")], vec![MsgResult::Ok, MsgResult::Cancel]),
-        MsgButtons::YesNo => (vec![trl("&Yes"), trl("&No")], vec![MsgResult::Yes, MsgResult::No]),
+        MsgButtons::YesNo => (vec![format!("&{}", trl("Yes")), format!("&{}", trl("No"))], vec![MsgResult::Yes, MsgResult::No]),
         MsgButtons::YesNoCancel => (
-            vec![trl("&Yes"), trl("&No"), trl("Cancel")],
+            vec![format!("&{}", trl("Yes")), format!("&{}", trl("No")), trl("Cancel")],
             vec![MsgResult::Yes, MsgResult::No, MsgResult::Cancel],
         ),
     };

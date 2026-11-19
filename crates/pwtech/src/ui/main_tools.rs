@@ -135,6 +135,10 @@ impl MainWindow {
                 w.profile_editor(false).await;
             });
         });
+        self.act("MainMenu_Help_CheckForUpdates", |w| {
+            let w = w.clone();
+            glib::spawn_future_local(async move { w.check_for_updates(true).await });
+        });
         self.act("MainMenu_Options_Config", |w| {
             let w = w.clone();
             glib::spawn_future_local(async move { w.configuration().await });
@@ -173,6 +177,83 @@ impl MainWindow {
                 }
             });
             b.add_controller(g);
+        }
+    }
+
+    /// `MainMenu_Help_CheckForUpdatesClick()` (manual) and the automatic
+    /// check at start-up (`FormActivate()`).
+    pub(super) async fn check_for_updates(self: &Rc<Self>, manual: bool) {
+        use crate::ui::update_check::{CheckResult, check_for_updates};
+        let win = self.win();
+        self.b.action("MainMenu_Help_CheckForUpdates").set_enabled(false);
+        let r = check_for_updates(Some(&win), manual).await;
+        self.b.action("MainMenu_Help_CheckForUpdates").set_enabled(true);
+        match r {
+            CheckResult::NotConfigured => {
+                if manual {
+                    msg_box(
+                        Some(&win),
+                        &trl("The update check is not configured in this build\n(no repository of the Linux port)."),
+                        MsgIcon::Info,
+                        MsgButtons::Ok,
+                        false,
+                    )
+                    .await;
+                }
+                return;
+            }
+            CheckResult::Negative if manual => {
+                msg_box(
+                    Some(&win),
+                    &trl_format("Your version of %1 is up-to-date.", &[PROGRAM_NAME]),
+                    MsgIcon::Info,
+                    MsgButtons::Ok,
+                    false,
+                )
+                .await;
+            }
+            _ => {}
+        }
+        if matches!(r, CheckResult::Negative | CheckResult::Positive) {
+            let now = glib::DateTime::now_local().ok();
+            if let Some(d) = now {
+                let s = pwtech_core::util::format_short_date(d.year(), d.month() as u32, d.day_of_month() as u32);
+                self.core.borrow_mut().ini.write_string("Main", "LastUpdateCheck", &s);
+            }
+        }
+    }
+
+    /// Automatic check at start-up if due (`AutoCheckUpdates`).
+    pub(super) fn auto_check_updates(self: &Rc<Self>) {
+        use crate::app_config::AutoCheckUpdates;
+        let (mode, last) = {
+            let core = self.core.borrow();
+            (core.config.auto_check_updates, core.ini.read_string("Main", "LastUpdateCheck", ""))
+        };
+        if mode == AutoCheckUpdates::Disabled {
+            return;
+        }
+        let Ok(now) = glib::DateTime::now_local() else { return };
+        let due = match pwtech_core::util::parse_short_date(&last)
+            .and_then(|(y, m, d)| glib::DateTime::from_local(y, m as i32, d as i32, 0, 0, 0.0).ok())
+        {
+            None => true,
+            Some(l) => {
+                let days = now.difference(&l).as_days();
+                match mode {
+                    AutoCheckUpdates::Daily => days >= 1,
+                    AutoCheckUpdates::Weekly => days >= 7,
+                    _ => {
+                        let months = (now.year() - l.year()) * 12 + now.month() - l.month()
+                            - if now.day_of_month() < l.day_of_month() { 1 } else { 0 };
+                        months >= 1
+                    }
+                }
+            }
+        };
+        if due {
+            let w = self.clone();
+            glib::spawn_future_local(async move { w.check_for_updates(false).await });
         }
     }
 

@@ -13,6 +13,7 @@ pub mod passw_enter;
 pub mod portal;
 pub mod quality_bar;
 pub mod tray;
+pub mod update_check;
 pub mod util;
 
 use std::cell::RefCell;

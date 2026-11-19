@@ -102,9 +102,51 @@ pub fn format_short_date(year: i32, month: u32, day: u32) -> String {
     strftime(c"%x", &tm)
 }
 
+/// Parse a short date of the user's locale (`StrToDate()`, inverse of
+/// [`format_short_date`]): (year, month, day).
+pub fn parse_short_date(s: &str) -> Option<(i32, u32, u32)> {
+    let nums: Vec<i64> = s
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|x| !x.is_empty())
+        .filter_map(|x| x.parse().ok())
+        .collect();
+    if nums.len() != 3 {
+        return None;
+    }
+    // order of the fields in the locale's format
+    let sample = format_short_date(2033, 11, 22);
+    let pos = |pat: &str| sample.find(pat);
+    let (py, pm, pd) = (pos("33").unwrap_or(usize::MAX), pos("11")?, pos("22")?);
+    let mut order = [(py, 'y'), (pm, 'm'), (pd, 'd')];
+    order.sort();
+    let (mut y, mut m, mut d) = (0i64, 0i64, 0i64);
+    for (i, (_, k)) in order.iter().enumerate() {
+        match k {
+            'y' => y = nums[i],
+            'm' => m = nums[i],
+            _ => d = nums[i],
+        }
+    }
+    if y < 100 {
+        y += 2000;
+    }
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        return None;
+    }
+    Some((y as i32, m as u32, d as u32))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn short_date_roundtrip() {
+        init_time_locale();
+        let s = format_short_date(2026, 11, 20);
+        assert_eq!(parse_short_date(&s), Some((2026, 11, 20)));
+        assert_eq!(parse_short_date("garbage"), None);
+    }
 
     #[test]
     fn floor_bits() {

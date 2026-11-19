@@ -1882,8 +1882,10 @@ impl MainWindow {
         }
     }
 
-    /// Show start-up errors (`FormActivate`).
-    pub fn show_startup_errors(&self) {
+    /// Show start-up errors and start the automatic update check
+    /// (`FormActivate`).
+    pub fn show_startup_errors(self: &Rc<Self>) {
+        self.auto_check_updates();
         let errs: Vec<String> = self.core.borrow_mut().startup_errors.drain(..).collect();
         if !errs.is_empty() {
             let mut m = trl_format("%1 encountered %2 error(s) during startup:", &[PROGRAM_NAME, &errs.len().to_string()]);
