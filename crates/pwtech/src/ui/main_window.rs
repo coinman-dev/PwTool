@@ -42,6 +42,8 @@ mod tools;
 mod config_dlg;
 #[path = "profile_editor.rs"]
 mod profile_editor;
+#[path = "char_set_builder.rs"]
+mod char_set_builder;
 
 const ENTROPY_SYSTEM: u32 = 24;
 const ENTROPY_MOUSECLICK: u32 = 2;
@@ -119,6 +121,7 @@ pub struct MainWindow {
     hot_keys_active: RefCell<crate::app_config::HotKeyList>,
     profile_dlg: RefCell<Option<Rc<profile_editor::ProfileEditDlg>>>,
     profile_list_guard: Cell<bool>,
+    char_set_builder: RefCell<Option<Rc<char_set_builder::CharSetBuilderWin>>>,
 }
 
 impl MainWindow {
@@ -174,6 +177,7 @@ impl MainWindow {
             hot_keys_active: RefCell::new(Default::default()),
             profile_dlg: RefCell::new(None),
             profile_list_guard: Cell::new(false),
+            char_set_builder: RefCell::new(None),
         });
         w.setup();
         w
@@ -524,6 +528,7 @@ impl MainWindow {
             *w.script.borrow_mut() = None;
         });
         self.click("HelpBtn", |w| w.help_btn_click());
+        self.click("BuildBtn", |w| w.char_set_builder());
         self.click("ClearClipBtn", |w| w.clear_clip_btn_click());
         self.click("ReloadProfileBtn", |w| {
             if let Some(i) = w.combo("ProfileList").active() {

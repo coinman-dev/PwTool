@@ -143,6 +143,7 @@ impl MainWindow {
         let ini = &mut core.ini;
         self.save_config_dlg_config(ini);
         self.save_profile_editor_config(ini);
+        self.save_char_set_builder_config(ini);
         if let Some(d) = self.tools.passw_enter.borrow().as_ref() {
             d.save_config(ini);
         }
