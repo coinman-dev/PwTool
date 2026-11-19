@@ -7,6 +7,7 @@ pub mod form;
 pub mod icons;
 pub mod layout;
 pub mod main_window;
+pub mod passw_enter;
 pub mod quality_bar;
 pub mod util;
 

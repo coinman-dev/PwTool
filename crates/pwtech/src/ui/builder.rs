@@ -204,6 +204,10 @@ impl UpDown {
         *self.min.borrow_mut() = v;
     }
 
+    pub fn set_sensitive(&self, on: bool) {
+        self.widget.set_sensitive(on);
+    }
+
     fn step(&self, d: i64) {
         let p = self.position();
         self.set_position(p + d * self.increment);
@@ -823,19 +827,41 @@ pub fn build_form(form: FormObj, form_name: &str) -> Built {
     };
 
     // image lists: TVirtualImageList → collection images
-    for c in &form.children {
-        if c.class == "TVirtualImageList" {
-            let coll = c.ident("ImageCollection").unwrap_or("").to_string();
-            let list: Vec<Option<gdk::Texture>> = c
-                .collection("Images")
-                .iter()
-                .map(|i| {
-                    let name = i.get("CollectionName").and_then(|v| v.as_str()).unwrap_or("");
-                    icons::texture(form_name, &coll, name)
-                })
-                .collect();
-            ctx.image_sizes.insert(c.name.clone(), (c.int_or("Width", 16) as f64 * scale).round() as i32);
-            ctx.image_lists.insert(c.name.clone(), list);
+    let mut add_lists = |src: &FormObj, src_form: &str, prefix: &str, only: Option<&str>| {
+        for c in &src.children {
+            if c.class == "TVirtualImageList" && only.is_none_or(|n| n == c.name) {
+                let coll = c.ident("ImageCollection").unwrap_or("").to_string();
+                let list: Vec<Option<gdk::Texture>> = c
+                    .collection("Images")
+                    .iter()
+                    .map(|i| {
+                        let name = i.get("CollectionName").and_then(|v| v.as_str()).unwrap_or("");
+                        icons::texture(src_form, &coll, name)
+                    })
+                    .collect();
+                let key = format!("{prefix}{}", c.name);
+                ctx.image_sizes.insert(key.clone(), (c.int_or("Width", 16) as f64 * scale).round() as i32);
+                ctx.image_lists.insert(key, list);
+            }
+        }
+    };
+    add_lists(&form, form_name, "", None);
+    // image lists of other forms ("MainForm.ImageList16")
+    let mut external: Vec<String> = Vec::new();
+    form.walk(&mut |o: &FormObj| {
+        for prop in ["Images", "SmallImages", "LargeImages"] {
+            if let Some(id) = o.ident(prop) {
+                if id.contains('.') && !external.iter().any(|e| e == id) {
+                    external.push(id.to_string());
+                }
+            }
+        }
+    });
+    for id in external {
+        let (fref, list) = id.split_once('.').unwrap();
+        let fname = fref.strip_suffix("Form").or_else(|| fref.strip_suffix("Dlg")).unwrap_or(fref);
+        if let Some(src) = super::form::try_load_form(fname) {
+            add_lists(&src, fname, &format!("{fref}."), Some(list));
         }
     }
 

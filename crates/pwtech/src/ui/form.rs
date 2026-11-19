@@ -89,6 +89,11 @@ impl FormObj {
 
 /// Load one of the embedded forms by name (e.g. `"Main"`).
 pub fn load_form(name: &str) -> FormObj {
+    try_load_form(name).unwrap_or_else(|| panic!("unknown form {name}"))
+}
+
+/// Load an embedded form, `None` if there is no such form.
+pub fn try_load_form(name: &str) -> Option<FormObj> {
     let json = match name {
         "About" => include_str!("../../../../assets/forms/About.json"),
         "CharSetBuilder" => include_str!("../../../../assets/forms/CharSetBuilder.json"),
@@ -111,8 +116,8 @@ pub fn load_form(name: &str) -> FormObj {
         "Progress" => include_str!("../../../../assets/forms/Progress.json"),
         "ProvideEntropy" => include_str!("../../../../assets/forms/ProvideEntropy.json"),
         "QuickHelp" => include_str!("../../../../assets/forms/QuickHelp.json"),
-        _ => panic!("unknown form {name}"),
+        _ => return None,
     };
     let v: Value = serde_json::from_str(json).expect("form JSON");
-    FormObj::from_json(&v)
+    Some(FormObj::from_json(&v))
 }
