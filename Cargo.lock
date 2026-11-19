@@ -376,6 +376,7 @@ name = "pwtech"
 version = "0.1.0"
 dependencies = [
  "pwtech-core",
+ "zeroize",
 ]
 
 [[package]]

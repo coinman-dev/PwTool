@@ -8,3 +8,4 @@ rust-version.workspace = true
 
 [dependencies]
 pwtech-core = { path = "../pwtech-core" }
+zeroize = "1.9"

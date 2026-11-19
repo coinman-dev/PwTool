@@ -1,0 +1,31 @@
+//! Program constants (`upstream/src/main/ProgramDef.h`), adapted for the
+//! Linux port.
+
+/// Name of the program.
+pub const PROGRAM_NAME: &str = "Password Tech";
+/// Version of the original this port corresponds to. Used for the
+/// compatibility check of translation files and in `LastVersion`.
+pub const PROGRAM_VERSION: &str = "3.6.1";
+/// Minimum version of translation files.
+pub const PROGRAM_LANGVER_MIN: &str = "3.6.0";
+/// Version of the Linux port.
+pub const PORT_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const PROGRAM_AUTHOR: &str = "Christian Thöing";
+pub const PROGRAM_COPYRIGHT: &str = "Copyright © 2002-2026";
+/// Repository of the Linux port (used for "Visit Website", "Get
+/// Translations" and the update check). Set when the repository exists.
+pub const PORT_REPOSITORY: &str = "";
+/// Donation page of the original author.
+pub const PROGRAM_URL_DONATE: &str = "https://www.paypal.com/donate/?hosted_button_id=XLLCYFJZLS5V8";
+pub const PROGRAM_URL_ORIGINAL: &str = "https://pwgen-win.sourceforge.io";
+pub const PROGRAM_HELPFILE: &str = "manual.pdf";
+pub const PROGRAM_LICENSEFILE: &str = "license.txt";
+pub const PROGRAM_INIFILE: &str = "PwTech.ini";
+pub const PROGRAM_RANDSEEDFILE: &str = "randseed.dat";
+pub const LANGUAGE_DEFAULT_NAME: &str = "English";
+pub const LANGUAGE_DEFAULT_CODE: &str = "en";
+
+/// Version string shown to the user.
+pub fn version_string() -> String {
+    format!("{PORT_VERSION} ({PROGRAM_VERSION})")
+}
