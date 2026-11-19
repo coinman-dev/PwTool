@@ -48,6 +48,8 @@ mod char_set_builder;
 mod mp_passw_gen;
 #[path = "main_integration.rs"]
 mod integration;
+#[path = "main_tray.rs"]
+mod tray_main;
 
 const ENTROPY_SYSTEM: u32 = 24;
 const ENTROPY_MOUSECLICK: u32 = 2;
@@ -128,6 +130,7 @@ pub struct MainWindow {
     char_set_builder: RefCell<Option<Rc<char_set_builder::CharSetBuilderWin>>>,
     mp_passw_gen: RefCell<Option<Rc<mp_passw_gen::MpPasswGenWin>>>,
     close_confirmed: Cell<bool>,
+    tray: tray_main::TrayState,
 }
 
 impl MainWindow {
@@ -186,6 +189,7 @@ impl MainWindow {
             char_set_builder: RefCell::new(None),
             mp_passw_gen: RefCell::new(None),
             close_confirmed: Cell::new(false),
+            tray: tray_main::TrayState::new(),
         });
         w.setup();
         w
@@ -297,6 +301,7 @@ impl MainWindow {
         self.connect_events();
         self.connect_tools();
         self.connect_profile_editor();
+        self.setup_tray();
         self.setup_timer();
         self.setup_entropy_events();
         self.update_entropy_progress(true);
@@ -1706,6 +1711,7 @@ impl MainWindow {
             }
             w.timer_cnt.set(c);
             w.tools_timer();
+            w.tray_timer();
             let n = w.auto_clear_clip_cnt.get();
             if n > 0 {
                 w.auto_clear_clip_cnt.set(n - 1);

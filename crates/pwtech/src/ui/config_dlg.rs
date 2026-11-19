@@ -911,8 +911,6 @@ impl MainWindow {
         *self.hot_keys_active.borrow_mut() = keys.clone();
     }
 
-    /// Show or hide the tray icon according to the configuration.
-    pub(super) fn update_tray_icon(&self) {}
 }
 
 /// Autostart entry (`LaunchSystemStartup`): `~/.config/autostart/

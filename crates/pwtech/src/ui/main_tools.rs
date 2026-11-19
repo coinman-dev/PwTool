@@ -99,6 +99,10 @@ impl MainWindow {
         self.act("MainMenu_Tools_CreateRandDataFile", |w| w.create_rand_data_file());
         self.act("TrayMenu_CreateRandDataFile", |w| w.create_rand_data_file());
         self.act("MainMenu_Tools_CreateTrigramFile", |w| w.create_trigram_file());
+        self.b.set_menu_label(
+            "MainMenu_Help_About",
+            &crate::ui::builder::mnemonic(&trl_format("About %1...", &[PROGRAM_NAME])),
+        );
         self.act("MainMenu_Help_About", |w| w.about());
         self.act("TrayMenu_About", |w| w.about());
         self.act("TrayMenu_OpenManual", |w| w.help_btn_click());
@@ -233,6 +237,7 @@ impl MainWindow {
     /// Profile entries of File | Profile and Tray | Profile
     /// (`UpdateProfileControls()`).
     pub(super) fn update_profile_menu(&self) {
+        self.update_tray_icon();
         let names: Vec<String> = self.core.borrow().profiles.iter().map(|p| p.profile_name.clone()).collect();
         let app = self.window.application();
         for old in self.tools.profile_accels.borrow_mut().drain(..) {

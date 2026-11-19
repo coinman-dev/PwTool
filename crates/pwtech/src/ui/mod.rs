@@ -9,6 +9,7 @@ pub mod layout;
 pub mod main_window;
 pub mod passw_enter;
 pub mod quality_bar;
+pub mod tray;
 pub mod util;
 
 use std::cell::RefCell;
@@ -41,6 +42,8 @@ pub fn run(cmd: CmdLineOptions) -> i32 {
         let w = main_window::MainWindow::new(app, core);
         if !silent {
             w.window.present();
+        } else {
+            w.start_hidden();
         }
         let w2 = w.clone();
         glib::idle_add_local_once(move || w2.show_startup_errors());
