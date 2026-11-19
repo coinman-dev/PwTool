@@ -44,6 +44,10 @@ mod config_dlg;
 mod profile_editor;
 #[path = "char_set_builder.rs"]
 mod char_set_builder;
+#[path = "mp_passw_gen.rs"]
+mod mp_passw_gen;
+#[path = "main_integration.rs"]
+mod integration;
 
 const ENTROPY_SYSTEM: u32 = 24;
 const ENTROPY_MOUSECLICK: u32 = 2;
@@ -122,6 +126,7 @@ pub struct MainWindow {
     profile_dlg: RefCell<Option<Rc<profile_editor::ProfileEditDlg>>>,
     profile_list_guard: Cell<bool>,
     char_set_builder: RefCell<Option<Rc<char_set_builder::CharSetBuilderWin>>>,
+    mp_passw_gen: RefCell<Option<Rc<mp_passw_gen::MpPasswGenWin>>>,
 }
 
 impl MainWindow {
@@ -178,6 +183,7 @@ impl MainWindow {
             profile_dlg: RefCell::new(None),
             profile_list_guard: Cell::new(false),
             char_set_builder: RefCell::new(None),
+            mp_passw_gen: RefCell::new(None),
         });
         w.setup();
         w
@@ -1722,7 +1728,12 @@ impl MainWindow {
     /// Activate the deterministic generator with a master password
     /// (`MainMenu_Tools_DetermRandGen_SetupClick` + `UseKeySeededPRNG`).
     pub fn use_key_seeded_prng(&self, passw: &str) {
-        *self.key_seeded_prng.borrow_mut() = Some(pwtech_core::mp_passw_gen::deterministic_generator(passw));
+        self.use_key_seeded_prng_with(pwtech_core::mp_passw_gen::deterministic_generator(passw));
+    }
+
+    /// `UseKeySeededPRNG()` with an already seeded generator.
+    pub fn use_key_seeded_prng_with(&self, prng: AesCtrPrng) {
+        *self.key_seeded_prng.borrow_mut() = Some(prng);
         let title = pwtech_core::unicode::format_w(
             "%1 (%2)",
             &[PROGRAM_NAME, &trl("WARNING: Random generator is deterministic (press F7 to deactivate)!")],

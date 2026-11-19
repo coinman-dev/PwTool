@@ -97,6 +97,34 @@ impl MainWindow {
         self.act("TrayMenu_About", |w| w.about());
         self.act("TrayMenu_OpenManual", |w| w.help_btn_click());
         self.act("MainMenu_File_BackupSettings", |w| w.backup_settings());
+        for name in ["MainMenu_Tools_MPPasswGen", "TrayMenu_MPPasswGen"] {
+            self.act(name, |w| w.mp_passw_gen());
+        }
+        self.click("MPPasswGenBtn", |w| w.mp_passw_gen());
+        for name in ["MainMenu_File_PasswManager", "TrayMenu_PasswManager"] {
+            self.act(name, |w| w.show_passw_manager());
+        }
+        self.click("PasswMngBtn", |w| w.show_passw_manager());
+        self.act("PasswBoxMenu_AddToDb", |w| {
+            let passw = Zeroizing::new(w.entry("PasswBox").text().to_string());
+            w.add_passw_to_db(&passw, true, None);
+        });
+        self.act("PasswBoxMenu_PerformAutotype", |w| {
+            let passw = Zeroizing::new(w.entry("PasswBox").text().to_string());
+            let win = w.win();
+            w.perform_autotype(&win, "", None, None, None, Some(&passw));
+        });
+        self.click("CryptTextBtn", |w| w.crypt_text_spawn(true, None));
+        self.click("ConfigBtn", |w| {
+            let w = w.clone();
+            glib::spawn_future_local(async move { w.configuration().await });
+        });
+        self.click("ProfileEditorBtn", |w| {
+            let w = w.clone();
+            glib::spawn_future_local(async move {
+                w.profile_editor(false).await;
+            });
+        });
         self.act("MainMenu_Options_Config", |w| {
             let w = w.clone();
             glib::spawn_future_local(async move { w.configuration().await });
@@ -144,6 +172,7 @@ impl MainWindow {
         self.save_config_dlg_config(ini);
         self.save_profile_editor_config(ini);
         self.save_char_set_builder_config(ini);
+        self.save_mp_passw_gen_config(ini);
         if let Some(d) = self.tools.passw_enter.borrow().as_ref() {
             d.save_config(ini);
         }
