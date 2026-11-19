@@ -91,6 +91,12 @@ impl MainWindow {
         msg(Some(&self.win()), &trl("The password manager is not available yet in this version."), MsgIcon::Info);
     }
 
+    /// `TPasswMngForm::SearchDbForKeyword()` (hot key action).
+    pub(super) fn search_db_for_keyword(self: &Rc<Self>, autotype: bool) {
+        let _ = autotype;
+        self.show_passw_manager();
+    }
+
     /// `PasswMngBtnClick()`.
     pub(super) fn show_passw_manager(self: &Rc<Self>) {
         msg(Some(&self.win()), &trl("The password manager is not available yet in this version."), MsgIcon::Info);

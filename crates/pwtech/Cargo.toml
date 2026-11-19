@@ -7,6 +7,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 ksni = { version = "0.3", default-features = false, features = ["async-io", "blocking"] }
 ashpd = { version = "0.14", default-features = false, features = ["async-io", "global_shortcuts", "remote_desktop", "screencast", "gtk4_wayland", "gtk4_x11"] }
 libc = "0.2"

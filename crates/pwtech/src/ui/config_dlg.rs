@@ -907,8 +907,121 @@ impl MainWindow {
     }
 
     /// `ActivateHotKeys()`: registers the global hot keys (see `hotkeys`).
-    pub(super) fn activate_hot_keys(&self, keys: &HotKeyList) {
+    pub(super) fn activate_hot_keys(self: &Rc<Self>, keys: &HotKeyList) {
         *self.hot_keys_active.borrow_mut() = keys.clone();
+        if keys.is_empty() {
+            crate::ui::hotkeys::deactivate();
+            return;
+        }
+        let show = trl("Show/restore main window");
+        let actions: Vec<String> = self
+            .b
+            .form
+            .find("HotKeyActionsList")
+            .map(|o| o.strings("Items.Strings"))
+            .or_else(|| {
+                crate::ui::form::try_load_form("Configuration")
+                    .and_then(|f| f.find("HotKeyActionsList").map(|o| o.strings("Items.Strings")))
+            })
+            .unwrap_or_default();
+        let list: Vec<(u16, String)> = keys
+            .iter()
+            .map(|(k, e)| {
+                let mut d = String::new();
+                if e.show_main_win {
+                    d.push_str(&show);
+                }
+                if e.action != hot_key_action::NONE {
+                    if !d.is_empty() {
+                        d.push_str(", ");
+                    }
+                    d.push_str(&trl(actions.get(e.action as usize).map(|s| s.as_str()).unwrap_or("")));
+                }
+                (*k, d)
+            })
+            .collect();
+        let w = Rc::downgrade(self);
+        let parent = self.win();
+        glib::spawn_future_local(async move {
+            let cb: Rc<dyn Fn(u16)> = Rc::new(move |code| {
+                if let Some(w) = w.upgrade() {
+                    w.on_hot_key(code);
+                }
+            });
+            let visible = parent.is_visible();
+            if let Err(e) = crate::ui::hotkeys::activate(if visible { Some(&parent) } else { None }, list, cb).await {
+                eprintln!("pwtech: global hot keys: {e}");
+            }
+        });
+    }
+
+    /// `OnHotKey()`.
+    fn on_hot_key(self: &Rc<Self>, code: u16) {
+        let Some(hke) = self.hot_keys_active.borrow().get(&code).copied() else { return };
+        if self.generating.get() {
+            return;
+        }
+        // no hot keys while a modal dialog is open
+        let modal_open = gtk::Window::list_toplevels()
+            .into_iter()
+            .filter_map(|x| x.downcast::<gtk::Window>().ok())
+            .any(|x| x.is_visible() && x.is_modal());
+        if modal_open {
+            return;
+        }
+        let was_hidden = self.tray.hidden.get() || !self.window.is_visible();
+        let show_main = |force: bool| {
+            if force || hke.show_main_win {
+                if was_hidden {
+                    self.restore_from_tray();
+                }
+                self.window.present();
+            }
+        };
+        let dest = match hke.action {
+            hot_key_action::SHOW_MPPG => {
+                show_main(true);
+                self.mp_passw_gen();
+                None
+            }
+            hot_key_action::SHOW_PASSW_MANAGER => {
+                show_main(true);
+                self.show_passw_manager();
+                None
+            }
+            hot_key_action::SEARCH_DATABASE | hot_key_action::SEARCH_DATABASE_AUTOTYPE => {
+                self.search_db_for_keyword(hke.action == hot_key_action::SEARCH_DATABASE_AUTOTYPE);
+                show_main(false);
+                None
+            }
+            hot_key_action::SINGLE_PASSW => {
+                show_main(false);
+                Some(GenDest::GuiSingle)
+            }
+            hot_key_action::PASSW_LIST => {
+                show_main(false);
+                Some(GenDest::GuiList)
+            }
+            hot_key_action::PASSW_CLIPBOARD => {
+                show_main(false);
+                Some(GenDest::Clipboard)
+            }
+            hot_key_action::PASSW_MSGBOX => {
+                show_main(true);
+                Some(GenDest::MsgBox)
+            }
+            hot_key_action::PASSW_AUTOTYPE => {
+                show_main(false);
+                Some(GenDest::Autotype)
+            }
+            _ => {
+                show_main(true);
+                None
+            }
+        };
+        if let Some(d) = dest {
+            self.generate_passw(d);
+        }
     }
 
 }

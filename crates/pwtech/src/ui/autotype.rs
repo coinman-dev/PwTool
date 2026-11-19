@@ -195,6 +195,7 @@ async fn session(parent: Option<&gtk::Window>, token: &str) -> Result<(Rc<RdSess
     if let Some(s) = SESSION.with(|s| s.borrow().clone()) {
         return Ok((s, None));
     }
+    super::portal::ensure_registered().await;
     let proxy = RemoteDesktop::new().await.map_err(|e| e.to_string())?;
     let session = proxy.create_session(Default::default()).await.map_err(|e| e.to_string())?;
     proxy
