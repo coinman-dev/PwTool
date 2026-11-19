@@ -1,0 +1,3140 @@
+{
+ "kind": "object",
+ "name": "PasswMngForm",
+ "class": "TPasswMngForm",
+ "props": {
+  "Left": 594,
+  "Top": 119,
+  "Margins.Left": 2,
+  "Margins.Top": 2,
+  "Margins.Right": 2,
+  "Margins.Bottom": 2,
+  "ClientHeight": 534,
+  "ClientWidth": 664,
+  "Color": {
+   "id": "clBtnFace"
+  },
+  "Constraints.MinHeight": 478,
+  "Constraints.MinWidth": 500,
+  "Font.Charset": {
+   "id": "ANSI_CHARSET"
+  },
+  "Font.Color": {
+   "id": "clWindowText"
+  },
+  "Font.Height": -11,
+  "Font.Name": "Tahoma",
+  "Font.Style": {
+   "set": []
+  },
+  "Menu": {
+   "id": "MainMenu"
+  },
+  "PopupMode": {
+   "id": "pmExplicit"
+  },
+  "OnActivate": {
+   "id": "FormActivate"
+  },
+  "OnClose": {
+   "id": "FormClose"
+  },
+  "OnCloseQuery": {
+   "id": "FormCloseQuery"
+  },
+  "OnShow": {
+   "id": "FormShow"
+  },
+  "TextHeight": 13
+ },
+ "children": [
+  {
+   "kind": "object",
+   "name": "Splitter2",
+   "class": "TSplitter",
+   "props": {
+    "Left": 375,
+    "Top": 67,
+    "Height": 467,
+    "Beveled": true,
+    "MinSize": 24
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "Splitter1",
+   "class": "TSplitter",
+   "props": {
+    "Left": 0,
+    "Top": 64,
+    "Width": 664,
+    "Height": 3,
+    "Cursor": {
+     "id": "crVSplit"
+    },
+    "Align": {
+     "id": "alTop"
+    },
+    "MinSize": 24
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "DbView",
+   "class": "TListView",
+   "props": {
+    "Left": 0,
+    "Top": 67,
+    "Width": 375,
+    "Height": 467,
+    "Align": {
+     "id": "alLeft"
+    },
+    "Columns": {
+     "items": []
+    },
+    "HideSelection": false,
+    "MultiSelect": true,
+    "ReadOnly": true,
+    "RowSelect": true,
+    "PopupMenu": {
+     "id": "DbViewMenu"
+    },
+    "SmallImages": {
+     "id": "ImageList16"
+    },
+    "TabOrder": 0,
+    "ViewStyle": {
+     "id": "vsReport"
+    },
+    "OnColumnClick": {
+     "id": "DbViewColumnClick"
+    },
+    "OnCompare": {
+     "id": "DbViewCompare"
+    },
+    "OnDragDrop": {
+     "id": "DbViewDragDrop"
+    },
+    "OnDragOver": {
+     "id": "DbViewDragOver"
+    },
+    "OnKeyDown": {
+     "id": "DbViewKeyDown"
+    },
+    "OnMouseMove": {
+     "id": "DbViewMouseMove"
+    },
+    "OnSelectItem": {
+     "id": "DbViewSelectItem"
+    }
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "EditPanel",
+   "class": "TPanel",
+   "props": {
+    "Left": 378,
+    "Top": 67,
+    "Width": 286,
+    "Height": 467,
+    "Align": {
+     "id": "alClient"
+    },
+    "BevelOuter": {
+     "id": "bvNone"
+    },
+    "Enabled": false,
+    "TabOrder": 1
+   },
+   "children": [
+    {
+     "kind": "object",
+     "name": "TitleLbl",
+     "class": "TLabel",
+     "props": {
+      "Left": 8,
+      "Top": 9,
+      "Width": 24,
+      "Height": 13,
+      "Caption": "Title:",
+      "Font.Charset": {
+       "id": "ANSI_CHARSET"
+      },
+      "Font.Color": {
+       "id": "clWindowText"
+      },
+      "Font.Height": -11,
+      "Font.Name": "Tahoma",
+      "Font.Style": {
+       "set": []
+      },
+      "ParentFont": false,
+      "OnMouseMove": {
+       "id": "TitleLblMouseMove"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "UserNameLbl",
+     "class": "TLabel",
+     "props": {
+      "Left": 8,
+      "Top": 36,
+      "Width": 55,
+      "Height": 13,
+      "Caption": "User name:",
+      "OnMouseMove": {
+       "id": "UserNameLblMouseMove"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "PasswLbl",
+     "class": "TLabel",
+     "props": {
+      "Left": 8,
+      "Top": 63,
+      "Width": 50,
+      "Height": 13,
+      "Caption": "Password:",
+      "OnMouseMove": {
+       "id": "PasswLblMouseMove"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "UrlLbl",
+     "class": "TLabel",
+     "props": {
+      "Left": 8,
+      "Top": 115,
+      "Width": 23,
+      "Height": 13,
+      "Caption": "URL:",
+      "OnMouseMove": {
+       "id": "UrlLblMouseMove"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "KeywordLbl",
+     "class": "TLabel",
+     "props": {
+      "Left": 8,
+      "Top": 142,
+      "Width": 46,
+      "Height": 13,
+      "Caption": "Keyword:",
+      "OnMouseMove": {
+       "id": "KeywordLblMouseMove"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "NotesLbl",
+     "class": "TLabel",
+     "props": {
+      "Left": 8,
+      "Top": 197,
+      "Width": 32,
+      "Height": 13,
+      "Caption": "Notes:",
+      "OnMouseMove": {
+       "id": "NotesLblMouseMove"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "AddModifyBtn",
+     "class": "TSpeedButton",
+     "props": {
+      "Tag": 9,
+      "Left": 150,
+      "Top": 422,
+      "Width": 41,
+      "Height": 41,
+      "Hint": "Accept changes",
+      "ImageIndex": 3,
+      "ImageName": "003-accept",
+      "Images": {
+       "id": "ImageList32"
+      },
+      "Flat": true,
+      "Font.Charset": {
+       "id": "SYMBOL_CHARSET"
+      },
+      "Font.Color": {
+       "id": "clGreen"
+      },
+      "Font.Height": -27,
+      "Font.Name": "Wingdings",
+      "Font.Style": {
+       "set": []
+      },
+      "ParentFont": false,
+      "ParentShowHint": false,
+      "ShowHint": true,
+      "OnClick": {
+       "id": "AddModifyBtnClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "PrevBtn",
+     "class": "TSpeedButton",
+     "props": {
+      "Tag": 9,
+      "Left": 6,
+      "Top": 422,
+      "Width": 41,
+      "Height": 41,
+      "Hint": "Previous entry",
+      "ImageIndex": 0,
+      "ImageName": "up",
+      "Images": {
+       "id": "ImageList32"
+      },
+      "Flat": true,
+      "Font.Charset": {
+       "id": "SYMBOL_CHARSET"
+      },
+      "Font.Color": {
+       "id": "clBlue"
+      },
+      "Font.Height": -27,
+      "Font.Name": "Wingdings",
+      "Font.Style": {
+       "set": []
+      },
+      "ParentFont": false,
+      "ParentShowHint": false,
+      "ShowHint": true,
+      "OnClick": {
+       "id": "PrevBtnClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "NextBtn",
+     "class": "TSpeedButton",
+     "props": {
+      "Tag": 9,
+      "Left": 50,
+      "Top": 422,
+      "Width": 37,
+      "Height": 41,
+      "Hint": "Next entry",
+      "ImageIndex": 1,
+      "ImageName": "down",
+      "Images": {
+       "id": "ImageList32"
+      },
+      "Flat": true,
+      "Font.Charset": {
+       "id": "SYMBOL_CHARSET"
+      },
+      "Font.Color": {
+       "id": "clBlue"
+      },
+      "Font.Height": -27,
+      "Font.Name": "Wingdings",
+      "Font.Style": {
+       "set": []
+      },
+      "ParentFont": false,
+      "ParentShowHint": false,
+      "ShowHint": true,
+      "OnClick": {
+       "id": "NextBtnClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "CancelBtn",
+     "class": "TSpeedButton",
+     "props": {
+      "Tag": 9,
+      "Left": 190,
+      "Top": 422,
+      "Width": 37,
+      "Height": 41,
+      "Hint": "Undo changes",
+      "ImageIndex": 4,
+      "ImageName": "004-cancel",
+      "Images": {
+       "id": "ImageList32"
+      },
+      "Flat": true,
+      "Font.Charset": {
+       "id": "SYMBOL_CHARSET"
+      },
+      "Font.Color": {
+       "id": "clMaroon"
+      },
+      "Font.Height": -27,
+      "Font.Name": "Wingdings",
+      "Font.Style": {
+       "set": []
+      },
+      "ParentFont": false,
+      "ParentShowHint": false,
+      "ShowHint": true,
+      "OnClick": {
+       "id": "CancelBtnClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "CreationTimeLbl",
+     "class": "TLabel",
+     "props": {
+      "Tag": 9,
+      "Left": 8,
+      "Top": 338,
+      "Width": 68,
+      "Height": 13,
+      "Caption": "Creation time:"
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "CreationTimeInfo",
+     "class": "TLabel",
+     "props": {
+      "Tag": 9,
+      "Left": 112,
+      "Top": 338,
+      "Width": 4,
+      "Height": 13,
+      "Caption": "-"
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "DeleteBtn",
+     "class": "TSpeedButton",
+     "props": {
+      "Tag": 9,
+      "Left": 93,
+      "Top": 422,
+      "Width": 41,
+      "Height": 41,
+      "Hint": "Delete entry",
+      "ImageIndex": 2,
+      "ImageName": "005-delete",
+      "Images": {
+       "id": "ImageList32"
+      },
+      "Flat": true,
+      "ParentShowHint": false,
+      "ShowHint": true,
+      "OnClick": {
+       "id": "DeleteBtnClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "LastModificationLbl",
+     "class": "TLabel",
+     "props": {
+      "Tag": 9,
+      "Left": 8,
+      "Top": 366,
+      "Width": 84,
+      "Height": 13,
+      "Caption": "Last modification:"
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "LastModificationInfo",
+     "class": "TLabel",
+     "props": {
+      "Tag": 9,
+      "Left": 112,
+      "Top": 366,
+      "Width": 4,
+      "Height": 13,
+      "Caption": "-"
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "TogglePasswBtn",
+     "class": "TSpeedButton",
+     "props": {
+      "Tag": 6,
+      "Left": 248,
+      "Top": 58,
+      "Width": 26,
+      "Height": 24,
+      "Hint": "Left-click: Hide/show password, right-click: Generate password",
+      "AllowAllUp": true,
+      "GroupIndex": 1,
+      "Caption": "···",
+      "Flat": true,
+      "Font.Charset": {
+       "id": "SYMBOL_CHARSET"
+      },
+      "Font.Color": {
+       "id": "clMaroon"
+      },
+      "Font.Height": -15,
+      "Font.Name": "Symbol",
+      "Font.Style": {
+       "set": []
+      },
+      "ParentFont": false,
+      "ParentShowHint": false,
+      "ShowHint": true,
+      "OnClick": {
+       "id": "TogglePasswBtnClick"
+      },
+      "OnMouseUp": {
+       "id": "TogglePasswBtnMouseUp"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "KeyValueListLbl",
+     "class": "TLabel",
+     "props": {
+      "Left": 8,
+      "Top": 170,
+      "Width": 68,
+      "Height": 13,
+      "Caption": "Key-value list:"
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "TagsLbl",
+     "class": "TLabel",
+     "props": {
+      "Tag": 9,
+      "Left": 6,
+      "Top": 286,
+      "Width": 27,
+      "Height": 13,
+      "Caption": "Tags:"
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "AddTagBtn",
+     "class": "TSpeedButton",
+     "props": {
+      "Tag": 12,
+      "Left": 248,
+      "Top": 282,
+      "Width": 23,
+      "Height": 22,
+      "Hint": "Select and add existing tag",
+      "ImageIndex": 14,
+      "ImageName": "011-add",
+      "Images": {
+       "id": "ImageList16"
+      },
+      "Flat": true,
+      "ParentShowHint": false,
+      "ShowHint": true,
+      "OnClick": {
+       "id": "AddTagBtnClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "EditKeyValBtn",
+     "class": "TSpeedButton",
+     "props": {
+      "Tag": 6,
+      "Left": 248,
+      "Top": 166,
+      "Width": 22,
+      "Height": 22,
+      "Hint": "Edit key-value list",
+      "ImageIndex": 13,
+      "ImageName": "012-note",
+      "Images": {
+       "id": "ImageList16"
+      },
+      "Flat": true,
+      "ParentShowHint": false,
+      "ShowHint": true,
+      "OnClick": {
+       "id": "EditKeyValBtnClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "ExpiryBtn",
+     "class": "TSpeedButton",
+     "props": {
+      "Tag": 12,
+      "Left": 248,
+      "Top": 309,
+      "Width": 23,
+      "Height": 23,
+      "Hint": "Change expiry date",
+      "ImageIndex": 15,
+      "ImageName": "013-alarm-clock",
+      "Images": {
+       "id": "ImageList16"
+      },
+      "Flat": true,
+      "ParentShowHint": false,
+      "ShowHint": true,
+      "OnClick": {
+       "id": "ExpiryBtnClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "PasswQualityBtn",
+     "class": "TSpeedButton",
+     "props": {
+      "Tag": 6,
+      "Left": 248,
+      "Top": 85,
+      "Width": 22,
+      "Height": 22,
+      "Hint": "Estimate password quality",
+      "AllowAllUp": true,
+      "GroupIndex": 2,
+      "Down": true,
+      "ImageIndex": 11,
+      "ImageName": "info",
+      "Images": {
+       "id": "ImageList16"
+      },
+      "Flat": true,
+      "ParentShowHint": false,
+      "ShowHint": true,
+      "OnClick": {
+       "id": "PasswQualityBtnClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "PasswSecurityLbl",
+     "class": "TLabel",
+     "props": {
+      "Left": 104,
+      "Top": 88,
+      "Width": 3,
+      "Height": 13,
+      "Alignment": {
+       "id": "taRightJustify"
+      },
+      "ParentShowHint": false,
+      "ShowHint": true,
+      "OnMouseMove": {
+       "id": "PasswSecurityBarPanelMouseMove"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "UrlBtn",
+     "class": "TSpeedButton",
+     "props": {
+      "Tag": 6,
+      "Left": 248,
+      "Top": 110,
+      "Width": 22,
+      "Height": 22,
+      "Hint": "Open URL",
+      "ImageIndex": 12,
+      "ImageName": "010-right",
+      "Images": {
+       "id": "ImageList16"
+      },
+      "Flat": true,
+      "ParentShowHint": false,
+      "ShowHint": true,
+      "OnClick": {
+       "id": "UrlBtnClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "PasswChangeLbl",
+     "class": "TLabel",
+     "props": {
+      "Tag": 9,
+      "Left": 8,
+      "Top": 393,
+      "Width": 94,
+      "Height": 13,
+      "Caption": "Password changed:"
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "PasswChangeInfo",
+     "class": "TLabel",
+     "props": {
+      "Tag": 9,
+      "Left": 112,
+      "Top": 393,
+      "Width": 4,
+      "Height": 13,
+      "Caption": "-"
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "PasswHistoryBtn",
+     "class": "TSpeedButton",
+     "props": {
+      "Tag": 9,
+      "Left": 126,
+      "Top": 389,
+      "Width": 23,
+      "Height": 23,
+      "Hint": "Password history",
+      "ImageIndex": 16,
+      "ImageName": "clock",
+      "Images": {
+       "id": "ImageList16"
+      },
+      "Flat": true,
+      "ParentShowHint": false,
+      "ShowHint": true,
+      "OnClick": {
+       "id": "PasswHistoryBtnClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "ToggleNotesBtn",
+     "class": "TSpeedButton",
+     "props": {
+      "Tag": 6,
+      "Left": 248,
+      "Top": 186,
+      "Width": 26,
+      "Height": 24,
+      "Hint": "Hide/show notes",
+      "AllowAllUp": true,
+      "GroupIndex": 3,
+      "ImageIndex": 17,
+      "ImageName": "hide",
+      "Images": {
+       "id": "ImageList16"
+      },
+      "Flat": true,
+      "ParentShowHint": false,
+      "ShowHint": true,
+      "OnClick": {
+       "id": "ToggleNotesBtnClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "TitleBox",
+     "class": "TEdit",
+     "props": {
+      "Tag": 7,
+      "Left": 112,
+      "Top": 6,
+      "Width": 132,
+      "Height": 21,
+      "TabOrder": 0,
+      "OnChange": {
+       "id": "TitleBoxChange"
+      },
+      "OnKeyPress": {
+       "id": "TitleBoxKeyPress"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "UserNameBox",
+     "class": "TEdit",
+     "props": {
+      "Tag": 7,
+      "Left": 112,
+      "Top": 33,
+      "Width": 132,
+      "Height": 21,
+      "TabOrder": 1,
+      "OnChange": {
+       "id": "TitleBoxChange"
+      },
+      "OnKeyPress": {
+       "id": "TitleBoxKeyPress"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "PasswBox",
+     "class": "TEdit",
+     "props": {
+      "Tag": 7,
+      "Left": 112,
+      "Top": 60,
+      "Width": 132,
+      "Height": 22,
+      "AutoSize": false,
+      "Font.Charset": {
+       "id": "ANSI_CHARSET"
+      },
+      "Font.Color": {
+       "id": "clWindowText"
+      },
+      "Font.Height": -10,
+      "Font.Name": "Consolas",
+      "Font.Style": {
+       "set": []
+      },
+      "ParentFont": false,
+      "TabOrder": 2,
+      "OnChange": {
+       "id": "PasswBoxChange"
+      },
+      "OnKeyPress": {
+       "id": "TitleBoxKeyPress"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "UrlBox",
+     "class": "TEdit",
+     "props": {
+      "Tag": 7,
+      "Left": 112,
+      "Top": 112,
+      "Width": 132,
+      "Height": 21,
+      "TabOrder": 3,
+      "OnChange": {
+       "id": "TitleBoxChange"
+      },
+      "OnKeyPress": {
+       "id": "TitleBoxKeyPress"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "KeywordBox",
+     "class": "TEdit",
+     "props": {
+      "Tag": 7,
+      "Left": 112,
+      "Top": 139,
+      "Width": 132,
+      "Height": 21,
+      "TabOrder": 4,
+      "OnChange": {
+       "id": "TitleBoxChange"
+      },
+      "OnKeyPress": {
+       "id": "TitleBoxKeyPress"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "NotesBox",
+     "class": "TMemo",
+     "props": {
+      "Tag": 15,
+      "Left": 112,
+      "Top": 193,
+      "Width": 132,
+      "Height": 85,
+      "ScrollBars": {
+       "id": "ssVertical"
+      },
+      "TabOrder": 6,
+      "OnChange": {
+       "id": "NotesBoxChange"
+      },
+      "OnEnter": {
+       "id": "NotesBoxEnter"
+      },
+      "OnExit": {
+       "id": "NotesBoxExit"
+      },
+      "OnKeyPress": {
+       "id": "NotesBoxKeyPress"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "TagsBox",
+     "class": "TEdit",
+     "props": {
+      "Tag": 13,
+      "Left": 112,
+      "Top": 284,
+      "Width": 132,
+      "Height": 21,
+      "TabOrder": 7,
+      "OnChange": {
+       "id": "TitleBoxChange"
+      },
+      "OnKeyPress": {
+       "id": "TitleBoxKeyPress"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "KeyValueListBox",
+     "class": "TEdit",
+     "props": {
+      "Tag": 7,
+      "Left": 112,
+      "Top": 166,
+      "Width": 132,
+      "Height": 21,
+      "Color": {
+       "id": "clBtnFace"
+      },
+      "ReadOnly": true,
+      "TabOrder": 5,
+      "OnChange": {
+       "id": "TitleBoxChange"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "ExpiryCheck",
+     "class": "TCheckBox",
+     "props": {
+      "Tag": 9,
+      "Left": 6,
+      "Top": 312,
+      "Width": 97,
+      "Height": 17,
+      "Caption": "Expires:",
+      "TabOrder": 8,
+      "OnClick": {
+       "id": "ExpiryCheckClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "ExpiryDatePicker",
+     "class": "TDateTimePicker",
+     "props": {
+      "Tag": 13,
+      "Left": 112,
+      "Top": 311,
+      "Width": 132,
+      "Height": 21,
+      "Date": 44241.0,
+      "Time": 0.6343958796278457,
+      "Enabled": false,
+      "TabOrder": 9,
+      "OnChange": {
+       "id": "ExpiryDatePickerChange"
+      },
+      "OnKeyPress": {
+       "id": "TitleBoxKeyPress"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "PasswSecurityBarPanel",
+     "class": "TPanel",
+     "props": {
+      "Tag": 7,
+      "Left": 112,
+      "Top": 87,
+      "Width": 132,
+      "Height": 17,
+      "BevelOuter": {
+       "id": "bvNone"
+      },
+      "Caption": "Password quality estimation is disabled",
+      "ParentShowHint": false,
+      "ShowCaption": false,
+      "ShowHint": true,
+      "TabOrder": 10,
+      "OnMouseMove": {
+       "id": "PasswSecurityBarPanelMouseMove"
+      }
+     },
+     "children": [
+      {
+       "kind": "object",
+       "name": "PasswGauge",
+       "class": "TCGauge",
+       "props": {
+        "Left": 0,
+        "Top": 0,
+        "Width": 132,
+        "Height": 17,
+        "Align": {
+         "id": "alClient"
+        },
+        "ShowText": false,
+        "BackColor": {
+         "id": "clBtnFace"
+        },
+        "MaxValue": 128
+       },
+       "children": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "kind": "object",
+   "name": "ToolBar",
+   "class": "TToolBar",
+   "props": {
+    "Left": 0,
+    "Top": 0,
+    "Width": 664,
+    "Height": 22,
+    "AutoSize": true,
+    "ButtonWidth": 32,
+    "Images": {
+     "id": "ImageList16"
+    },
+    "TabOrder": 2,
+    "Transparent": true
+   },
+   "children": [
+    {
+     "kind": "object",
+     "name": "NewBtn",
+     "class": "TToolButton",
+     "props": {
+      "Left": 0,
+      "Top": 0,
+      "Hint": "New...",
+      "Caption": "NewBtn",
+      "ImageIndex": 0,
+      "ImageName": "006-add-folder",
+      "ParentShowHint": false,
+      "ShowHint": true,
+      "OnClick": {
+       "id": "MainMenu_File_NewClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "OpenBtn",
+     "class": "TToolButton",
+     "props": {
+      "Left": 32,
+      "Top": 0,
+      "Hint": "Open...",
+      "Caption": "OpenBtn",
+      "ImageIndex": 1,
+      "ImageName": "007-folder",
+      "ParentShowHint": false,
+      "ShowHint": true,
+      "OnClick": {
+       "id": "MainMenu_File_OpenClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "SaveBtn",
+     "class": "TToolButton",
+     "props": {
+      "Left": 64,
+      "Top": 0,
+      "Hint": "Save",
+      "Caption": "SaveBtn",
+      "ImageIndex": 2,
+      "ImageName": "floppy-disk",
+      "ParentShowHint": false,
+      "ShowHint": true,
+      "OnClick": {
+       "id": "MainMenu_File_SaveClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "LockBtn",
+     "class": "TToolButton",
+     "props": {
+      "Left": 96,
+      "Top": 0,
+      "Hint": "Lock/unlock database",
+      "Caption": "LockBtn",
+      "ImageIndex": 3,
+      "ImageName": "008-padlock",
+      "ParentShowHint": false,
+      "ShowHint": true,
+      "OnClick": {
+       "id": "MainMenu_File_LockClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "AddEntryBtn",
+     "class": "TToolButton",
+     "props": {
+      "Left": 128,
+      "Top": 0,
+      "Hint": "Add Entry",
+      "Caption": "AddEntryBtn",
+      "ImageIndex": 4,
+      "ImageName": "009-add",
+      "ParentShowHint": false,
+      "ShowHint": true,
+      "OnClick": {
+       "id": "MainMenu_Edit_AddEntryClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "ClearSearchBtn",
+     "class": "TSpeedButton",
+     "props": {
+      "Left": 160,
+      "Top": 0,
+      "Width": 23,
+      "Height": 22,
+      "Hint": "Clear search",
+      "Caption": "✕",
+      "Flat": true,
+      "Font.Charset": {
+       "id": "ANSI_CHARSET"
+      },
+      "Font.Color": {
+       "id": "clWindowText"
+      },
+      "Font.Height": -15,
+      "Font.Name": "Tahoma",
+      "Font.Style": {
+       "set": []
+      },
+      "ParentFont": false,
+      "ParentShowHint": false,
+      "ShowHint": true,
+      "OnClick": {
+       "id": "ClearSearchBtnClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "SearchBox",
+     "class": "TComboBox",
+     "props": {
+      "Left": 183,
+      "Top": 0,
+      "Width": 145,
+      "Height": 21,
+      "TabOrder": 0,
+      "TextHint": "Search...",
+      "OnEnter": {
+       "id": "SearchBoxEnter"
+      },
+      "OnKeyPress": {
+       "id": "SearchBoxKeyPress"
+      },
+      "OnSelect": {
+       "id": "SearchBoxSelect"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "SearchBtn",
+     "class": "TToolButton",
+     "props": {
+      "Left": 328,
+      "Top": 0,
+      "Hint": "Perform search",
+      "Caption": "SearchBtn",
+      "DropdownMenu": {
+       "id": "SearchMenu"
+      },
+      "ImageIndex": 5,
+      "ImageName": "search",
+      "ParentShowHint": false,
+      "ShowHint": true,
+      "Style": {
+       "id": "tbsDropDown"
+      },
+      "OnClick": {
+       "id": "SearchBtnClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "SearchResultPanel",
+     "class": "TPanel",
+     "props": {
+      "Left": 379,
+      "Top": 0,
+      "Width": 129,
+      "Height": 22,
+      "BevelInner": {
+       "id": "bvLowered"
+      },
+      "BevelOuter": {
+       "id": "bvNone"
+      },
+      "ParentBackground": false,
+      "TabOrder": 1
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "FilterInfoPanel",
+     "class": "TPanel",
+     "props": {
+      "Left": 508,
+      "Top": 0,
+      "Width": 89,
+      "Height": 22,
+      "BevelOuter": {
+       "id": "bvNone"
+      },
+      "ParentBackground": false,
+      "ParentShowHint": false,
+      "ShowHint": true,
+      "TabOrder": 2,
+      "Visible": false
+     },
+     "children": [
+      {
+       "kind": "object",
+       "name": "ClearFilterBtn",
+       "class": "TSpeedButton",
+       "props": {
+        "Left": 70,
+        "Top": 0,
+        "Width": 17,
+        "Height": 22,
+        "Hint": "Remove filter",
+        "Caption": "V",
+        "Flat": true,
+        "Font.Charset": {
+         "id": "SYMBOL_CHARSET"
+        },
+        "Font.Color": {
+         "id": "clWindowText"
+        },
+        "Font.Height": -16,
+        "Font.Name": "Wingdings 2",
+        "Font.Style": {
+         "set": []
+        },
+        "ParentFont": false,
+        "ParentShowHint": false,
+        "ShowHint": true,
+        "OnClick": {
+         "id": "ClearFilterBtnClick"
+        }
+       },
+       "children": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "kind": "object",
+   "name": "TagView",
+   "class": "TListView",
+   "props": {
+    "Left": 0,
+    "Top": 22,
+    "Width": 664,
+    "Height": 42,
+    "Align": {
+     "id": "alTop"
+    },
+    "Columns": {
+     "items": []
+    },
+    "MultiSelect": true,
+    "ReadOnly": true,
+    "SmallImages": {
+     "id": "ImageList16"
+    },
+    "SortType": {
+     "id": "stData"
+    },
+    "TabOrder": 3,
+    "ViewStyle": {
+     "id": "vsSmallIcon"
+    },
+    "OnCompare": {
+     "id": "TagViewCompare"
+    },
+    "OnSelectItem": {
+     "id": "TagViewSelectItem"
+    }
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "MainMenu",
+   "class": "TMainMenu",
+   "props": {
+    "Left": 16,
+    "Top": 88
+   },
+   "children": [
+    {
+     "kind": "object",
+     "name": "MainMenu_File",
+     "class": "TMenuItem",
+     "props": {
+      "Caption": "File"
+     },
+     "children": [
+      {
+       "kind": "object",
+       "name": "MainMenu_File_New",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "New...",
+        "ShortCut": 16462,
+        "OnClick": {
+         "id": "MainMenu_File_NewClick"
+        }
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_File_Open",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Open...",
+        "ShortCut": 16463,
+        "OnClick": {
+         "id": "MainMenu_File_OpenClick"
+        }
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_File_OpenReadOnly",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Open As Read-only...",
+        "OnClick": {
+         "id": "MainMenu_File_OpenReadOnlyClick"
+        }
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_File_Close",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Close",
+        "ShortCut": 16471,
+        "OnClick": {
+         "id": "MainMenu_File_CloseClick"
+        }
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_File_Lock",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Lock",
+        "ShortCut": 16460,
+        "OnClick": {
+         "id": "MainMenu_File_LockClick"
+        }
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_File_N1",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "-"
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_File_ClearRecentFiles",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Clear Recently Opened List",
+        "OnClick": {
+         "id": "MainMenu_File_ClearRecentFilesClick"
+        }
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_File_N6",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "-"
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_File_Save",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Save",
+        "ShortCut": 16467,
+        "OnClick": {
+         "id": "MainMenu_File_SaveClick"
+        }
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_File_SaveAs",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Save As...",
+        "OnClick": {
+         "id": "MainMenu_File_SaveAsClick"
+        }
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_File_N2",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "-"
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_File_Export",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Export To"
+       },
+       "children": [
+        {
+         "kind": "object",
+         "name": "MainMenu_File_Export_CsvFile",
+         "class": "TMenuItem",
+         "props": {
+          "Caption": "CSV File...",
+          "OnClick": {
+           "id": "MainMenu_File_Export_CsvFileClick"
+          }
+         },
+         "children": []
+        }
+       ]
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_File_N4",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "-"
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_File_DbSettings",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Database Settings...",
+        "OnClick": {
+         "id": "MainMenu_File_DbSettingsClick"
+        }
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_File_ChangeMasterPassword",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Change Master Password...",
+        "OnClick": {
+         "id": "MainMenu_File_ChangeMasterPasswordClick"
+        }
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_File_SetRecoveryPassword",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Set Recovery Password...",
+        "OnClick": {
+         "id": "MainMenu_File_SetRecoveryPasswordClick"
+        }
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_File_N5",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "-"
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_File_Properties",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Properties...",
+        "OnClick": {
+         "id": "MainMenu_File_PropertiesClick"
+        }
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_File_N3",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "-"
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_File_Exit",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Exit",
+        "ShortCut": 16465,
+        "OnClick": {
+         "id": "MainMenu_File_ExitClick"
+        }
+       },
+       "children": []
+      }
+     ]
+    },
+    {
+     "kind": "object",
+     "name": "MainMenu_Edit",
+     "class": "TMenuItem",
+     "props": {
+      "Caption": "Edit",
+      "OnClick": {
+       "id": "MainMenu_EditClick"
+      }
+     },
+     "children": [
+      {
+       "kind": "object",
+       "name": "MainMenu_Edit_CopyUserName",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Copy User Name",
+        "OnClick": {
+         "id": "MainMenu_Edit_CopyUserNameClick"
+        }
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_Edit_CopyPassw",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Copy Password",
+        "OnClick": {
+         "id": "MainMenu_Edit_CopyPasswClick"
+        }
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_Edit_OpenUrl",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Open URL",
+        "OnClick": {
+         "id": "MainMenu_Edit_OpenUrlClick"
+        }
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_Edit_Run",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Run",
+        "OnClick": {
+         "id": "MainMenu_Edit_RunClick"
+        }
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_Edit_PerformAutotype",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Perform Autotype",
+        "OnClick": {
+         "id": "MainMenu_Edit_PerformAutotypeClick"
+        }
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_Edit_N1",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "-"
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_Edit_AddEntry",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Add Entry",
+        "OnClick": {
+         "id": "MainMenu_Edit_AddEntryClick"
+        }
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_Edit_DuplicateEntry",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Duplicate Entry",
+        "OnClick": {
+         "id": "MainMenu_Edit_DuplicateEntryClick"
+        }
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_Edit_DeleteEntry",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Delete Entry",
+        "OnClick": {
+         "id": "DeleteBtnClick"
+        }
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_Edit_N2",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "-"
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_Edit_Rearrange",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Rearrange Entry"
+       },
+       "children": [
+        {
+         "kind": "object",
+         "name": "MainMenu_Edit_Rearrange_Down",
+         "class": "TMenuItem",
+         "props": {
+          "Caption": "Move to Top",
+          "OnClick": {
+           "id": "MainMenu_Edit_Rearrange_DownClick"
+          }
+         },
+         "children": []
+        },
+        {
+         "kind": "object",
+         "name": "MainMenu_Edit_Rearrange_Top",
+         "class": "TMenuItem",
+         "props": {
+          "Caption": "Move Up by One",
+          "OnClick": {
+           "id": "MainMenu_Edit_Rearrange_TopClick"
+          }
+         },
+         "children": []
+        },
+        {
+         "kind": "object",
+         "name": "MainMenu_Edit_Rearrange_Up",
+         "class": "TMenuItem",
+         "props": {
+          "Caption": "Move Down by One",
+          "OnClick": {
+           "id": "MainMenu_Edit_Rearrange_UpClick"
+          }
+         },
+         "children": []
+        },
+        {
+         "kind": "object",
+         "name": "MainMenu_Edit_Rearrange_Bottom",
+         "class": "TMenuItem",
+         "props": {
+          "Caption": "Move to Bottom",
+          "OnClick": {
+           "id": "MainMenu_Edit_Rearrange_BottomClick"
+          }
+         },
+         "children": []
+        }
+       ]
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_Edit_N3",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "-"
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_Edit_SelectAll",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Select All",
+        "OnClick": {
+         "id": "MainMenu_Edit_SelectAllClick"
+        }
+       },
+       "children": []
+      }
+     ]
+    },
+    {
+     "kind": "object",
+     "name": "MainMenu_View",
+     "class": "TMenuItem",
+     "props": {
+      "Caption": "View"
+     },
+     "children": [
+      {
+       "kind": "object",
+       "name": "MainMenu_View_ShowColumns",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Show Columns"
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_View_ShowPasswInList",
+       "class": "TMenuItem",
+       "props": {
+        "AutoCheck": true,
+        "Caption": "Show Passwords in List",
+        "OnClick": {
+         "id": "MainMenu_View_ShowPasswInListClick"
+        }
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_View_N1",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "-"
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_View_SortBy",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Sort Entries By"
+       },
+       "children": [
+        {
+         "kind": "object",
+         "name": "MainMenu_View_SortBy_Unsorted",
+         "class": "TMenuItem",
+         "props": {
+          "Tag": -1,
+          "AutoCheck": true,
+          "Caption": "Unsorted",
+          "Checked": true,
+          "RadioItem": true,
+          "OnClick": {
+           "id": "MainMenu_View_SortByClick"
+          }
+         },
+         "children": []
+        },
+        {
+         "kind": "object",
+         "name": "MainMenu_View_SortBy_N1",
+         "class": "TMenuItem",
+         "props": {
+          "Caption": "-"
+         },
+         "children": []
+        },
+        {
+         "kind": "object",
+         "name": "MainMenu_View_SortBy_N2",
+         "class": "TMenuItem",
+         "props": {
+          "Caption": "-"
+         },
+         "children": []
+        },
+        {
+         "kind": "object",
+         "name": "MainMenu_View_SortBy_Ascending",
+         "class": "TMenuItem",
+         "props": {
+          "AutoCheck": true,
+          "Caption": "Ascending",
+          "Checked": true,
+          "GroupIndex": 1,
+          "RadioItem": true,
+          "OnClick": {
+           "id": "MainMenu_View_SortOrderClick"
+          }
+         },
+         "children": []
+        },
+        {
+         "kind": "object",
+         "name": "MainMenu_View_SortBy_Descending",
+         "class": "TMenuItem",
+         "props": {
+          "AutoCheck": true,
+          "Caption": "Descending",
+          "GroupIndex": 1,
+          "RadioItem": true,
+          "OnClick": {
+           "id": "MainMenu_View_SortOrderClick"
+          }
+         },
+         "children": []
+        }
+       ]
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_View_SortTagsBy",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Sort Tags By"
+       },
+       "children": [
+        {
+         "kind": "object",
+         "name": "MainMenu_View_SortTagsBy_Name",
+         "class": "TMenuItem",
+         "props": {
+          "AutoCheck": true,
+          "Caption": "Name",
+          "Checked": true,
+          "RadioItem": true,
+          "OnClick": {
+           "id": "MainMenu_View_SortTagsByClick"
+          }
+         },
+         "children": []
+        },
+        {
+         "kind": "object",
+         "name": "MainMenu_View_SortTagsBy_Freq",
+         "class": "TMenuItem",
+         "props": {
+          "Tag": 1,
+          "AutoCheck": true,
+          "Caption": "Frequency",
+          "RadioItem": true,
+          "OnClick": {
+           "id": "MainMenu_View_SortTagsByClick"
+          }
+         },
+         "children": []
+        },
+        {
+         "kind": "object",
+         "name": "MainMenu_View_SortTagsBy_N1",
+         "class": "TMenuItem",
+         "props": {
+          "Caption": "-"
+         },
+         "children": []
+        },
+        {
+         "kind": "object",
+         "name": "MainMenu_View_SortTagsBy_Ascending",
+         "class": "TMenuItem",
+         "props": {
+          "AutoCheck": true,
+          "Caption": "Ascending",
+          "Checked": true,
+          "GroupIndex": 1,
+          "RadioItem": true,
+          "OnClick": {
+           "id": "MainMenu_View_SortTagsOrderClick"
+          }
+         },
+         "children": []
+        },
+        {
+         "kind": "object",
+         "name": "MainMenu_View_SortTagsBy_Descending",
+         "class": "TMenuItem",
+         "props": {
+          "AutoCheck": true,
+          "Caption": "Descending",
+          "GroupIndex": 1,
+          "RadioItem": true,
+          "OnClick": {
+           "id": "MainMenu_View_SortTagsOrderClick"
+          }
+         },
+         "children": []
+        }
+       ]
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_View_N2",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "-"
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_View_Filter",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Filter"
+       },
+       "children": [
+        {
+         "kind": "object",
+         "name": "MainMenu_View_Filter_Expired",
+         "class": "TMenuItem",
+         "props": {
+          "AutoCheck": true,
+          "Caption": "Expired Entries",
+          "GroupIndex": 1,
+          "RadioItem": true,
+          "OnClick": {
+           "id": "MainMenu_View_Filter_ExpiredClick"
+          }
+         },
+         "children": []
+        },
+        {
+         "kind": "object",
+         "name": "MainMenu_View_Filter_ExpireSoon",
+         "class": "TMenuItem",
+         "props": {
+          "AutoCheck": true,
+          "Caption": "Entries that Will Expire Soon",
+          "GroupIndex": 1,
+          "RadioItem": true,
+          "OnClick": {
+           "id": "MainMenu_View_Filter_ExpiredClick"
+          }
+         },
+         "children": []
+        },
+        {
+         "kind": "object",
+         "name": "MainMenu_View_Filter_WeakPassw",
+         "class": "TMenuItem",
+         "props": {
+          "AutoCheck": true,
+          "Caption": "Entries with Weak Passwords",
+          "GroupIndex": 1,
+          "RadioItem": true,
+          "OnClick": {
+           "id": "MainMenu_View_Filter_ExpiredClick"
+          }
+         },
+         "children": []
+        }
+       ]
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_View_N3",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "-",
+        "GroupIndex": 1
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_View_ChangeListFont",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Change List Font...",
+        "GroupIndex": 1,
+        "OnClick": {
+         "id": "MainMenu_View_ChangeListFontClick"
+        }
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_View_ChangePasswFont",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Change Password Font...",
+        "GroupIndex": 1,
+        "OnClick": {
+         "id": "MainMenu_View_ChangePasswFontClick"
+        }
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "MainMenu_View_ResetFonts",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Reset Fonts",
+        "GroupIndex": 1,
+        "OnClick": {
+         "id": "MainMenu_View_ResetFontsClick"
+        }
+       },
+       "children": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "kind": "object",
+   "name": "OpenDlg",
+   "class": "TOpenDialog",
+   "props": {
+    "Left": 16,
+    "Top": 128
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "SaveDlg",
+   "class": "TSaveDialog",
+   "props": {
+    "DefaultExt": "pwdb",
+    "Options": {
+     "set": [
+      "ofOverwritePrompt",
+      "ofHideReadOnly",
+      "ofEnableSizing"
+     ]
+    },
+    "Left": 56,
+    "Top": 128
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "DbViewMenu",
+   "class": "TPopupMenu",
+   "props": {
+    "OnPopup": {
+     "id": "DbViewMenuPopup"
+    },
+    "Left": 16,
+    "Top": 168
+   },
+   "children": [
+    {
+     "kind": "object",
+     "name": "DbViewMenu_CopyUserName",
+     "class": "TMenuItem",
+     "props": {
+      "Caption": "Copy User Name",
+      "ShortCut": 16450,
+      "OnClick": {
+       "id": "MainMenu_Edit_CopyUserNameClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "DbViewMenu_CopyPassw",
+     "class": "TMenuItem",
+     "props": {
+      "Caption": "Copy Password",
+      "ShortCut": 16451,
+      "OnClick": {
+       "id": "MainMenu_Edit_CopyPasswClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "DbViewMenu_OpenUrl",
+     "class": "TMenuItem",
+     "props": {
+      "Caption": "Open URL",
+      "ShortCut": 16469,
+      "OnClick": {
+       "id": "MainMenu_Edit_OpenUrlClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "DbViewMenu_Run",
+     "class": "TMenuItem",
+     "props": {
+      "Caption": "Run",
+      "ShortCut": 16466,
+      "OnClick": {
+       "id": "MainMenu_Edit_RunClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "DbViewMenu_PerformAutotype",
+     "class": "TMenuItem",
+     "props": {
+      "Caption": "Perform Autotype",
+      "ShortCut": 16468,
+      "OnClick": {
+       "id": "MainMenu_Edit_PerformAutotypeClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "DbViewMenu_N1",
+     "class": "TMenuItem",
+     "props": {
+      "Caption": "-"
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "DbViewMenu_DuplicateEntry",
+     "class": "TMenuItem",
+     "props": {
+      "Caption": "Duplicate Entry",
+      "ShortCut": 16464,
+      "OnClick": {
+       "id": "MainMenu_Edit_DuplicateEntryClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "DbViewMenu_DeleteEntry",
+     "class": "TMenuItem",
+     "props": {
+      "Caption": "Delete Entry",
+      "ShortCut": 16452,
+      "OnClick": {
+       "id": "DeleteBtnClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "DbViewMenu_N2",
+     "class": "TMenuItem",
+     "props": {
+      "Caption": "-"
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "DbViewMenu_Rearrange",
+     "class": "TMenuItem",
+     "props": {
+      "Caption": "Rearrange Entry"
+     },
+     "children": [
+      {
+       "kind": "object",
+       "name": "DbViewMenu_Rearrange_Top",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Move to Top",
+        "OnClick": {
+         "id": "MainMenu_Edit_Rearrange_TopClick"
+        }
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "DbViewMenu_Rearrange_Up",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Move Up by One",
+        "OnClick": {
+         "id": "MainMenu_Edit_Rearrange_UpClick"
+        }
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "DbViewMenu_Rearrange_Down",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Move Down by One",
+        "OnClick": {
+         "id": "MainMenu_Edit_Rearrange_DownClick"
+        }
+       },
+       "children": []
+      },
+      {
+       "kind": "object",
+       "name": "DbViewMenu_Rearrange_Bottom",
+       "class": "TMenuItem",
+       "props": {
+        "Caption": "Move to Bottom",
+        "OnClick": {
+         "id": "MainMenu_Edit_Rearrange_BottomClick"
+        }
+       },
+       "children": []
+      }
+     ]
+    },
+    {
+     "kind": "object",
+     "name": "DbViewMenu_N3",
+     "class": "TMenuItem",
+     "props": {
+      "Caption": "-"
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "DbViewMenu_SelectAll",
+     "class": "TMenuItem",
+     "props": {
+      "Caption": "Select All",
+      "ShortCut": 16449,
+      "OnClick": {
+       "id": "MainMenu_Edit_SelectAllClick"
+      }
+     },
+     "children": []
+    }
+   ]
+  },
+  {
+   "kind": "object",
+   "name": "IdleTimer",
+   "class": "TTimer",
+   "props": {
+    "Enabled": false,
+    "OnTimer": {
+     "id": "IdleTimerTimer"
+    },
+    "Left": 16,
+    "Top": 216
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "FontDlg",
+   "class": "TFontDialog",
+   "props": {
+    "Font.Charset": {
+     "id": "DEFAULT_CHARSET"
+    },
+    "Font.Color": {
+     "id": "clWindowText"
+    },
+    "Font.Height": -11,
+    "Font.Name": "Tahoma",
+    "Font.Style": {
+     "set": []
+    },
+    "Left": 56,
+    "Top": 169
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "TagMenu",
+   "class": "TPopupMenu",
+   "props": {
+    "AutoHotkeys": {
+     "id": "maManual"
+    },
+    "Left": 764,
+    "Top": 534
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "ExpiryMenu",
+   "class": "TPopupMenu",
+   "props": {
+    "Left": 710,
+    "Top": 534
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "SearchMenu",
+   "class": "TPopupMenu",
+   "props": {
+    "Left": 56,
+    "Top": 216
+   },
+   "children": [
+    {
+     "kind": "object",
+     "name": "SearchMenu_CaseSensitive",
+     "class": "TMenuItem",
+     "props": {
+      "AutoCheck": true,
+      "Caption": "Case-sensitive"
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "SearchMenu_FuzzySearch",
+     "class": "TMenuItem",
+     "props": {
+      "AutoCheck": true,
+      "Caption": "Fuzzy search"
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "SearchMenu_N1",
+     "class": "TMenuItem",
+     "props": {
+      "Caption": "-"
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "SearchMenu_SelectFields",
+     "class": "TMenuItem",
+     "props": {
+      "Caption": "Select fields...",
+      "OnClick": {
+       "id": "SearchMenu_SelectFieldsClick"
+      }
+     },
+     "children": []
+    }
+   ]
+  },
+  {
+   "kind": "object",
+   "name": "ImageCollection32",
+   "class": "TImageCollection",
+   "props": {
+    "Images": {
+     "items": [
+      {
+       "index": null,
+       "props": {
+        "Name": "up",
+        "SourceImages": {
+         "items": [
+          {
+           "index": null,
+           "props": {
+            "Image.Data": {
+             "bin": 9320
+            }
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "Name": "down",
+        "SourceImages": {
+         "items": [
+          {
+           "index": null,
+           "props": {
+            "Image.Data": {
+             "bin": 9191
+            }
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "Name": "005-delete",
+        "SourceImages": {
+         "items": [
+          {
+           "index": null,
+           "props": {
+            "Image.Data": {
+             "bin": 7302
+            }
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "Name": "003-accept",
+        "SourceImages": {
+         "items": [
+          {
+           "index": null,
+           "props": {
+            "Image.Data": {
+             "bin": 18960
+            }
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "Name": "004-cancel",
+        "SourceImages": {
+         "items": [
+          {
+           "index": null,
+           "props": {
+            "Image.Data": {
+             "bin": 16267
+            }
+           }
+          }
+         ]
+        }
+       }
+      }
+     ]
+    },
+    "Left": 44,
+    "Top": 348
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "ImageList32",
+   "class": "TVirtualImageList",
+   "props": {
+    "AutoFill": true,
+    "Images": {
+     "items": [
+      {
+       "index": null,
+       "props": {
+        "CollectionIndex": 0,
+        "CollectionName": "up",
+        "Name": "up"
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "CollectionIndex": 1,
+        "CollectionName": "down",
+        "Name": "down"
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "CollectionIndex": 2,
+        "CollectionName": "005-delete",
+        "Name": "005-delete"
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "CollectionIndex": 3,
+        "CollectionName": "003-accept",
+        "Name": "003-accept"
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "CollectionIndex": 4,
+        "CollectionName": "004-cancel",
+        "Name": "004-cancel"
+       }
+      }
+     ]
+    },
+    "ImageCollection": {
+     "id": "ImageCollection32"
+    },
+    "Width": 32,
+    "Height": 32,
+    "Left": 4,
+    "Top": 348
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "ImageCollection16",
+   "class": "TImageCollection",
+   "props": {
+    "Images": {
+     "items": [
+      {
+       "index": null,
+       "props": {
+        "Name": "006-add-folder",
+        "SourceImages": {
+         "items": [
+          {
+           "index": null,
+           "props": {
+            "Image.Data": {
+             "bin": 15855
+            }
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "Name": "007-folder",
+        "SourceImages": {
+         "items": [
+          {
+           "index": null,
+           "props": {
+            "Image.Data": {
+             "bin": 19141
+            }
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "Name": "floppy-disk",
+        "SourceImages": {
+         "items": [
+          {
+           "index": null,
+           "props": {
+            "Image.Data": {
+             "bin": 9182
+            }
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "Name": "008-padlock",
+        "SourceImages": {
+         "items": [
+          {
+           "index": null,
+           "props": {
+            "Image.Data": {
+             "bin": 12449
+            }
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "Name": "009-add",
+        "SourceImages": {
+         "items": [
+          {
+           "index": null,
+           "props": {
+            "Image.Data": {
+             "bin": 12758
+            }
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "Name": "search",
+        "SourceImages": {
+         "items": [
+          {
+           "index": null,
+           "props": {
+            "Image.Data": {
+             "bin": 27770
+            }
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "Name": "014-tag",
+        "SourceImages": {
+         "items": [
+          {
+           "index": null,
+           "props": {
+            "Image.Data": {
+             "bin": 18474
+            }
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "Name": "015-global",
+        "SourceImages": {
+         "items": [
+          {
+           "index": null,
+           "props": {
+            "Image.Data": {
+             "bin": 24763
+            }
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "Name": "016-circumference",
+        "SourceImages": {
+         "items": [
+          {
+           "index": null,
+           "props": {
+            "Image.Data": {
+             "bin": 16002
+            }
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "Name": "018-expired",
+        "SourceImages": {
+         "items": [
+          {
+           "index": null,
+           "props": {
+            "Image.Data": {
+             "bin": 21174
+            }
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "Name": "017-expired",
+        "SourceImages": {
+         "items": [
+          {
+           "index": null,
+           "props": {
+            "Image.Data": {
+             "bin": 19115
+            }
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "Name": "info",
+        "SourceImages": {
+         "items": [
+          {
+           "index": null,
+           "props": {
+            "Image.Data": {
+             "bin": 14497
+            }
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "Name": "010-right",
+        "SourceImages": {
+         "items": [
+          {
+           "index": null,
+           "props": {
+            "Image.Data": {
+             "bin": 7539
+            }
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "Name": "012-note",
+        "SourceImages": {
+         "items": [
+          {
+           "index": null,
+           "props": {
+            "Image.Data": {
+             "bin": 12566
+            }
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "Name": "011-add",
+        "SourceImages": {
+         "items": [
+          {
+           "index": null,
+           "props": {
+            "Image.Data": {
+             "bin": 5290
+            }
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "Name": "013-alarm-clock",
+        "SourceImages": {
+         "items": [
+          {
+           "index": null,
+           "props": {
+            "Image.Data": {
+             "bin": 45715
+            }
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "Name": "clock",
+        "SourceImages": {
+         "items": [
+          {
+           "index": null,
+           "props": {
+            "Image.Data": {
+             "bin": 25421
+            }
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "Name": "hide",
+        "SourceImages": {
+         "items": [
+          {
+           "index": null,
+           "props": {
+            "Image.Data": {
+             "bin": 18044
+            }
+           }
+          }
+         ]
+        }
+       }
+      }
+     ]
+    },
+    "Left": 8,
+    "Top": 296
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "ImageList16",
+   "class": "TVirtualImageList",
+   "props": {
+    "AutoFill": true,
+    "Images": {
+     "items": [
+      {
+       "index": null,
+       "props": {
+        "CollectionIndex": 0,
+        "CollectionName": "006-add-folder",
+        "Name": "006-add-folder"
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "CollectionIndex": 1,
+        "CollectionName": "007-folder",
+        "Name": "007-folder"
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "CollectionIndex": 2,
+        "CollectionName": "floppy-disk",
+        "Name": "floppy-disk"
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "CollectionIndex": 3,
+        "CollectionName": "008-padlock",
+        "Name": "008-padlock"
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "CollectionIndex": 4,
+        "CollectionName": "009-add",
+        "Name": "009-add"
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "CollectionIndex": 5,
+        "CollectionName": "search",
+        "Name": "search"
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "CollectionIndex": 6,
+        "CollectionName": "014-tag",
+        "Name": "014-tag"
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "CollectionIndex": 7,
+        "CollectionName": "015-global",
+        "Name": "015-global"
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "CollectionIndex": 8,
+        "CollectionName": "016-circumference",
+        "Name": "016-circumference"
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "CollectionIndex": 9,
+        "CollectionName": "018-expired",
+        "Name": "018-expired"
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "CollectionIndex": 10,
+        "CollectionName": "017-expired",
+        "Name": "017-expired"
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "CollectionIndex": 11,
+        "CollectionName": "info",
+        "Name": "info"
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "CollectionIndex": 12,
+        "CollectionName": "010-right",
+        "Name": "010-right"
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "CollectionIndex": 13,
+        "CollectionName": "012-note",
+        "Name": "012-note"
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "CollectionIndex": 14,
+        "CollectionName": "011-add",
+        "Name": "011-add"
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "CollectionIndex": 15,
+        "CollectionName": "013-alarm-clock",
+        "Name": "013-alarm-clock"
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "CollectionIndex": 16,
+        "CollectionName": "clock",
+        "Name": "clock"
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "CollectionIndex": 17,
+        "CollectionName": "hide",
+        "Name": "hide"
+       }
+      }
+     ]
+    },
+    "ImageCollection": {
+     "id": "ImageCollection16"
+    },
+    "Left": 48,
+    "Top": 296
+   },
+   "children": []
+  }
+ ]
+}

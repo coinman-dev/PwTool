@@ -1,0 +1,234 @@
+{
+ "kind": "object",
+ "name": "PasswListForm",
+ "class": "TPasswListForm",
+ "props": {
+  "Left": 192,
+  "Top": 114,
+  "Caption": "Password List",
+  "ClientHeight": 428,
+  "ClientWidth": 336,
+  "Color": {
+   "id": "clBtnFace"
+  },
+  "Font.Charset": {
+   "id": "ANSI_CHARSET"
+  },
+  "Font.Color": {
+   "id": "clWindowText"
+  },
+  "Font.Height": -17,
+  "Font.Name": "Tahoma",
+  "Font.Style": {
+   "set": []
+  },
+  "KeyPreview": true,
+  "PopupMode": {
+   "id": "pmExplicit"
+  },
+  "Position": {
+   "id": "poDefault"
+  },
+  "OnClose": {
+   "id": "FormClose"
+  },
+  "OnKeyPress": {
+   "id": "FormKeyPress"
+  },
+  "OnShow": {
+   "id": "FormShow"
+  },
+  "PixelsPerInch": 120,
+  "TextHeight": 21
+ },
+ "children": [
+  {
+   "kind": "object",
+   "name": "PasswList",
+   "class": "TRichEdit",
+   "props": {
+    "Left": 0,
+    "Top": 0,
+    "Width": 336,
+    "Height": 428,
+    "Margins.Left": 4,
+    "Margins.Top": 4,
+    "Margins.Right": 4,
+    "Margins.Bottom": 4,
+    "Align": {
+     "id": "alClient"
+    },
+    "Font.Charset": {
+     "id": "ANSI_CHARSET"
+    },
+    "Font.Color": {
+     "id": "clWindowText"
+    },
+    "Font.Height": -17,
+    "Font.Name": "Consolas",
+    "Font.Style": {
+     "set": []
+    },
+    "HideSelection": false,
+    "MaxLength": 2147483645,
+    "ParentFont": false,
+    "PlainText": true,
+    "PopupMenu": {
+     "id": "PasswListMenu"
+    },
+    "ReadOnly": true,
+    "ScrollBars": {
+     "id": "ssBoth"
+    },
+    "TabOrder": 0,
+    "WordWrap": false,
+    "OnStartDrag": {
+     "id": "PasswListStartDrag"
+    }
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "PasswListMenu",
+   "class": "TPopupMenu",
+   "props": {
+    "OnPopup": {
+     "id": "PasswListMenuPopup"
+    },
+    "Left": 8,
+    "Top": 8
+   },
+   "children": [
+    {
+     "kind": "object",
+     "name": "PasswListMenu_Copy",
+     "class": "TMenuItem",
+     "props": {
+      "Caption": "Copy",
+      "ShortCut": 16451,
+      "OnClick": {
+       "id": "PasswListMenu_CopyClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "PasswListMenu_EncryptCopy",
+     "class": "TMenuItem",
+     "props": {
+      "Caption": "Encrypt && Copy",
+      "ShortCut": 16453,
+      "OnClick": {
+       "id": "PasswListMenu_EncryptCopyClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "PasswListMenu_AddToDb",
+     "class": "TMenuItem",
+     "props": {
+      "Caption": "Add to Database",
+      "ShortCut": 16452,
+      "OnClick": {
+       "id": "PasswListMenu_AddToDbClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "PasswListMenu_SelectAll",
+     "class": "TMenuItem",
+     "props": {
+      "Caption": "Select All",
+      "ShortCut": 16449,
+      "OnClick": {
+       "id": "PasswListMenu_SelectAllClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "PasswListMenu_N1",
+     "class": "TMenuItem",
+     "props": {
+      "Caption": "-"
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "PasswListMenu_SaveAsFile",
+     "class": "TMenuItem",
+     "props": {
+      "Caption": "Save As File...",
+      "ShortCut": 16467,
+      "OnClick": {
+       "id": "PasswListMenu_SaveAsFileClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "PasswListMenu_N2",
+     "class": "TMenuItem",
+     "props": {
+      "Caption": "-"
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "PasswListMenu_ChangeFont",
+     "class": "TMenuItem",
+     "props": {
+      "Caption": "Change Font...",
+      "OnClick": {
+       "id": "PasswListMenu_ChangeFontClick"
+      }
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "PasswListMenu_ResetFont",
+     "class": "TMenuItem",
+     "props": {
+      "Caption": "Reset Font",
+      "OnClick": {
+       "id": "PasswListMenu_ResetFontClick"
+      }
+     },
+     "children": []
+    }
+   ]
+  },
+  {
+   "kind": "object",
+   "name": "FontDlg",
+   "class": "TFontDialog",
+   "props": {
+    "Font.Charset": {
+     "id": "DEFAULT_CHARSET"
+    },
+    "Font.Color": {
+     "id": "clWindowText"
+    },
+    "Font.Height": -11,
+    "Font.Name": "MS Sans Serif",
+    "Font.Style": {
+     "set": []
+    },
+    "Left": 40,
+    "Top": 8
+   },
+   "children": []
+  }
+ ]
+}

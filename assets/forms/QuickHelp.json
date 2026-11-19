@@ -1,0 +1,155 @@
+{
+ "kind": "object",
+ "name": "QuickHelpForm",
+ "class": "TQuickHelpForm",
+ "props": {
+  "Left": 611,
+  "Top": 124,
+  "HorzScrollBar.Visible": false,
+  "VertScrollBar.Visible": false,
+  "BorderIcons": {
+   "set": [
+    "biSystemMenu"
+   ]
+  },
+  "Caption": "Quick Help",
+  "ClientHeight": 100,
+  "ClientWidth": 570,
+  "Color": {
+   "id": "clCream"
+  },
+  "Font.Charset": {
+   "id": "DEFAULT_CHARSET"
+  },
+  "Font.Color": {
+   "id": "clWindowText"
+  },
+  "Font.Height": -14,
+  "Font.Name": "MS Sans Serif",
+  "Font.Style": {
+   "set": []
+  },
+  "FormStyle": {
+   "id": "fsStayOnTop"
+  },
+  "KeyPreview": true,
+  "OnKeyPress": {
+   "id": "FormKeyPress"
+  },
+  "PixelsPerInch": 120,
+  "TextHeight": 16
+ },
+ "children": [
+  {
+   "kind": "object",
+   "name": "QuickHelpBox",
+   "class": "TRichEdit",
+   "props": {
+    "Left": 0,
+    "Top": 0,
+    "Width": 570,
+    "Height": 100,
+    "Margins.Left": 4,
+    "Margins.Top": 4,
+    "Margins.Right": 4,
+    "Margins.Bottom": 4,
+    "Align": {
+     "id": "alClient"
+    },
+    "BevelInner": {
+     "id": "bvNone"
+    },
+    "BevelOuter": {
+     "id": "bvNone"
+    },
+    "Font.Charset": {
+     "id": "ANSI_CHARSET"
+    },
+    "Font.Color": {
+     "id": "clWindowText"
+    },
+    "Font.Height": -13,
+    "Font.Name": "Consolas",
+    "Font.Style": {
+     "set": []
+    },
+    "ParentFont": false,
+    "PopupMenu": {
+     "id": "QuickHelpBoxMenu"
+    },
+    "ReadOnly": true,
+    "ScrollBars": {
+     "id": "ssBoth"
+    },
+    "TabOrder": 0,
+    "WordWrap": false,
+    "ExplicitWidth": 564,
+    "ExplicitHeight": 99
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "QuickHelpBoxMenu",
+   "class": "TPopupMenu",
+   "props": {
+    "Left": 8,
+    "Top": 8
+   },
+   "children": [
+    {
+     "kind": "object",
+     "name": "QuickHelpBoxMenu_AutoPosition",
+     "class": "TMenuItem",
+     "props": {
+      "AutoCheck": true,
+      "Caption": "Position Automatically"
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "QuickHelpBoxMenu_N1",
+     "class": "TMenuItem",
+     "props": {
+      "Caption": "-"
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
+     "name": "QuickHelpBoxMenu_ChangeFont",
+     "class": "TMenuItem",
+     "props": {
+      "Caption": "Change Font...",
+      "OnClick": {
+       "id": "QuickHelpBoxMenu_ChangeFontClick"
+      }
+     },
+     "children": []
+    }
+   ]
+  },
+  {
+   "kind": "object",
+   "name": "FontDlg",
+   "class": "TFontDialog",
+   "props": {
+    "Font.Charset": {
+     "id": "DEFAULT_CHARSET"
+    },
+    "Font.Color": {
+     "id": "clWindowText"
+    },
+    "Font.Height": -11,
+    "Font.Name": "MS Sans Serif",
+    "Font.Style": {
+     "set": []
+    },
+    "Left": 40,
+    "Top": 8
+   },
+   "children": []
+  }
+ ]
+}

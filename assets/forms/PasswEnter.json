@@ -1,0 +1,500 @@
+{
+ "kind": "object",
+ "name": "PasswEnterDlg",
+ "class": "TPasswEnterDlg",
+ "props": {
+  "Left": 623,
+  "Top": 29,
+  "Margins.Left": 2,
+  "Margins.Top": 2,
+  "Margins.Right": 2,
+  "Margins.Bottom": 2,
+  "BorderIcons": {
+   "set": [
+    "biSystemMenu"
+   ]
+  },
+  "Caption": "Password",
+  "ClientHeight": 229,
+  "ClientWidth": 424,
+  "Color": {
+   "id": "clBtnFace"
+  },
+  "Font.Charset": {
+   "id": "ANSI_CHARSET"
+  },
+  "Font.Color": {
+   "id": "clWindowText"
+  },
+  "Font.Height": -11,
+  "Font.Name": "Tahoma",
+  "Font.Style": {
+   "set": []
+  },
+  "Position": {
+   "id": "poDesigned"
+  },
+  "OnActivate": {
+   "id": "FormActivate"
+  },
+  "OnShow": {
+   "id": "FormShow"
+  },
+  "TextHeight": 13
+ },
+ "children": [
+  {
+   "kind": "object",
+   "name": "PasswLbl",
+   "class": "TLabel",
+   "props": {
+    "Left": 11,
+    "Top": 14,
+    "Width": 90,
+    "Height": 13,
+    "Caption": "Enter password:",
+    "Font.Charset": {
+     "id": "ANSI_CHARSET"
+    },
+    "Font.Color": {
+     "id": "clWindowText"
+    },
+    "Font.Height": -11,
+    "Font.Name": "Tahoma",
+    "Font.Style": {
+     "set": [
+      "fsBold"
+     ]
+    },
+    "ParentFont": false
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "ConfirmPasswLbl",
+   "class": "TLabel",
+   "props": {
+    "Left": 11,
+    "Top": 40,
+    "Width": 90,
+    "Height": 13,
+    "Caption": "Confirm password:",
+    "Color": {
+     "id": "clBtnFace"
+    },
+    "ParentColor": false
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "TogglePasswBtn",
+   "class": "TSpeedButton",
+   "props": {
+    "Tag": 6,
+    "Left": 389,
+    "Top": 7,
+    "Width": 26,
+    "Height": 25,
+    "Hint": "Hide/show password",
+    "AllowAllUp": true,
+    "GroupIndex": 1,
+    "Caption": "···",
+    "Flat": true,
+    "Font.Charset": {
+     "id": "SYMBOL_CHARSET"
+    },
+    "Font.Color": {
+     "id": "clMaroon"
+    },
+    "Font.Height": -15,
+    "Font.Name": "Symbol",
+    "Font.Style": {
+     "set": []
+    },
+    "ParentFont": false,
+    "ParentShowHint": false,
+    "ShowHint": true,
+    "OnClick": {
+     "id": "TogglePasswBtnClick"
+    }
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "KeyFileLbl",
+   "class": "TLabel",
+   "props": {
+    "Left": 11,
+    "Top": 158,
+    "Width": 82,
+    "Height": 13,
+    "Caption": "Select key file:",
+    "Font.Charset": {
+     "id": "ANSI_CHARSET"
+    },
+    "Font.Color": {
+     "id": "clWindowText"
+    },
+    "Font.Height": -11,
+    "Font.Name": "Tahoma",
+    "Font.Style": {
+     "set": [
+      "fsBold"
+     ]
+    },
+    "ParentFont": false
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "BrowseBtn",
+   "class": "TSpeedButton",
+   "props": {
+    "Tag": 6,
+    "Left": 367,
+    "Top": 154,
+    "Width": 23,
+    "Height": 22,
+    "Hint": "Browse",
+    "ImageIndex": 6,
+    "ImageName": "007-folder",
+    "Images": {
+     "id": "MainForm.ImageList16"
+    },
+    "ParentShowHint": false,
+    "ShowHint": true,
+    "OnClick": {
+     "id": "BrowseBtnClick"
+    }
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "CreateKeyFileBtn",
+   "class": "TSpeedButton",
+   "props": {
+    "Tag": 6,
+    "Left": 392,
+    "Top": 154,
+    "Width": 23,
+    "Height": 22,
+    "Hint": "Create key file",
+    "ImageIndex": 4,
+    "ImageName": "floppy-disk",
+    "Images": {
+     "id": "MainForm.ImageList16"
+    },
+    "ParentShowHint": false,
+    "ShowHint": true,
+    "OnClick": {
+     "id": "CreateKeyFileBtnClick"
+    }
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "Separator",
+   "class": "TBevel",
+   "props": {
+    "Tag": 7,
+    "Left": 11,
+    "Top": 144,
+    "Width": 405,
+    "Height": 8,
+    "Shape": {
+     "id": "bsTopLine"
+    }
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "PasswInfoLbl",
+   "class": "TLabel",
+   "props": {
+    "Left": 351,
+    "Top": 64,
+    "Width": 3,
+    "Height": 13
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "PasswGauge",
+   "class": "TCGauge",
+   "props": {
+    "Left": 146,
+    "Top": 64,
+    "Width": 200,
+    "Height": 15,
+    "ShowText": false,
+    "BackColor": {
+     "id": "clBtnFace"
+    },
+    "MaxValue": 128
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "OldVersionCheck",
+   "class": "TCheckBox",
+   "props": {
+    "Left": 146,
+    "Top": 114,
+    "Width": 98,
+    "Height": 18,
+    "Caption": "PWGen <2.3.0",
+    "TabOrder": 6
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "OKBtn",
+   "class": "TButton",
+   "props": {
+    "Tag": 6,
+    "Left": 258,
+    "Top": 193,
+    "Width": 76,
+    "Height": 25,
+    "Caption": "OK",
+    "Default": true,
+    "TabOrder": 8,
+    "OnClick": {
+     "id": "OKBtnClick"
+    }
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "CancelBtn",
+   "class": "TButton",
+   "props": {
+    "Tag": 6,
+    "Left": 340,
+    "Top": 193,
+    "Width": 75,
+    "Height": 25,
+    "Cancel": true,
+    "Caption": "Cancel",
+    "ModalResult": 2,
+    "TabOrder": 9
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "PasswBox",
+   "class": "TEdit",
+   "props": {
+    "Tag": 7,
+    "Left": 146,
+    "Top": 11,
+    "Width": 236,
+    "Height": 21,
+    "Font.Charset": {
+     "id": "ANSI_CHARSET"
+    },
+    "Font.Color": {
+     "id": "clWindowText"
+    },
+    "Font.Height": -11,
+    "Font.Name": "Tahoma",
+    "Font.Style": {
+     "set": []
+    },
+    "ParentFont": false,
+    "TabOrder": 0,
+    "OnChange": {
+     "id": "PasswBoxChange"
+    }
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "ConfirmPasswBox",
+   "class": "TEdit",
+   "props": {
+    "Tag": 7,
+    "Left": 146,
+    "Top": 38,
+    "Width": 236,
+    "Height": 21,
+    "Font.Charset": {
+     "id": "ANSI_CHARSET"
+    },
+    "Font.Color": {
+     "id": "clWindowText"
+    },
+    "Font.Height": -11,
+    "Font.Name": "Tahoma",
+    "Font.Style": {
+     "set": []
+    },
+    "ParentFont": false,
+    "TabOrder": 1
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "RememberPasswCheck",
+   "class": "TCheckBox",
+   "props": {
+    "Tag": 7,
+    "Left": 11,
+    "Top": 91,
+    "Width": 263,
+    "Height": 17,
+    "Caption": "Remember password (seconds):",
+    "TabOrder": 3,
+    "OnClick": {
+     "id": "RememberPasswCheckClick"
+    }
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "RememberPasswTimeBox",
+   "class": "TEdit",
+   "props": {
+    "Left": 48,
+    "Top": 113,
+    "Width": 49,
+    "Height": 21,
+    "Enabled": false,
+    "TabOrder": 4,
+    "Text": "10"
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "RememberPasswTimeSpinBtn",
+   "class": "TUpDown",
+   "props": {
+    "Left": 97,
+    "Top": 113,
+    "Width": 16,
+    "Height": 21,
+    "Associate": {
+     "id": "RememberPasswTimeBox"
+    },
+    "Enabled": false,
+    "Max": 32767,
+    "Position": 10,
+    "TabOrder": 5
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "KeyFileBox",
+   "class": "TComboBox",
+   "props": {
+    "Tag": 7,
+    "Left": 146,
+    "Top": 156,
+    "Width": 217,
+    "Height": 21,
+    "Style": {
+     "id": "csDropDownList"
+    },
+    "ItemIndex": 0,
+    "TabOrder": 7,
+    "Text": "(None)",
+    "Items.Strings": {
+     "list": [
+      "(None)"
+     ]
+    }
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "PasswQualityCheck",
+   "class": "TCheckBox",
+   "props": {
+    "Left": 11,
+    "Top": 65,
+    "Width": 129,
+    "Height": 17,
+    "Caption": "Estimate quality",
+    "TabOrder": 2,
+    "OnClick": {
+     "id": "PasswQualityCheckClick"
+    }
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "SkipBtn",
+   "class": "TButton",
+   "props": {
+    "Left": 11,
+    "Top": 193,
+    "Width": 86,
+    "Height": 25,
+    "Caption": "Skip",
+    "ModalResult": 5,
+    "TabOrder": 10
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "KeyExpiryTimer",
+   "class": "TTimer",
+   "props": {
+    "Enabled": false,
+    "OnTimer": {
+     "id": "KeyExpiryTimerTimer"
+    },
+    "Left": 350,
+    "Top": 71
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "OpenDlg",
+   "class": "TOpenDialog",
+   "props": {
+    "Left": 460,
+    "Top": 106
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "SaveDlg",
+   "class": "TSaveDialog",
+   "props": {
+    "Options": {
+     "set": [
+      "ofOverwritePrompt",
+      "ofHideReadOnly",
+      "ofEnableSizing"
+     ]
+    },
+    "Left": 342,
+    "Top": 104
+   },
+   "children": []
+  }
+ ]
+}

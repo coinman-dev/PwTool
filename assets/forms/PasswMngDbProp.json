@@ -1,0 +1,173 @@
+{
+ "kind": "object",
+ "name": "PasswMngDbPropDlg",
+ "class": "TPasswMngDbPropDlg",
+ "props": {
+  "Left": 0,
+  "Top": 0,
+  "BorderIcons": {
+   "set": [
+    "biSystemMenu",
+    "biMaximize"
+   ]
+  },
+  "Caption": "Properties",
+  "ClientHeight": 394,
+  "ClientWidth": 513,
+  "Color": {
+   "id": "clBtnFace"
+  },
+  "Font.Charset": {
+   "id": "DEFAULT_CHARSET"
+  },
+  "Font.Color": {
+   "id": "clWindowText"
+  },
+  "Font.Height": -14,
+  "Font.Name": "Tahoma",
+  "Font.Style": {
+   "set": []
+  },
+  "OnClose": {
+   "id": "FormClose"
+  },
+  "OnShow": {
+   "id": "FormShow"
+  },
+  "PixelsPerInch": 120,
+  "DesignSize": {
+   "list": [
+    513,
+    394
+   ]
+  },
+  "TextHeight": 17
+ },
+ "children": [
+  {
+   "kind": "object",
+   "name": "PropView",
+   "class": "TListView",
+   "props": {
+    "Left": 0,
+    "Top": 0,
+    "Width": 513,
+    "Height": 341,
+    "Margins.Left": 4,
+    "Margins.Top": 4,
+    "Margins.Right": 4,
+    "Margins.Bottom": 4,
+    "Align": {
+     "id": "alTop"
+    },
+    "Anchors": {
+     "set": [
+      "akLeft",
+      "akTop",
+      "akRight",
+      "akBottom"
+     ]
+    },
+    "Columns": {
+     "items": [
+      {
+       "index": null,
+       "props": {
+        "Caption": "Property",
+        "Width": 188
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "Caption": "Value",
+        "Width": 300
+       }
+      }
+     ]
+    },
+    "Groups": {
+     "items": [
+      {
+       "index": null,
+       "props": {
+        "Header": "File",
+        "GroupID": 0,
+        "State": {
+         "set": [
+          "lgsNormal",
+          "lgsSelected"
+         ]
+        },
+        "HeaderAlign": {
+         "id": "taLeftJustify"
+        },
+        "FooterAlign": {
+         "id": "taLeftJustify"
+        },
+        "TitleImage": -1
+       }
+      },
+      {
+       "index": null,
+       "props": {
+        "Header": "Database",
+        "GroupID": 1,
+        "State": {
+         "set": [
+          "lgsNormal"
+         ]
+        },
+        "HeaderAlign": {
+         "id": "taLeftJustify"
+        },
+        "FooterAlign": {
+         "id": "taLeftJustify"
+        },
+        "TitleImage": -1
+       }
+      }
+     ]
+    },
+    "Items.ItemData": {
+     "bin": 580
+    },
+    "GroupView": true,
+    "ReadOnly": true,
+    "RowSelect": true,
+    "TabOrder": 0,
+    "ViewStyle": {
+     "id": "vsReport"
+    },
+    "ExplicitHeight": 328
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "CloseBtn",
+   "class": "TButton",
+   "props": {
+    "Left": 210,
+    "Top": 353,
+    "Width": 94,
+    "Height": 31,
+    "Margins.Left": 4,
+    "Margins.Top": 4,
+    "Margins.Right": 4,
+    "Margins.Bottom": 4,
+    "Anchors": {
+     "set": [
+      "akLeft",
+      "akBottom"
+     ]
+    },
+    "Caption": "Close",
+    "ModalResult": 1,
+    "TabOrder": 1,
+    "ExplicitTop": 340
+   },
+   "children": []
+  }
+ ]
+}

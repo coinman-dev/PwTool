@@ -1,0 +1,72 @@
+{
+ "kind": "object",
+ "name": "InfoBoxForm",
+ "class": "TInfoBoxForm",
+ "props": {
+  "Left": 0,
+  "Top": 0,
+  "BorderIcons": {
+   "set": [
+    "biSystemMenu"
+   ]
+  },
+  "BorderStyle": {
+   "id": "bsToolWindow"
+  },
+  "ClientHeight": 38,
+  "ClientWidth": 335,
+  "Color": {
+   "id": "clInfoBk"
+  },
+  "Font.Charset": {
+   "id": "DEFAULT_CHARSET"
+  },
+  "Font.Color": {
+   "id": "clWindowText"
+  },
+  "Font.Height": -14,
+  "Font.Name": "Tahoma",
+  "Font.Style": {
+   "set": []
+  },
+  "OnClose": {
+   "id": "FormClose"
+  },
+  "OnShow": {
+   "id": "FormShow"
+  },
+  "PixelsPerInch": 120,
+  "TextHeight": 17
+ },
+ "children": [
+  {
+   "kind": "object",
+   "name": "TextLbl",
+   "class": "TLabel",
+   "props": {
+    "Left": 10,
+    "Top": 10,
+    "Width": 45,
+    "Height": 17,
+    "Margins.Left": 4,
+    "Margins.Top": 4,
+    "Margins.Right": 4,
+    "Margins.Bottom": 4,
+    "Caption": "TextLbl"
+   },
+   "children": []
+  },
+  {
+   "kind": "object",
+   "name": "Timer",
+   "class": "TTimer",
+   "props": {
+    "OnTimer": {
+     "id": "TimerTimer"
+    },
+    "Left": 120
+   },
+   "children": []
+  }
+ ]
+}
