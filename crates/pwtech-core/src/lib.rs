@@ -10,6 +10,12 @@
 //! Licence: GPL-2.0-or-later, like the original.
 
 pub mod crypto;
+pub mod generate;
+pub mod language;
 pub mod lzo;
+pub mod passw;
 pub mod random;
 pub mod secure_mem;
+pub mod text_file;
+pub mod unicode;
+pub mod util;
