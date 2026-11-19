@@ -17,6 +17,7 @@
 //! - `pmprint NAME` / `pmtitle` / `pmrows` / `pmtags` / `pmstate` — print to
 //!   stdout
 //! - `pmsavecfg` — save the configuration and print the INI file
+//! - `pmgen` — right-click on the password toggle button (generate)
 //! - `pmdrop I` — drop the selected entry on row I (drag & drop)
 //! - `pmsnap PATH` — picture of the manager window, `pmsnapdlg PATH` of the
 //!   top-most dialog
@@ -183,6 +184,7 @@ pub fn automate(main: &Rc<MainWindow>, cmd: &str, rest: &str) -> bool {
                 println!("ini: {line}");
             }
         }
+        "pmgen" => pm.toggle_passw_btn_right_click(),
         "pmdrop" => {
             if let Ok(i) = rest.parse::<u32>() {
                 pm.db_view_drag_drop(i);

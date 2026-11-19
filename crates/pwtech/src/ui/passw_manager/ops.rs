@@ -1377,7 +1377,13 @@ impl PasswManager {
             self.item_passw_change_confirm.set(false);
             self.reset_nav_controls();
         }
-        self.toggle_shutdown_blocker(if changed { Some(trl("Password database entry is being edited.")) } else { None });
+        self.toggle_shutdown_blocker(if changed {
+            Some(trl("Password database entry is being edited."))
+        } else if self.db_changed.get() && self.is_db_open() {
+            Some(trl("Password database contains unsaved changes."))
+        } else {
+            None
+        });
         self.update_menu_states();
     }
 
@@ -1608,7 +1614,7 @@ impl PasswManager {
     }
 
     /// `TogglePasswBtnMouseUp()` with the right button: generate a password.
-    fn toggle_passw_btn_right_click(self: &Rc<Self>) {
+    pub(super) fn toggle_passw_btn_right_click(self: &Rc<Self>) {
         self.notify_user_action();
         let Some(main) = self.main.upgrade() else { return };
         let mut gen_main = true;
