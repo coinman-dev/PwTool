@@ -2,17 +2,27 @@
 //! `AppRestore()`, `TrayMenu*`). Child module of `main_window`.
 
 use super::*;
-use crate::ui::tray::{TrayCmd, TrayEntry, TrayIcon, icon_from_bytes};
+use crate::ui::tray::{TrayCmd, TrayEntry, TrayIcon, icon_from_pngs};
 
-/// Icon file data for `Configuration::AppIconName`.
-fn app_icon_bytes(name: &str) -> &'static [u8] {
+/// PNG images (16, 32, 48 pixels) of the icon for
+/// `Configuration::AppIconName`.
+fn app_icon_pngs(name: &str) -> [&'static [u8]; 3] {
+    macro_rules! icon {
+        ($n:literal) => {
+            [
+                include_bytes!(concat!("../../../../assets/appicons/", $n, "_16.png")),
+                include_bytes!(concat!("../../../../assets/appicons/", $n, "_32.png")),
+                include_bytes!(concat!("../../../../assets/appicons/", $n, "_48.png")),
+            ]
+        };
+    }
     match name {
-        "Blue" => include_bytes!("../../../../assets/pwtech_icon_blue.ico"),
-        "Red" => include_bytes!("../../../../assets/pwtech_icon_red.ico"),
-        "Orange" => include_bytes!("../../../../assets/pwtech_icon_orange.ico"),
-        "Green" => include_bytes!("../../../../assets/pwtech_icon_green.ico"),
-        "Colors" => include_bytes!("../../../../assets/pwtech_icon_colored.ico"),
-        _ => include_bytes!("../../../../assets/pwtech_default.ico"),
+        "Blue" => icon!("pwtech_icon_blue"),
+        "Red" => icon!("pwtech_icon_red"),
+        "Orange" => icon!("pwtech_icon_orange"),
+        "Green" => icon!("pwtech_icon_green"),
+        "Colors" => icon!("pwtech_icon_colored"),
+        _ => icon!("pwtech_default"),
     }
 }
 
@@ -196,7 +206,7 @@ impl MainWindow {
                 }
                 *icon = TrayIcon::spawn(
                     &title,
-                    icon_from_bytes(app_icon_bytes(&icon_name)),
+                    icon_from_pngs(&app_icon_pngs(&icon_name)),
                     self.tray_entries(),
                     profiles,
                     self.tray.tx.clone(),
@@ -213,7 +223,7 @@ impl MainWindow {
                     *self.tray.title.borrow_mut() = title;
                 }
                 if *self.tray.icon_name.borrow() != icon_name {
-                    t.set_icon(icon_from_bytes(app_icon_bytes(&icon_name)));
+                    t.set_icon(icon_from_pngs(&app_icon_pngs(&icon_name)));
                     *self.tray.icon_name.borrow_mut() = icon_name;
                 }
                 t.set_profiles(profiles);

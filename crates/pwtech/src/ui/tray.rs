@@ -4,8 +4,8 @@
 //! main loop through a channel.
 
 use gtk4 as gtk;
-use gtk::gdk_pixbuf;
 use gtk::glib;
+use gtk::gdk::prelude::TextureExt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use ksni::blocking::TrayMethods;
@@ -199,31 +199,24 @@ impl Drop for TrayIcon {
     }
 }
 
-/// Icon for the tray from an `.ico`/`.png` file (ARGB32, network byte
-/// order), all sizes contained in the file that the loader provides.
-pub fn icon_from_bytes(bytes: &'static [u8]) -> Vec<Icon> {
-    let stream = gtk::gio::MemoryInputStream::from_bytes(&glib::Bytes::from_static(bytes));
-    let Ok(pb) = gdk_pixbuf::Pixbuf::from_stream(&stream, gtk::gio::Cancellable::NONE) else {
-        return Vec::new();
-    };
-    let pb = if pb.has_alpha() {
-        pb
-    } else {
-        match pb.add_alpha(false, 0, 0, 0) {
-            Ok(p) => p,
-            Err(_) => return Vec::new(),
+/// Icon for the tray from PNG images (ARGB32, network byte order), one
+/// entry per size.
+pub fn icon_from_pngs(images: &[&'static [u8]]) -> Vec<Icon> {
+    let mut v = Vec::new();
+    for bytes in images {
+        let Ok(tex) = gtk::gdk::Texture::from_bytes(&glib::Bytes::from_static(bytes)) else { continue };
+        let (w, h) = (tex.width(), tex.height());
+        let mut dl = gtk::gdk::TextureDownloader::new(&tex);
+        dl.set_format(gtk::gdk::MemoryFormat::R8g8b8a8);
+        let (bytes, stride) = dl.download_bytes();
+        let mut data = Vec::with_capacity((w * h * 4) as usize);
+        for y in 0..h as usize {
+            for x in 0..w as usize {
+                let o = y * stride + x * 4;
+                data.extend_from_slice(&[bytes[o + 3], bytes[o], bytes[o + 1], bytes[o + 2]]);
+            }
         }
-    };
-    let (w, h, stride) = (pb.width(), pb.height(), pb.rowstride() as usize);
-    let n = pb.n_channels() as usize;
-    let pixels = pb.read_pixel_bytes();
-    let mut data = Vec::with_capacity((w * h * 4) as usize);
-    for y in 0..h as usize {
-        for x in 0..w as usize {
-            let o = y * stride + x * n;
-            let (r, g, b, a) = (pixels[o], pixels[o + 1], pixels[o + 2], pixels[o + 3]);
-            data.extend_from_slice(&[a, r, g, b]);
-        }
+        v.push(Icon { width: w, height: h, data });
     }
-    vec![Icon { width: w, height: h, data }]
+    v
 }
