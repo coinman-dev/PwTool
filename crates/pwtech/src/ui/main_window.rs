@@ -40,6 +40,8 @@ use crate::program::*;
 mod tools;
 #[path = "config_dlg.rs"]
 mod config_dlg;
+#[path = "profile_editor.rs"]
+mod profile_editor;
 
 const ENTROPY_SYSTEM: u32 = 24;
 const ENTROPY_MOUSECLICK: u32 = 2;
@@ -115,6 +117,8 @@ pub struct MainWindow {
     tools: tools::ToolsState,
     config_dlg: RefCell<Option<Rc<config_dlg::ConfigDlg>>>,
     hot_keys_active: RefCell<crate::app_config::HotKeyList>,
+    profile_dlg: RefCell<Option<Rc<profile_editor::ProfileEditDlg>>>,
+    profile_list_guard: Cell<bool>,
 }
 
 impl MainWindow {
@@ -168,6 +172,8 @@ impl MainWindow {
             tools: tools::ToolsState::new(),
             config_dlg: RefCell::new(None),
             hot_keys_active: RefCell::new(Default::default()),
+            profile_dlg: RefCell::new(None),
+            profile_list_guard: Cell::new(false),
         });
         w.setup();
         w
@@ -277,6 +283,7 @@ impl MainWindow {
         self.load_config_to_controls();
         self.connect_events();
         self.connect_tools();
+        self.connect_profile_editor();
         self.setup_timer();
         self.setup_entropy_events();
         self.update_entropy_progress(true);
@@ -526,7 +533,9 @@ impl MainWindow {
         let w = Rc::downgrade(self);
         self.combo("ProfileList").connect_changed(move |cb| {
             if let (Some(w), Some(i)) = (w.upgrade(), cb.active()) {
-                w.load_profile(i as usize);
+                if !w.profile_list_guard.get() {
+                    w.load_profile(i as usize);
+                }
             }
         });
 
@@ -1056,6 +1065,14 @@ impl MainWindow {
         self.update_word_list_info();
         self.set_advanced_btn_caption();
         self.include_chars_check_click();
+        self.select_profile_in_list(i);
+    }
+
+    /// `ProfileList->ItemIndex = i` without loading the profile again.
+    fn select_profile_in_list(&self, i: usize) {
+        self.profile_list_guard.set(true);
+        self.combo("ProfileList").set_active(Some(i as u32));
+        self.profile_list_guard.set(false);
     }
 
     /// Copy the controls into the generator settings.
