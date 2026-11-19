@@ -1,0 +1,1663 @@
+object MainForm: TMainForm
+  Left = 193
+  Top = 123
+  ActiveControl = PasswBox
+  ClientHeight = 694
+  ClientWidth = 588
+  Color = clBtnFace
+  Constraints.MinHeight = 617
+  Constraints.MinWidth = 488
+  Font.Charset = DEFAULT_CHARSET
+  Font.Color = clWindowText
+  Font.Height = -14
+  Font.Name = 'Tahoma'
+  Font.Style = []
+  KeyPreview = True
+  Menu = MainMenu
+  ShowHint = True
+  OnActivate = FormActivate
+  OnClose = FormClose
+  OnCloseQuery = FormCloseQuery
+  OnPaint = FormPaint
+  OnResize = FormResize
+  PixelsPerInch = 120
+  TextHeight = 17
+  object ProfileLbl: TLabel
+    Left = 10
+    Top = 80
+    Width = 149
+    Height = 16
+    Margins.Left = 4
+    Margins.Top = 4
+    Margins.Right = 4
+    Margins.Bottom = 4
+    Alignment = taCenter
+    AutoSize = False
+    Caption = 'Profile:'
+    Font.Charset = DEFAULT_CHARSET
+    Font.Color = clWindowText
+    Font.Height = -14
+    Font.Name = 'Tahoma'
+    Font.Style = [fsBold]
+    ParentFont = False
+  end
+  object ReloadProfileBtn: TSpeedButton
+    Tag = 6
+    Left = 453
+    Top = 74
+    Width = 28
+    Height = 27
+    Hint = 'Reload profile'
+    Margins.Left = 4
+    Margins.Top = 4
+    Margins.Right = 4
+    Margins.Bottom = 4
+    ImageIndex = 0
+    ImageName = 'reload'
+    Images = ImageList16
+    Flat = True
+    ParentShowHint = False
+    ShowHint = True
+    OnClick = ProfileListSelect
+  end
+  object AddProfileBtn: TSpeedButton
+    Tag = 6
+    Left = 483
+    Top = 74
+    Width = 27
+    Height = 27
+    Hint = 'Add profile'
+    Margins.Left = 4
+    Margins.Top = 4
+    Margins.Right = 4
+    Margins.Bottom = 4
+    ImageIndex = 1
+    ImageName = 'plus'
+    Images = ImageList16
+    Flat = True
+    OnClick = AddProfileBtnClick
+  end
+  object ToolBar: TPanel
+    Left = 0
+    Top = 0
+    Width = 588
+    Height = 61
+    Margins.Left = 4
+    Margins.Top = 4
+    Margins.Right = 4
+    Margins.Bottom = 4
+    Align = alTop
+    Alignment = taRightJustify
+    Color = clWindow
+    ParentBackground = False
+    TabOrder = 0
+    DesignSize = (588, 61)
+    object LogoLbl: TLabel
+      Left = 10
+      Top = 18
+      Width = 162
+      Height = 23
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Caption = 'PW GENERATOR'
+      Font.Charset = ANSI_CHARSET
+      Font.Color = clBlack
+      Font.Height = -20
+      Font.Name = 'Times New Roman'
+      Font.Style = [fsBold]
+      ParentFont = False
+    end
+    object MPPasswGenBtn: TSpeedButton
+      Left = 268
+      Top = 5
+      Width = 51
+      Height = 51
+      Hint = 'Generate passwords based on a master password'
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Anchors = [akTop, akRight]
+      ImageIndex = 5
+      ImageName = 'password'
+      Images = ImageList32
+      Flat = True
+      ParentShowHint = False
+      ShowHint = True
+      OnClick = MPPasswGenBtnClick
+      ExplicitLeft = 270
+    end
+    object ClearClipBtn: TSpeedButton
+      Left = 422
+      Top = 5
+      Width = 51
+      Height = 51
+      Hint = 'Clear clipboard (text contents only)'
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Anchors = [akTop, akRight]
+      ImageIndex = 2
+      ImageName = 'eraser'
+      Images = ImageList32
+      Flat = True
+      ParentShowHint = False
+      ShowHint = True
+      OnClick = ClearClipBtnClick
+      ExplicitLeft = 424
+    end
+    object ConfigBtn: TSpeedButton
+      Left = 473
+      Top = 5
+      Width = 51
+      Height = 51
+      Hint = 'Main configuration of the program'
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Anchors = [akTop, akRight]
+      ImageIndex = 1
+      ImageName = '002-repair-tools'
+      Images = ImageList32
+      Flat = True
+      ParentShowHint = False
+      ShowHint = True
+      OnClick = MainMenu_Options_ConfigClick
+      ExplicitLeft = 475
+    end
+    object CryptTextBtn: TSpeedButton
+      Left = 371
+      Top = 5
+      Width = 51
+      Height = 51
+      Hint = 'Clipboard text encryption (left-click) or decryption (right-click)'
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Anchors = [akTop, akRight]
+      ImageIndex = 3
+      ImageName = '007-encrypted-data'
+      Images = ImageList32
+      Flat = True
+      ParentShowHint = False
+      ShowHint = True
+      OnClick = CryptTextBtnClick
+      OnMouseUp = CryptTextBtnMouseUp
+      ExplicitLeft = 373
+    end
+    object HelpBtn: TSpeedButton
+      Left = 524
+      Top = 5
+      Width = 52
+      Height = 51
+      Hint = 'Open user manual'
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Anchors = [akTop, akRight]
+      ImageIndex = 0
+      ImageName = 'question'
+      Images = ImageList32
+      Flat = True
+      ParentShowHint = False
+      ShowHint = True
+      OnClick = HelpBtnClick
+      ExplicitLeft = 526
+    end
+    object ProfileEditorBtn: TSpeedButton
+      Left = 319
+      Top = 5
+      Width = 52
+      Height = 51
+      Hint = 'Load, create or delete profiles'
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Anchors = [akTop, akRight]
+      ImageIndex = 4
+      ImageName = 'edit'
+      Images = ImageList32
+      Flat = True
+      ParentShowHint = False
+      ShowHint = True
+      OnClick = ProfileEditorBtnClick
+      ExplicitLeft = 321
+    end
+    object PasswMngBtn: TSpeedButton
+      Left = 217
+      Top = 5
+      Width = 51
+      Height = 51
+      Hint = 'Manage passwords in encrypted databases'
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Anchors = [akTop, akRight]
+      ImageIndex = 6
+      ImageName = 'database-lock-icon'
+      Images = ImageList32
+      Flat = True
+      ParentShowHint = False
+      ShowHint = True
+      OnClick = PasswMngBtnClick
+      ExplicitLeft = 219
+    end
+  end
+  object PasswGroup: TGroupBox
+    Tag = 7
+    Left = 13
+    Top = 561
+    Width = 562
+    Height = 95
+    Margins.Left = 4
+    Margins.Top = 4
+    Margins.Right = 4
+    Margins.Bottom = 4
+    Caption = 'Generated password'
+    TabOrder = 1
+    OnMouseMove = PasswGroupMouseMove
+    DesignSize = (562, 95)
+    object PasswInfoLbl: TLabel
+      Left = 310
+      Top = 62
+      Width = 118
+      Height = 17
+      Hint = 'Hold left mouse button to drag & drop password'
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Caption = 'Click on "Generate"'
+      OnMouseMove = PasswInfoLblMouseMove
+    end
+    object TogglePasswBtn: TSpeedButton
+      Left = 413
+      Top = 23
+      Width = 34
+      Height = 31
+      Hint = 'Hide/show password'
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      AllowAllUp = True
+      Anchors = [akTop, akRight]
+      GroupIndex = 1
+      Caption = '···'
+      Flat = True
+      Font.Charset = SYMBOL_CHARSET
+      Font.Color = clMaroon
+      Font.Height = -19
+      Font.Name = 'Symbol'
+      Font.Style = []
+      ParentFont = False
+      ParentShowHint = False
+      ShowHint = True
+      OnClick = TogglePasswBtnClick
+    end
+    object PasswGauge: TCGauge
+      Left = 10
+      Top = 61
+      Width = 292
+      Height = 21
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Color = clBtnFace
+      ShowText = False
+      BackColor = clBtnFace
+      MaxValue = 128
+      ParentColor = False
+    end
+    object PasswBox: TEdit
+      Left = 10
+      Top = 25
+      Width = 402
+      Height = 28
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Anchors = [akLeft, akTop, akRight]
+      DragCursor = crDefault
+      Font.Charset = ANSI_CHARSET
+      Font.Color = clWindowText
+      Font.Height = -17
+      Font.Name = 'Consolas'
+      Font.Style = []
+      ParentFont = False
+      PopupMenu = PasswBoxMenu
+      TabOrder = 0
+      OnChange = PasswBoxChange
+      OnKeyPress = PasswBoxKeyPress
+    end
+    object GenerateBtn: TButton
+      Left = 450
+      Top = 25
+      Width = 102
+      Height = 31
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Anchors = [akTop, akRight]
+      Caption = 'Generate'
+      Font.Charset = ANSI_CHARSET
+      Font.Color = clBlack
+      Font.Height = -14
+      Font.Name = 'Tahoma'
+      Font.Style = [fsBold]
+      ParentFont = False
+      TabOrder = 1
+      OnClick = GenerateBtnClick
+    end
+  end
+  object SettingsGroup: TGroupBox
+    Tag = 7
+    Left = 13
+    Top = 109
+    Width = 562
+    Height = 445
+    Margins.Left = 4
+    Margins.Top = 4
+    Margins.Right = 4
+    Margins.Bottom = 4
+    Caption = 'Settings'
+    TabOrder = 2
+    DesignSize = (562, 445)
+    object CharsLengthLbl: TLabel
+      Left = 40
+      Top = 60
+      Width = 48
+      Height = 17
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Caption = 'Length:'
+    end
+    object WordsNumLbl: TLabel
+      Left = 40
+      Top = 175
+      Width = 54
+      Height = 17
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Caption = 'Number:'
+    end
+    object WordListFileLbl: TLabel
+      Left = 40
+      Top = 210
+      Width = 78
+      Height = 17
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Caption = 'Word list file:'
+    end
+    object CharSetLbl: TLabel
+      Left = 40
+      Top = 95
+      Width = 87
+      Height = 17
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Caption = 'Character set:'
+    end
+    object CharSetInfoLbl: TLabel
+      Left = 479
+      Top = 68
+      Width = 73
+      Height = 17
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Alignment = taRightJustify
+      Anchors = [akTop, akRight]
+      Caption = 'CharSetInfo'
+    end
+    object WordListInfoLbl: TLabel
+      Left = 473
+      Top = 183
+      Width = 79
+      Height = 17
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Alignment = taRightJustify
+      Anchors = [akTop, akRight]
+      Caption = 'WordListInfo'
+      Color = clBtnFace
+      ParentColor = False
+    end
+    object MultiplePasswLbl: TLabel
+      Left = 54
+      Top = 405
+      Width = 136
+      Height = 17
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Alignment = taRightJustify
+      Caption = 'Multiple passwords:'
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clWindowText
+      Font.Height = -14
+      Font.Name = 'Tahoma'
+      Font.Style = [fsBold]
+      ParentFont = False
+    end
+    object CharSetInfoBtn: TSpeedButton
+      Left = 493
+      Top = 88
+      Width = 29
+      Height = 28
+      Hint = 'Show details'
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Anchors = [akTop, akRight]
+      ImageIndex = 2
+      ImageName = 'info'
+      Images = ImageList16
+      Flat = True
+      ParentShowHint = False
+      ShowHint = True
+      OnClick = CharSetInfoBtnClick
+    end
+    object BrowseBtn: TSpeedButton
+      Left = 523
+      Top = 203
+      Width = 29
+      Height = 27
+      Hint = 'Browse'
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Anchors = [akTop, akRight]
+      ImageIndex = 3
+      ImageName = 'search'
+      Images = ImageList16
+      Flat = True
+      ParentShowHint = False
+      ShowHint = True
+      OnClick = BrowseBtnClick
+      ExplicitLeft = 524
+    end
+    object FormatPasswInfoLbl: TLabel
+      Left = 548
+      Top = 278
+      Width = 4
+      Height = 17
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Alignment = taRightJustify
+      Anchors = [akTop, akRight]
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clBlack
+      Font.Height = -14
+      Font.Name = 'Tahoma'
+      Font.Style = []
+      ParentFont = False
+      ExplicitLeft = 549
+    end
+    object WordListInfoBtn: TSpeedButton
+      Left = 493
+      Top = 203
+      Width = 29
+      Height = 27
+      Hint = 'Show details'
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Anchors = [akTop, akRight]
+      ImageIndex = 2
+      ImageName = 'info'
+      Images = ImageList16
+      Flat = True
+      ParentShowHint = False
+      ShowHint = True
+      OnClick = WordListInfoBtnClick
+      ExplicitLeft = 494
+    end
+    object CharSetHelpBtn: TSpeedButton
+      Left = 523
+      Top = 88
+      Width = 29
+      Height = 28
+      Hint = 'Quick help'
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Anchors = [akTop, akRight]
+      ImageIndex = 5
+      ImageName = 'question2'
+      Images = ImageList16
+      Flat = True
+      Font.Charset = ANSI_CHARSET
+      Font.Color = clTeal
+      Font.Height = -20
+      Font.Name = 'Arial'
+      Font.Style = [fsBold]
+      ParentFont = False
+      ParentShowHint = False
+      ShowHint = True
+      OnClick = CharSetHelpBtnClick
+    end
+    object FormatPasswHelpBtn: TSpeedButton
+      Left = 523
+      Top = 298
+      Width = 29
+      Height = 27
+      Hint = 'Quick help'
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Anchors = [akTop, akRight]
+      ImageIndex = 5
+      ImageName = 'question2'
+      Images = ImageList16
+      Flat = True
+      Font.Charset = ANSI_CHARSET
+      Font.Color = clTeal
+      Font.Height = -20
+      Font.Name = 'Arial'
+      Font.Style = [fsBold]
+      ParentFont = False
+      ParentShowHint = False
+      ShowHint = True
+      OnClick = FormatPasswHelpBtnClick
+    end
+    object Separator: TBevel
+      Left = 10
+      Top = 381
+      Width = 542
+      Height = 12
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Anchors = [akLeft, akTop, akRight]
+      Shape = bsTopLine
+      ExplicitWidth = 543
+    end
+    object BrowseBtn2: TSpeedButton
+      Left = 523
+      Top = 336
+      Width = 29
+      Height = 27
+      Hint = 'Browse'
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Anchors = [akTop, akRight]
+      ImageIndex = 3
+      ImageName = 'search'
+      Images = ImageList16
+      Flat = True
+      ParentShowHint = False
+      ShowHint = True
+      OnClick = BrowseBtn2Click
+    end
+    object ReloadScriptBtn: TSpeedButton
+      Left = 493
+      Top = 336
+      Width = 29
+      Height = 27
+      Hint = 'Reload script'
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Anchors = [akTop, akRight]
+      ImageIndex = 0
+      ImageName = 'reload'
+      Images = ImageList16
+      Flat = True
+      ParentShowHint = False
+      ShowHint = True
+      OnClick = ReloadScriptBtnClick
+    end
+    object IncludeCharsCheck: TCheckBox
+      Left = 10
+      Top = 25
+      Width = 421
+      Height = 21
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Caption = 'Include characters (pass*words*)'
+      Color = clBtnFace
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clWindowText
+      Font.Height = -14
+      Font.Name = 'Tahoma'
+      Font.Style = [fsBold]
+      ParentColor = False
+      ParentFont = False
+      TabOrder = 0
+      OnClick = IncludeCharsCheckClick
+    end
+    object IncludeWordsCheck: TCheckBox
+      Left = 10
+      Top = 140
+      Width = 421
+      Height = 21
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Caption = 'Include words (pass*phrases*)'
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clWindowText
+      Font.Height = -14
+      Font.Name = 'Tahoma'
+      Font.Style = [fsBold]
+      ParentFont = False
+      TabOrder = 3
+      OnClick = IncludeCharsCheckClick
+    end
+    object CharSetList: TComboBox
+      Left = 200
+      Top = 90
+      Width = 292
+      Height = 25
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Anchors = [akLeft, akTop, akRight]
+      Ctl3D = True
+      DropDownCount = 10
+      ParentCtl3D = False
+      PopupMenu = ListMenu
+      TabOrder = 2
+      OnEnter = CharSetListEnter
+      OnExit = CharSetListExit
+      OnKeyPress = CharSetListKeyPress
+    end
+    object CombineWordsCharsCheck: TCheckBox
+      Left = 290
+      Top = 245
+      Width = 262
+      Height = 21
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Anchors = [akLeft, akTop, akRight]
+      Caption = 'Combine words with characters'
+      TabOrder = 8
+    end
+    object WLFNList: TComboBox
+      Left = 200
+      Top = 205
+      Width = 292
+      Height = 25
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Anchors = [akLeft, akTop, akRight]
+      DropDownCount = 10
+      PopupMenu = ListMenu
+      TabOrder = 5
+      OnEnter = WLFNListEnter
+      OnExit = WLFNListExit
+      OnKeyPress = WLFNListKeyPress
+    end
+    object CharsLengthBox: TEdit
+      Left = 200
+      Top = 55
+      Width = 61
+      Height = 25
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      TabOrder = 1
+      Text = '1'
+      OnExit = CharsLengthBoxExit
+    end
+    object CharsLengthSpinBtn: TUpDown
+      Left = 261
+      Top = 55
+      Width = 22
+      Height = 25
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Associate = CharsLengthBox
+      Min = 1
+      Position = 1
+      TabOrder = 11
+      Thousands = False
+    end
+    object WordsNumBox: TEdit
+      Left = 200
+      Top = 170
+      Width = 61
+      Height = 25
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      TabOrder = 4
+      Text = '1'
+      OnExit = WordsNumBoxExit
+    end
+    object WordsNumSpinBtn: TUpDown
+      Left = 261
+      Top = 170
+      Width = 22
+      Height = 25
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Associate = WordsNumBox
+      Min = 1
+      Position = 1
+      TabOrder = 12
+      Thousands = False
+    end
+    object FormatPasswCheck: TCheckBox
+      Left = 10
+      Top = 300
+      Width = 183
+      Height = 21
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Caption = 'Format password:'
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clWindowText
+      Font.Height = -14
+      Font.Name = 'Tahoma'
+      Font.Style = [fsBold]
+      ParentFont = False
+      TabOrder = 9
+      OnClick = IncludeCharsCheckClick
+    end
+    object FormatList: TComboBox
+      Left = 200
+      Top = 300
+      Width = 322
+      Height = 25
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Anchors = [akLeft, akTop, akRight]
+      DropDownCount = 10
+      PopupMenu = ListMenu
+      TabOrder = 10
+      OnEnter = FormatListEnter
+      OnExit = FormatListExit
+    end
+    object NumPasswBox: TEdit
+      Left = 200
+      Top = 400
+      Width = 91
+      Height = 25
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      TabOrder = 13
+      OnKeyPress = NumPasswBoxKeyPress
+    end
+    object GenerateBtn2: TButton
+      Left = 300
+      Top = 398
+      Width = 111
+      Height = 31
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Caption = 'Generate'
+      DropDownMenu = GenerateMenu
+      Style = bsSplitButton
+      TabOrder = 14
+      OnClick = GenerateBtnClick
+    end
+    object AdvancedBtn: TButton
+      Left = 430
+      Top = 398
+      Width = 122
+      Height = 31
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Anchors = [akTop, akRight]
+      Caption = 'Advanced'
+      DropDownMenu = AdvancedOptionsMenu
+      Style = bsSplitButton
+      TabOrder = 15
+      OnClick = AdvancedBtnClick
+    end
+    object SpecifyLengthBox: TEdit
+      Left = 200
+      Top = 240
+      Width = 71
+      Height = 25
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      TabOrder = 7
+    end
+    object SpecifyLengthCheck: TCheckBox
+      Left = 40
+      Top = 243
+      Width = 151
+      Height = 21
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Caption = 'Specify length*:'
+      TabOrder = 6
+      OnClick = SpecifyLengthCheckClick
+    end
+    object RunScriptCheck: TCheckBox
+      Left = 10
+      Top = 340
+      Width = 183
+      Height = 21
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Caption = 'Run script:'
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clWindowText
+      Font.Height = -14
+      Font.Name = 'Tahoma'
+      Font.Style = [fsBold]
+      ParentFont = False
+      TabOrder = 16
+      OnClick = IncludeCharsCheckClick
+    end
+    object ScriptList: TComboBox
+      Left = 200
+      Top = 338
+      Width = 292
+      Height = 25
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Anchors = [akLeft, akTop, akRight]
+      PopupMenu = ListMenu
+      TabOrder = 17
+    end
+    object BuildBtn: TButton
+      Left = 463
+      Top = 123
+      Width = 90
+      Height = 31
+      Hint = 'Build character set definition'
+      Margins.Left = 4
+      Margins.Top = 4
+      Margins.Right = 4
+      Margins.Bottom = 4
+      Anchors = [akTop, akRight]
+      Caption = 'Build...'
+      TabOrder = 18
+      OnClick = BuildBtnClick
+    end
+  end
+  object StatusBar: TStatusBar
+    AlignWithMargins = True
+    Left = 4
+    Top = 665
+    Width = 580
+    Height = 25
+    Margins.Left = 4
+    Margins.Top = 4
+    Margins.Right = 4
+    Margins.Bottom = 4
+    Panels = <collection, 3 items>
+      item
+        Alignment = taCenter
+        Width = 438
+      item
+        Alignment = taRightJustify
+        Text = 'E'
+        Width = 31
+      item
+        Width = 63
+    ParentFont = True
+    UseSystemFont = False
+  end
+  object ProfileList: TComboBox
+    Tag = 7
+    Left = 166
+    Top = 75
+    Width = 283
+    Height = 25
+    Margins.Left = 4
+    Margins.Top = 4
+    Margins.Right = 4
+    Margins.Bottom = 4
+    Style = csDropDownList
+    TabOrder = 4
+    OnSelect = ProfileListSelect
+  end
+  object OpenDlg: TOpenDialog
+    FilterIndex = 2
+    Left = 408
+    Top = 104
+  end
+  object SaveDlg: TSaveDialog
+    Options = [ofOverwritePrompt, ofHideReadOnly, ofEnableSizing]
+    Left = 376
+    Top = 104
+  end
+  object TrayMenu: TPopupMenu
+    OnPopup = TrayMenuPopup
+    Left = 40
+    Top = 8
+    object TrayMenu_Exit: TMenuItem
+      Caption = 'Exit'
+      OnClick = TrayMenu_ExitClick
+    end
+    object TrayMenu_N4: TMenuItem
+      Caption = '-'
+    end
+    object TrayMenu_About: TMenuItem
+      OnClick = MainMenu_Help_AboutClick
+    end
+    object TrayMenu_OpenManual: TMenuItem
+      Caption = 'Open Manual'
+      OnClick = HelpBtnClick
+    end
+    object TrayMenu_N3: TMenuItem
+      Caption = '-'
+    end
+    object TrayMenu_PasswManager: TMenuItem
+      Caption = 'Password Manager...'
+      OnClick = PasswMngBtnClick
+    end
+    object TrayMenu_MPPasswGen: TMenuItem
+      Caption = 'MP Password Generator...'
+      OnClick = MPPasswGenBtnClick
+    end
+    object TrayMenu_CreateRandDataFile: TMenuItem
+      Caption = 'Create Random Data File...'
+      OnClick = MainMenu_Tools_CreateRandDataFileClick
+    end
+    object TrayMenu_DecryptClip: TMenuItem
+      Caption = 'Decrypt Clipboard...'
+      OnClick = TrayMenu_DecryptClipClick
+    end
+    object TrayMenu_EncryptClip: TMenuItem
+      Caption = 'Encrypt Clipboard...'
+      OnClick = TrayMenu_EncryptClipClick
+    end
+    object TrayMenu_ClearClip: TMenuItem
+      Caption = 'Clear Clipboard'
+      OnClick = ClearClipBtnClick
+    end
+    object TrayMenu_N5: TMenuItem
+      Caption = '-'
+    end
+    object TrayMenu_ResetWindowPos: TMenuItem
+      Caption = 'Reset All Window Positions'
+      OnClick = TrayMenu_ResetWindowPosClick
+    end
+    object TrayMenu_N2: TMenuItem
+      Caption = '-'
+    end
+    object TrayMenu_Profile: TMenuItem
+      Caption = 'Profile'
+      object TrayMenu_Profile_N1: TMenuItem
+        Caption = '-'
+      end
+      object TrayMenu_Profile_ProfileEditor: TMenuItem
+        Caption = 'Profile Editor...'
+        OnClick = ProfileEditorBtnClick
+      end
+    end
+    object TrayMenu_GenAndShowPassw: TMenuItem
+      Caption = 'Generate and Show Password...'
+      OnClick = GenerateBtnClick
+    end
+    object TrayMenu_GenAndAutoTypePassw: TMenuItem
+      Caption = 'Generate and Autotype Password'
+      OnClick = GenerateBtnClick
+    end
+    object TrayMenu_GenPassw: TMenuItem
+      Caption = 'Generate Password'
+      OnClick = GenerateBtnClick
+    end
+    object TrayMenu_N1: TMenuItem
+      Caption = '-'
+    end
+    object TrayMenu_Restore: TMenuItem
+      Default = True
+      OnClick = TrayMenu_RestoreClick
+    end
+  end
+  object Timer: TTimer
+    OnTimer = TimerTick
+    Left = 8
+    Top = 8
+  end
+  object ListMenu: TPopupMenu
+    OnPopup = ListMenuPopup
+    Left = 344
+    Top = 104
+    object ListMenu_Undo: TMenuItem
+      Caption = 'Undo'
+      ShortCut = 16474
+      OnClick = ListMenu_UndoClick
+    end
+    object ListMenu_N1: TMenuItem
+      Caption = '-'
+    end
+    object ListMenu_Cut: TMenuItem
+      Caption = 'Cut'
+      ShortCut = 16472
+      OnClick = ListMenu_CutClick
+    end
+    object ListMenu_Copy: TMenuItem
+      Caption = 'Copy'
+      ShortCut = 16451
+      OnClick = ListMenu_CopyClick
+    end
+    object ListMenu_Paste: TMenuItem
+      Caption = 'Paste'
+      ShortCut = 16470
+      OnClick = ListMenu_PasteClick
+    end
+    object ListMenu_Delete: TMenuItem
+      Caption = 'Delete'
+      OnClick = ListMenu_DeleteClick
+    end
+    object ListMenu_N2: TMenuItem
+      Caption = '-'
+    end
+    object ListMenu_SelectAll: TMenuItem
+      Caption = 'Select All'
+      ShortCut = 16449
+      OnClick = ListMenu_SelectAllClick
+    end
+    object ListMenu_N3: TMenuItem
+      Caption = '-'
+    end
+    object ListMenu_RemoveEntry: TMenuItem
+      Caption = 'Remove Entry'
+      OnClick = ListMenu_RemoveEntryClick
+    end
+    object ListMenu_ClearList: TMenuItem
+      Caption = 'Clear List'
+      OnClick = ListMenu_ClearListClick
+    end
+  end
+  object MainMenu: TMainMenu
+    Left = 72
+    Top = 8
+    object MainMenu_File: TMenuItem
+      Caption = 'File'
+      ShortCut = 16465
+      object MainMenu_File_Profile: TMenuItem
+        Caption = 'Profile'
+        object MainMenu_File_Profile_N1: TMenuItem
+          Caption = '-'
+        end
+        object MainMenu_File_Profile_ProfileEditor: TMenuItem
+          Caption = 'Profile Editor...'
+          ShortCut = 121
+          OnClick = ProfileEditorBtnClick
+        end
+      end
+      object MainMenu_File_N2: TMenuItem
+        Caption = '-'
+      end
+      object MainMenu_File_PasswManager: TMenuItem
+        Caption = 'Password Manager...'
+        OnClick = PasswMngBtnClick
+      end
+      object MainMenu_File_N1: TMenuItem
+        Caption = '-'
+      end
+      object MainMenu_File_BackupSettings: TMenuItem
+        Caption = 'Backup Settings...'
+        OnClick = MainMenu_File_BackupSettingsClick
+      end
+      object MainMenu_File_RestoreSettings: TMenuItem
+        Caption = 'Restore Settings from Backup...'
+        OnClick = MainMenu_File_RestoreSettingsClick
+      end
+      object MainMenu_File_N3: TMenuItem
+        Caption = '-'
+      end
+      object MainMenu_File_Exit: TMenuItem
+        Caption = 'Exit'
+        ShortCut = 32849
+        OnClick = MainMenu_File_ExitClick
+      end
+    end
+    object MainMenu_Tools: TMenuItem
+      Caption = 'Tools'
+      object MainMenu_Tools_ClearClipboard: TMenuItem
+        Caption = 'Clear Clipboard'
+        ShortCut = 113
+        OnClick = ClearClipBtnClick
+      end
+      object MainMenu_Tools_EncryptClip: TMenuItem
+        Caption = 'Encrypt Clipboard...'
+        ShortCut = 114
+        OnClick = TrayMenu_EncryptClipClick
+      end
+      object MainMenu_Tools_DecryptClip: TMenuItem
+        Caption = 'Decrypt Clipboard...'
+        ShortCut = 115
+        OnClick = TrayMenu_DecryptClipClick
+      end
+      object MainMenu_Tools_N1: TMenuItem
+        Caption = '-'
+      end
+      object MainMenu_Tools_CreateRandDataFile: TMenuItem
+        Caption = 'Create Random Data File...'
+        ShortCut = 116
+        OnClick = MainMenu_Tools_CreateRandDataFileClick
+      end
+      object MainMenu_Tools_N2: TMenuItem
+        Caption = '-'
+      end
+      object MainMenu_Tools_CreateTrigramFile: TMenuItem
+        Caption = 'Create Trigram File...'
+        ShortCut = 117
+        OnClick = MainMenu_Tools_CreateTrigramFileClick
+      end
+      object MainMenu_Tools_N3: TMenuItem
+        Caption = '-'
+      end
+      object MainMenu_Tools_MPPasswGen: TMenuItem
+        Caption = 'MP Password Generator...'
+        ShortCut = 119
+        OnClick = MPPasswGenBtnClick
+      end
+      object MainMenu_Tools_DetermRandGen: TMenuItem
+        Caption = 'Deterministic Random Generator'
+        object MainMenu_Tools_DetermRandGen_Setup: TMenuItem
+          Caption = 'Set up...'
+          ShortCut = 16503
+          OnClick = MainMenu_Tools_DetermRandGen_SetupClick
+        end
+        object MainMenu_Tools_DetermRandGen_Reset: TMenuItem
+          Caption = 'Reset'
+          Enabled = False
+          ShortCut = 16502
+          OnClick = MainMenu_Tools_DetermRandGen_ResetClick
+        end
+        object MainMenu_Tools_DetermRandGen_Deactivate: TMenuItem
+          Caption = 'Deactivate'
+          Enabled = False
+          ShortCut = 118
+          OnClick = MainMenu_Tools_DetermRandGen_DeactivateClick
+        end
+      end
+      object MainMenu_Tools_N4: TMenuItem
+        Caption = '-'
+      end
+      object MainMenu_Tools_ProvideAddEntropy: TMenuItem
+        Caption = 'Provide Additional Entropy'
+        object MainMenu_Tools_ProvideAddEntropy_AsText: TMenuItem
+          Caption = 'As Text...'
+          ShortCut = 120
+          OnClick = MainMenu_Tools_ProvideAddEntropy_AsTextClick
+        end
+        object MainMenu_Tools_ProvideAddEntropy_FromFile: TMenuItem
+          Caption = 'From File...'
+          ShortCut = 16504
+          OnClick = MainMenu_Tools_ProvideAddEntropy_FromFileClick
+        end
+      end
+    end
+    object MainMenu_Options: TMenuItem
+      Caption = 'Options'
+      OnClick = MainMenu_OptionsClick
+      object MainMenu_Options_Config: TMenuItem
+        Caption = 'Configuration...'
+        ShortCut = 122
+        OnClick = MainMenu_Options_ConfigClick
+      end
+      object MainMenu_Options_ClearPasswCache: TMenuItem
+        Caption = 'Clear Password Cache'
+        OnClick = MainMenu_Options_ClearPasswCacheClick
+      end
+      object MainMenu_Options_N1: TMenuItem
+        Caption = '-'
+      end
+      object MainMenu_Options_AlwaysOnTop: TMenuItem
+        AutoCheck = True
+        Caption = 'Always on Top'
+        OnClick = MainMenu_Options_AlwaysOnTopClick
+      end
+      object MainMenu_Options_HideEntProgress: TMenuItem
+        Caption = 'Hide Entropy Progress'
+        OnClick = MainMenu_Options_HideEntProgressClick
+      end
+      object MainMenu_Options_N2: TMenuItem
+        Caption = '-'
+      end
+      object MainMenu_Options_SaveSettingsOnExit: TMenuItem
+        AutoCheck = True
+        Caption = 'Save Settings on Exit'
+      end
+      object MainMenu_Options_SaveSettingsNow: TMenuItem
+        Caption = 'Save Settings Now'
+        OnClick = MainMenu_Options_SaveSettingsNowClick
+      end
+    end
+    object MainMenu_Help: TMenuItem
+      Caption = 'Help'
+      OnClick = MainMenu_HelpClick
+      object MainMenu_Help_OpenManual: TMenuItem
+        Caption = 'Open Manual'
+        ShortCut = 112
+        OnClick = HelpBtnClick
+      end
+      object MainMenu_Help_CmdLineArgs: TMenuItem
+        Caption = 'Command Line Arguments...'
+        OnClick = MainMenu_Help_CmdLineArgsClick
+      end
+      object MainMenu_Help_N1: TMenuItem
+        Caption = '-'
+      end
+      object MainMenu_Help_VisitWebsite: TMenuItem
+        Caption = 'Visit Website'
+        OnClick = MainMenu_Help_VisitWebsiteClick
+      end
+      object MainMenu_Help_GetTranslations: TMenuItem
+        Caption = 'Get Translations...'
+        OnClick = MainMenu_Help_GetTranslationsClick
+      end
+      object MainMenu_Help_Donate: TMenuItem
+        Caption = 'Donate...'
+        OnClick = MainMenu_Help_DonateClick
+      end
+      object MainMenu_Help_EnterDonorKey: TMenuItem
+        Caption = 'Enter Donor Key...'
+        OnClick = MainMenu_Help_EnterDonorKeyClick
+      end
+      object MainMenu_Help_N2: TMenuItem
+        Caption = '-'
+      end
+      object MainMenu_Help_CheckForUpdates: TMenuItem
+        Caption = 'Check for Updates'
+        OnClick = MainMenu_Help_CheckForUpdatesClick
+      end
+      object MainMenu_Help_N3: TMenuItem
+        Caption = '-'
+      end
+      object MainMenu_Help_TotalEntBits: TMenuItem
+        Caption = 'Total Entropy Bits:'
+      end
+      object MainMenu_Help_TimerInfo: TMenuItem
+        Caption = 'Timer Info...'
+        OnClick = MainMenu_Help_TimerInfoClick
+      end
+      object MainMenu_Help_N4: TMenuItem
+        Caption = '-'
+      end
+      object MainMenu_Help_About: TMenuItem
+        OnClick = MainMenu_Help_AboutClick
+      end
+    end
+  end
+  object PasswBoxMenu: TPopupMenu
+    OnPopup = PasswBoxMenuPopup
+    Left = 32
+    Top = 436
+    object PasswBoxMenu_Undo: TMenuItem
+      Caption = 'Undo'
+      ShortCut = 16474
+      OnClick = PasswBoxMenu_UndoClick
+    end
+    object PasswBoxMenu_N1: TMenuItem
+      Caption = '-'
+    end
+    object PasswBoxMenu_Cut: TMenuItem
+      Caption = 'Cut'
+      ShortCut = 16472
+      OnClick = PasswBoxMenu_CutClick
+    end
+    object PasswBoxMenu_Copy: TMenuItem
+      Caption = 'Copy'
+      ShortCut = 16451
+      OnClick = PasswBoxMenu_CopyClick
+    end
+    object PasswBoxMenu_EncryptCopy: TMenuItem
+      Caption = 'Encrypt && Copy'
+      ShortCut = 16453
+      OnClick = PasswBoxMenu_EncryptCopyClick
+    end
+    object PasswBoxMenu_Paste: TMenuItem
+      Caption = 'Paste'
+      ShortCut = 16470
+      OnClick = PasswBoxMenu_PasteClick
+    end
+    object PasswBoxMenu_PerformAutotype: TMenuItem
+      Caption = 'Perform Autotype'
+      ShortCut = 16468
+      OnClick = PasswBoxMenu_PerformAutotypeClick
+    end
+    object PasswBoxMenu_AddToDb: TMenuItem
+      Caption = 'Add to Database'
+      OnClick = PasswBoxMenu_AddToDbClick
+    end
+    object PasswBoxMenu_Delete: TMenuItem
+      Caption = 'Delete'
+      OnClick = PasswBoxMenu_DeleteClick
+    end
+    object PasswBoxMenu_N2: TMenuItem
+      Caption = '-'
+    end
+    object PasswBoxMenu_SelectAll: TMenuItem
+      Caption = 'Select All'
+      ShortCut = 16449
+      OnClick = PasswBoxMenu_SelectAllClick
+    end
+    object PasswBoxMenu_N3: TMenuItem
+      Caption = '-'
+    end
+    object PasswBoxMenu_SaveAsFile: TMenuItem
+      Caption = 'Save As File...'
+      ShortCut = 24659
+      OnClick = PasswBoxMenu_SaveAsFileClick
+    end
+    object PasswBoxMenu_N4: TMenuItem
+      Caption = '-'
+    end
+    object PasswBoxMenu_Editable: TMenuItem
+      AutoCheck = True
+      Caption = 'Editable'
+      OnClick = PasswBoxMenu_EditableClick
+    end
+    object PasswBoxMenu_EnablePasswTest: TMenuItem
+      AutoCheck = True
+      Caption = 'Enable Password Testing'
+    end
+    object PasswBoxMenu_N5: TMenuItem
+      Caption = '-'
+    end
+    object PasswBoxMenu_ChangeFont: TMenuItem
+      Caption = 'Change Font...'
+      OnClick = PasswBoxMenu_ChangeFontClick
+    end
+    object PasswBoxMenu_ResetFont: TMenuItem
+      Caption = 'Reset Font'
+      OnClick = PasswBoxMenu_ResetFontClick
+    end
+  end
+  object FontDlg: TFontDialog
+    Font.Charset = DEFAULT_CHARSET
+    Font.Color = clWindowText
+    Font.Height = -11
+    Font.Name = 'Tahoma'
+    Font.Style = []
+    Left = 312
+    Top = 104
+  end
+  object TrayIcon: TTrayIcon
+    BalloonTimeout = 5000
+    PopupMenu = TrayMenu
+    OnDblClick = TrayIconDblClick
+    Left = 104
+    Top = 8
+  end
+  object ImageCollection32: TImageCollection
+    Images = <collection, 7 items>
+      item
+        Name = 'question'
+        SourceImages = <collection, 1 items>
+          item
+            Image.Data = {binary, 14507 bytes}
+      item
+        Name = '002-repair-tools'
+        SourceImages = <collection, 1 items>
+          item
+            Image.Data = {binary, 40205 bytes}
+      item
+        Name = 'eraser'
+        SourceImages = <collection, 1 items>
+          item
+            Image.Data = {binary, 12067 bytes}
+      item
+        Name = '007-encrypted-data'
+        SourceImages = <collection, 1 items>
+          item
+            Image.Data = {binary, 13891 bytes}
+      item
+        Name = 'edit'
+        SourceImages = <collection, 1 items>
+          item
+            Image.Data = {binary, 14505 bytes}
+      item
+        Name = 'password'
+        SourceImages = <collection, 1 items>
+          item
+            Image.Data = {binary, 8588 bytes}
+      item
+        Name = 'database-lock-icon'
+        SourceImages = <collection, 1 items>
+          item
+            Image.Data = {binary, 12808 bytes}
+    Left = 200
+    Top = 125
+  end
+  object ImageList32: TVirtualImageList
+    AutoFill = True
+    Images = <collection, 7 items>
+      item
+        CollectionIndex = 0
+        CollectionName = 'question'
+        Name = 'question'
+      item
+        CollectionIndex = 1
+        CollectionName = '002-repair-tools'
+        Name = '002-repair-tools'
+      item
+        CollectionIndex = 2
+        CollectionName = 'eraser'
+        Name = 'eraser'
+      item
+        CollectionIndex = 3
+        CollectionName = '007-encrypted-data'
+        Name = '007-encrypted-data'
+      item
+        CollectionIndex = 4
+        CollectionName = 'edit'
+        Name = 'edit'
+      item
+        CollectionIndex = 5
+        CollectionName = 'password'
+        Name = 'password'
+      item
+        CollectionIndex = 6
+        CollectionName = 'database-lock-icon'
+        Name = 'database-lock-icon'
+    ImageCollection = ImageCollection32
+    Width = 40
+    Height = 40
+    Left = 160
+    Top = 125
+  end
+  object ImageCollection16: TImageCollection
+    Images = <collection, 9 items>
+      item
+        Name = 'reload'
+        SourceImages = <collection, 1 items>
+          item
+            Image.Data = {binary, 20440 bytes}
+      item
+        Name = 'plus'
+        SourceImages = <collection, 1 items>
+          item
+            Image.Data = {binary, 15271 bytes}
+      item
+        Name = 'info'
+        SourceImages = <collection, 1 items>
+          item
+            Image.Data = {binary, 14497 bytes}
+      item
+        Name = 'search'
+        SourceImages = <collection, 1 items>
+          item
+            Image.Data = {binary, 27770 bytes}
+      item
+        Name = 'floppy-disk'
+        SourceImages = <collection, 1 items>
+          item
+            Image.Data = {binary, 9182 bytes}
+      item
+        Name = 'question2'
+        SourceImages = <collection, 1 items>
+          item
+            Image.Data = {binary, 12349 bytes}
+      item
+        Name = '007-folder'
+        SourceImages = <collection, 1 items>
+          item
+            Image.Data = {binary, 19141 bytes}
+      item
+        Name = 'up'
+        SourceImages = <collection, 1 items>
+          item
+            Image.Data = {binary, 17381 bytes}
+      item
+        Name = 'down'
+        SourceImages = <collection, 1 items>
+          item
+            Image.Data = {binary, 17341 bytes}
+    Left = 224
+    Top = 102
+  end
+  object ImageList16: TVirtualImageList
+    AutoFill = True
+    Images = <collection, 9 items>
+      item
+        CollectionIndex = 0
+        CollectionName = 'reload'
+        Name = 'reload'
+      item
+        CollectionIndex = 1
+        CollectionName = 'plus'
+        Name = 'plus'
+      item
+        CollectionIndex = 2
+        CollectionName = 'info'
+        Name = 'info'
+      item
+        CollectionIndex = 3
+        CollectionName = 'search'
+        Name = 'search'
+      item
+        CollectionIndex = 4
+        CollectionName = 'floppy-disk'
+        Name = 'floppy-disk'
+      item
+        CollectionIndex = 5
+        CollectionName = 'question2'
+        Name = 'question2'
+      item
+        CollectionIndex = 6
+        CollectionName = '007-folder'
+        Name = '007-folder'
+      item
+        CollectionIndex = 7
+        CollectionName = 'up'
+        Name = 'up'
+      item
+        CollectionIndex = 8
+        CollectionName = 'down'
+        Name = 'down'
+    ImageCollection = ImageCollection16
+    Width = 20
+    Height = 20
+    Left = 240
+    Top = 128
+  end
+  object AdvancedOptionsMenu: TPopupMenu
+    Left = 190
+    Top = 540
+    object AdvancedOptionsMenu_DeactivateAll: TMenuItem
+      Caption = 'Deactivate All Options'
+      OnClick = AdvancedOptionsMenu_DeactivateAllClick
+    end
+    object AdvancedOptionsMenu_DeactivateAllStarred: TMenuItem
+      Caption = 'Deactivate All Starred (*) Options'
+      OnClick = AdvancedOptionsMenu_DeactivateAllStarredClick
+    end
+  end
+  object GenerateMenu: TPopupMenu
+    Left = 247
+    Top = 431
+    object GenerateMenu_Clipboard: TMenuItem
+      Caption = 'Generate to Clipboard'
+      OnClick = GenerateBtnClick
+    end
+    object GenerateMenu_File: TMenuItem
+      Caption = 'Generate to File...'
+      OnClick = GenerateBtnClick
+    end
+    object GenerateMenu_N1: TMenuItem
+      Caption = '-'
+    end
+    object GenerateMenu_IncludeHeader: TMenuItem
+      AutoCheck = True
+      Caption = 'Include Header'
+    end
+  end
+  object OpenFolderDlg: TFileOpenDialog
+    FavoriteLinks = <collection, 0 items>
+    FileTypes = <collection, 0 items>
+    Options = [fdoPickFolders]
+    Left = 540
+    Top = 80
+  end
+  object NetHTTPClient: TNetHTTPClient
+    ConnectionTimeout = 5000
+    SendTimeout = 5000
+    ResponseTimeout = 5000
+    AllowCookies = False
+    UserAgent = 'Embarcadero URI Client/1.0'
+    Left = 550
+    Top = 65
+  end
+end
