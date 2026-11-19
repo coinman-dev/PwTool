@@ -1,5 +1,6 @@
 //! GTK 4 user interface.
 
+pub mod autotype;
 pub mod builder;
 pub mod clipboard;
 pub mod dialogs;

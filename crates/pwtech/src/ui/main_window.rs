@@ -652,6 +652,7 @@ impl MainWindow {
         self.act("MainMenu_Tools_DetermRandGen_Deactivate", |w| w.deactivate_det_rand_gen());
         self.act("TrayMenu_GenPassw", |w| w.generate_passw(GenDest::Clipboard));
         self.act("TrayMenu_GenAndShowPassw", |w| w.generate_passw(GenDest::MsgBox));
+        self.act("TrayMenu_GenAndAutoTypePassw", |w| w.generate_passw(GenDest::Autotype));
     }
 
     fn on_combo_leave(self: &Rc<Self>, name: &str, f: impl Fn(&Rc<Self>) + 'static) {
@@ -1564,6 +1565,12 @@ impl MainWindow {
                 }
                 GenDest::Clipboard => {
                     super::clipboard::set_data(&out.single);
+                }
+                GenDest::Autotype => {
+                    let delay = self.core.borrow().config.autotype_delay.clamp(0, 10000) as u32;
+                    let mut strokes = Vec::new();
+                    super::autotype::string_sequence(&out.single, delay, &mut strokes);
+                    self.send_keys(&win, strokes, false);
                 }
                 GenDest::MsgBox => {
                     let len = out.single.chars().count();
