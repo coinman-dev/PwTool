@@ -11,15 +11,26 @@ use crate::unicode::format_w;
 
 static TRANSLATIONS: RwLock<Option<HashMap<String, String>>> = RwLock::new(None);
 static IS_LNG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static TRANSLATOR: RwLock<String> = RwLock::new(String::new());
+
+/// Name of the translator of the active language file.
+pub fn translator_name() -> Option<String> {
+    let t = TRANSLATOR.read().unwrap();
+    if t.is_empty() { None } else { Some(t.clone()) }
+}
 
 /// Install a loaded translation file.
 pub fn set_language(lf: Option<crate::language_file::LanguageFile>) {
     match lf {
         Some(lf) => {
+            *TRANSLATOR.write().unwrap() = lf.translator.clone();
             IS_LNG.store(lf.format == crate::language_file::LanguageFormat::Lng, std::sync::atomic::Ordering::Relaxed);
             set_translations(Some(lf.into_map()));
         }
-        None => set_translations(None),
+        None => {
+            TRANSLATOR.write().unwrap().clear();
+            set_translations(None)
+        }
     }
 }
 

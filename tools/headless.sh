@@ -3,12 +3,18 @@
 # own D-Bus session and runtime directory, so that windows do not appear on
 # the user's desktop. Used for automatic screenshots of the GUI.
 #
+# Everything runs in its own process group; services started through D-Bus
+# activation inside the session are killed together with it at the end
+# (otherwise they keep the output open and the script never returns).
+#
 # Usage: tools/headless.sh <command> [args...]
 set -u
 RT=$(mktemp -d /tmp/pwtech-rt.XXXXXX)
 chmod 700 "$RT"
 export XDG_RUNTIME_DIR="$RT"
-timeout -k 5 120 dbus-run-session -- bash -c '
+LOG="$RT/output.log"
+setsid timeout -k 5 120 dbus-run-session -- bash -c '
+  exec </dev/null
   kwin_wayland --virtual --socket pwtest --width 1400 --height 1100 \
     --no-lockscreen --no-global-shortcuts --no-kactivities >"$XDG_RUNTIME_DIR/kwin.log" 2>&1 &
   KW=$!
@@ -19,7 +25,18 @@ timeout -k 5 120 dbus-run-session -- bash -c '
   RC=$?
   kill $KW 2>/dev/null; sleep 0.5; kill -9 $KW 2>/dev/null
   exit $RC
-' -- "$@" 2>&1 | grep -v "^dbus-daemon\|^$"
-RC=${PIPESTATUS[0]}
+' -- "$@" >"$LOG" 2>&1 &
+PID=$!
+wait $PID
+RC=$?
+# kill what is left in the process group (D-Bus activated services)
+kill -TERM -- -$PID 2>/dev/null
+sleep 0.3
+kill -KILL -- -$PID 2>/dev/null
+grep -v "^dbus-daemon\|^$\|^qt\.qpa\." "$LOG"
+# the document portal leaves its FUSE mount behind
+if [ -e "$RT/doc" ] || grep -q " $RT/doc " /proc/mounts; then
+  fusermount3 -uz "$RT/doc" 2>/dev/null || fusermount -uz "$RT/doc" 2>/dev/null
+fi
 rm -rf "$RT"
 exit $RC

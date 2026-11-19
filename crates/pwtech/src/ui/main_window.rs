@@ -36,6 +36,9 @@ use super::util::{MsgButtons, MsgIcon, MsgResult, combo_entry, combo_text, msg, 
 use crate::app::AppCore;
 use crate::program::*;
 
+#[path = "main_tools.rs"]
+mod tools;
+
 const ENTROPY_SYSTEM: u32 = 24;
 const ENTROPY_MOUSECLICK: u32 = 2;
 const ENTROPY_MOUSEMOVE: u32 = 2;
@@ -107,6 +110,7 @@ pub struct MainWindow {
     format_passw_help: String,
     default_title: String,
     mouse_move_cnt: Cell<i32>,
+    tools: tools::ToolsState,
 }
 
 impl MainWindow {
@@ -157,6 +161,7 @@ impl MainWindow {
             format_passw_help,
             default_title: PROGRAM_NAME.to_string(),
             mouse_move_cnt: Cell::new(60),
+            tools: tools::ToolsState::new(),
         });
         w.setup();
         w
@@ -257,6 +262,7 @@ impl MainWindow {
 
         self.load_config_to_controls();
         self.connect_events();
+        self.connect_tools();
         self.setup_timer();
         self.setup_entropy_events();
         self.update_entropy_progress(true);
@@ -361,8 +367,9 @@ impl MainWindow {
         let core = self.core.borrow();
         let names: Vec<String> = core.profiles.iter().map(|p| p.profile_name.clone()).collect();
         set_combo_items(&self.combo("ProfileList"), &names);
+        drop(core);
         // File | Profile menu: profiles with Alt+Shift+0..Z, then editor
-        let _ = names;
+        self.update_profile_menu();
     }
 
     /// `IncludeCharsCheckClick()`: enable dependent controls.
@@ -569,10 +576,6 @@ impl MainWindow {
         });
         self.act("PasswBoxMenu_Undo", |_| {});
         self.act("PasswBoxMenu_SaveAsFile", |w| w.passw_box_save_as_file());
-        self.act("EntropyProgressMenu_ResetCounters", |w| {
-            EntropyManager::global().reset_counters();
-            w.update_entropy_progress(true);
-        });
         self.act("MainMenu_Tools_ProvideAddEntropy_FromFile", |w| w.add_entropy_from_file());
         self.act("MainMenu_Tools_DetermRandGen_Reset", |w| {
             if let Some(g) = w.key_seeded_prng.borrow_mut().as_mut() {
@@ -1531,6 +1534,13 @@ impl MainWindow {
     }
 
     fn setup_entropy_events(self: &Rc<Self>) {
+        let win = self.window.clone();
+        self.attach_entropy_events(&win);
+    }
+
+    /// Collect entropy from keyboard and mouse events of a window (the
+    /// original does this application-wide in `AppMessage()`).
+    pub fn attach_entropy_events(self: &Rc<Self>, window: &impl IsA<gtk::Widget>) {
         let key = gtk::EventControllerKey::new();
         key.set_propagation_phase(gtk::PropagationPhase::Capture);
         let w = Rc::downgrade(self);
@@ -1545,7 +1555,7 @@ impl MainWindow {
             }
             glib::Propagation::Proceed
         });
-        self.window.add_controller(key);
+        window.add_controller(key);
         let click = gtk::GestureClick::new();
         click.set_button(0);
         click.set_propagation_phase(gtk::PropagationPhase::Capture);
@@ -1559,7 +1569,7 @@ impl MainWindow {
                 }
             }
         });
-        self.window.add_controller(click);
+        window.add_controller(click);
         let motion = gtk::EventControllerMotion::new();
         let w = Rc::downgrade(self);
         motion.connect_motion(move |_, x, y| {
@@ -1577,7 +1587,7 @@ impl MainWindow {
                 }
             }
         });
-        self.window.add_controller(motion);
+        window.add_controller(motion);
     }
 
     /// `TimerTick()` (every second).
@@ -1608,6 +1618,7 @@ impl MainWindow {
                 c[3] = 0;
             }
             w.timer_cnt.set(c);
+            w.tools_timer();
             let n = w.auto_clear_clip_cnt.get();
             if n > 0 {
                 w.auto_clear_clip_cnt.set(n - 1);
@@ -1691,9 +1702,15 @@ impl MainWindow {
     // ----------------------------------------------------------------------
     // configuration
 
-    /// `SaveConfig()` (main window part).
+    /// `SaveConfig()`.
     pub fn save_config(&self) -> bool {
+        self.save_config_to(None)
+    }
+
+    /// `SaveConfig(sFileName)`: `path` = backup file.
+    pub fn save_config_to(&self, path: Option<&std::path::Path>) -> bool {
         self.sync_settings();
+        self.save_tools_config();
         let mut core = self.core.borrow_mut();
         let ini = &mut core.ini;
         ini.write_integer("Main", "WindowWidth", self.window.width() as i64);
@@ -1704,7 +1721,7 @@ impl MainWindow {
         ini.write_bool("Main", "SaveSettingsOnExit", self.action_checked("MainMenu_Options_SaveSettingsOnExit"));
         ini.write_bool("Main", "PasswEditable", self.action_checked("PasswBoxMenu_Editable"));
         ini.write_bool("Main", "EnablePasswTest", self.action_checked("PasswBoxMenu_EnablePasswTest"));
-        match core.save_config() {
+        match core.save_config_to(path) {
             Ok(()) => true,
             Err(e) => {
                 drop(core);

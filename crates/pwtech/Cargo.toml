@@ -7,6 +7,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+libc = "0.2"
 pwtech-core = { path = "../pwtech-core" }
 zeroize = "1.9"
 gtk4 = { version = "0.11", features = ["v4_10"] }

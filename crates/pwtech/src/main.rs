@@ -12,5 +12,13 @@ fn main() {
     if cmd.gen_num_passw > 0 || cmd.show_help {
         std::process::exit(cli::run(cmd));
     }
-    std::process::exit(ui::run(cmd));
+    let rc = ui::run(cmd);
+    if app::restart_requested() {
+        use std::os::unix::process::CommandExt;
+        if let Ok(exe) = std::env::current_exe() {
+            let err = std::process::Command::new(exe).args(std::env::args_os().skip(1)).exec();
+            eprintln!("pwtech: restart failed: {err}");
+        }
+    }
+    std::process::exit(rc);
 }

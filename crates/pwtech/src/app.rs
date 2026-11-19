@@ -427,7 +427,13 @@ impl AppCore {
 
     /// Save the configuration (generator part; the GUI adds its own keys).
     pub fn save_config(&mut self) -> std::io::Result<()> {
-        if self.cmd.config_readonly || self.fake_ini {
+        self.save_config_to(None)
+    }
+
+    /// `SaveConfig(sFileName)`: save to the configuration file, or to
+    /// `path` (backup; also when the configuration is read-only).
+    pub fn save_config_to(&mut self, path: Option<&Path>) -> std::io::Result<()> {
+        if path.is_none() && (self.cmd.config_readonly || self.fake_ini) {
             return Ok(());
         }
         self.ini.write_string(CONFIG_ID, "LastVersion", PROGRAM_VERSION);
@@ -443,8 +449,13 @@ impl AppCore {
             self.ini.erase_section(&s);
         }
         save_profiles(&mut self.ini, &self.profiles);
-        std::fs::create_dir_all(&self.paths.data_dir)?;
-        self.ini.save(&self.paths.ini_file)
+        match path {
+            Some(p) => self.ini.save(p),
+            None => {
+                std::fs::create_dir_all(&self.paths.data_dir)?;
+                self.ini.save(&self.paths.ini_file)
+            }
+        }
     }
 
     /// `LoadCharSet()`: returns the size of the set (0 = invalid).
@@ -627,4 +638,16 @@ pub fn compare_versions(a: &str, b: &str) -> i32 {
         }
     }
     0
+}
+
+static RESTART: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Request a restart of the program after the main window has been closed
+/// (`g_terminateAction = TerminateAction::RestartProgram`).
+pub fn request_restart() {
+    RESTART.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn restart_requested() -> bool {
+    RESTART.load(std::sync::atomic::Ordering::Relaxed)
 }

@@ -53,6 +53,19 @@ pub fn set_data(text: &str) {
     });
 }
 
+/// Put sensitive text on the clipboard with the password-manager hint, but
+/// without automatic clearing (decrypted text: the original uses the plain
+/// clipboard here).
+pub fn set_hidden(text: &str) {
+    let Some(cb) = clipboard() else { return };
+    let providers = [
+        gdk::ContentProvider::for_bytes("text/plain;charset=utf-8", &glib::Bytes::from(text.as_bytes())),
+        gdk::ContentProvider::for_value(&text.to_value()),
+        gdk::ContentProvider::for_bytes("x-kde-passwordManagerHint", &glib::Bytes::from_static(b"secret")),
+    ];
+    let _ = cb.set_content(Some(&gdk::ContentProvider::new_union(&providers)));
+}
+
 /// Put ordinary (non-sensitive) text on the clipboard.
 pub fn set_plain(text: &str) {
     if let Some(cb) = clipboard() {

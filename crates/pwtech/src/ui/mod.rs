@@ -74,12 +74,14 @@ fn automate(w: Rc<main_window::MainWindow>, script: String) {
             let (cmd, rest) = c.split_once(' ').unwrap_or((c.as_str(), ""));
             match cmd {
                 "click" => {
-                    if let Some(b) = w.b.try_get::<gtk::Button>(rest) {
+                    if let Some(b) = find_widget(&w, rest).and_then(|x| x.downcast::<gtk::Button>().ok()) {
                         b.emit_clicked();
+                    } else {
+                        eprintln!("automate: no button {rest}");
                     }
                 }
                 "toggle" => {
-                    if let Some(b) = w.b.try_get::<gtk::CheckButton>(rest) {
+                    if let Some(b) = find_widget(&w, rest).and_then(|x| x.downcast::<gtk::CheckButton>().ok()) {
                         b.set_active(!b.is_active());
                     }
                 }
@@ -88,10 +90,29 @@ fn automate(w: Rc<main_window::MainWindow>, script: String) {
                 }
                 "text" => {
                     let (name, val) = rest.split_once(' ').unwrap_or((rest, ""));
-                    if let Some(e) = w.b.try_get::<gtk::Entry>(name) {
-                        e.set_text(val);
-                    } else if let Some(cb) = w.b.try_get::<gtk::ComboBoxText>(name) {
-                        util::set_combo_text(&cb, val);
+                    match find_widget(&w, name) {
+                        Some(x) => {
+                            if let Some(e) = x.downcast_ref::<gtk::Entry>() {
+                                e.set_text(val);
+                            } else if let Some(cb) = x.downcast_ref::<gtk::ComboBoxText>() {
+                                util::set_combo_text(cb, val);
+                            } else if let Some(tv) = x.downcast_ref::<gtk::TextView>() {
+                                tv.buffer().set_text(val);
+                            }
+                        }
+                        None => eprintln!("automate: no widget {name}"),
+                    }
+                }
+                "clip" => {
+                    clipboard::set_plain(rest);
+                }
+                "printclip" => {
+                    let (tx, rx) = async_channel::bounded(1);
+                    clipboard::read_text(move |t| {
+                        let _ = tx.try_send(t.map(|t| t.to_string()).unwrap_or_default());
+                    });
+                    if let Ok(t) = rx.recv().await {
+                        println!("clipboard={t}");
                     }
                 }
                 "wait" => {
@@ -112,11 +133,26 @@ fn automate(w: Rc<main_window::MainWindow>, script: String) {
                         }
                     }
                 }
-                "print" => {
-                    if let Some(l) = w.b.try_get::<gtk::Label>(rest) {
-                        println!("{rest}={}", l.text());
-                    } else if let Some(e) = w.b.try_get::<gtk::Entry>(rest) {
-                        println!("{rest}={}", e.text());
+                "print" => match find_widget(&w, rest) {
+                    Some(x) => {
+                        if let Some(l) = x.downcast_ref::<gtk::Label>() {
+                            println!("{rest}={}", l.text());
+                        } else if let Some(e) = x.downcast_ref::<gtk::Entry>() {
+                            println!("{rest}={}", e.text());
+                        } else if let Some(tv) = x.downcast_ref::<gtk::TextView>() {
+                            let b = tv.buffer();
+                            println!("{rest}={}", b.text(&b.start_iter(), &b.end_iter(), false));
+                        }
+                    }
+                    None => eprintln!("automate: no widget {rest}"),
+                },
+                "windows" => {
+                    for win in gtk::Window::list_toplevels() {
+                        if let Ok(win) = win.downcast::<gtk::Window>() {
+                            if win.is_visible() {
+                                println!("window: {} (active: {})", win.title().unwrap_or_default(), win.is_active());
+                            }
+                        }
                     }
                 }
                 "quit" => {
@@ -129,4 +165,34 @@ fn automate(w: Rc<main_window::MainWindow>, script: String) {
             glib::timeout_future(std::time::Duration::from_millis(150)).await;
         }
     });
+}
+
+/// Find a widget by name (`TComponent.Name`): first in the active window,
+/// then in the other visible windows, finally in the main window's form.
+fn find_widget(w: &main_window::MainWindow, name: &str) -> Option<gtk::Widget> {
+    fn search(root: &gtk::Widget, name: &str) -> Option<gtk::Widget> {
+        if root.widget_name() == name {
+            return Some(root.clone());
+        }
+        let mut c = root.first_child();
+        while let Some(ch) = c {
+            if let Some(f) = search(&ch, name) {
+                return Some(f);
+            }
+            c = ch.next_sibling();
+        }
+        None
+    }
+    let mut wins: Vec<gtk::Window> = gtk::Window::list_toplevels()
+        .into_iter()
+        .filter_map(|x| x.downcast::<gtk::Window>().ok())
+        .filter(|x| x.is_visible())
+        .collect();
+    wins.sort_by_key(|x| !x.is_active());
+    for win in wins {
+        if let Some(f) = search(win.upcast_ref(), name) {
+            return Some(f);
+        }
+    }
+    w.b.widgets.get(name).cloned()
 }

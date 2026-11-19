@@ -107,6 +107,10 @@ pub struct Built {
     pub image_lists: HashMap<String, Vec<Option<gdk::Texture>>>,
     /// Up-down buttons with their associated edit (`TUpDown.Associate`).
     pub updowns: HashMap<String, Rc<UpDown>>,
+    /// Submenu models of menu items with children (item name → menu).
+    pub submenus: HashMap<String, gio::Menu>,
+    /// Position of every menu item: (section menu, index, item).
+    pub menu_items: RefCell<HashMap<String, (gio::Menu, i32, gio::MenuItem)>>,
 }
 
 impl Built {
@@ -142,6 +146,15 @@ impl Built {
             na.set_enabled(enabled);
             self.actions.add_action(&na);
         }
+    }
+
+    /// Change the caption of a menu item (`TMenuItem.Caption = ...`).
+    pub fn set_menu_label(&self, name: &str, label: &str) {
+        let items = self.menu_items.borrow();
+        let Some((section, idx, item)) = items.get(name) else { return };
+        item.set_label(Some(label));
+        section.remove(*idx);
+        section.insert_item(*idx, item);
     }
 
     pub fn has_action(&self, name: &str) -> bool {
@@ -431,6 +444,7 @@ fn create(o: &FormObj, ctx: &mut Ctx, form_name: &str) -> Option<gtk::Widget> {
             let sw = gtk::ScrolledWindow::new();
             sw.set_child(Some(&tv));
             sw.set_has_frame(true);
+            tv.set_widget_name(&format!("{}.view", o.name));
             ctx.widgets.insert(format!("{}.view", o.name), tv.upcast());
             sw.upcast()
         }
@@ -763,7 +777,18 @@ pub fn shortcut_to_accel(code: i64) -> Option<String> {
     Some(s)
 }
 
-fn build_menu(items: &[FormObj], actions: &gio::SimpleActionGroup, accels: &mut Vec<(String, String)>) -> gio::Menu {
+#[derive(Default)]
+struct MenuMaps {
+    submenus: HashMap<String, gio::Menu>,
+    items: HashMap<String, (gio::Menu, i32, gio::MenuItem)>,
+}
+
+fn build_menu(
+    items: &[FormObj],
+    actions: &gio::SimpleActionGroup,
+    accels: &mut Vec<(String, String)>,
+    maps: &mut MenuMaps,
+) -> gio::Menu {
     let menu = gio::Menu::new();
     let mut section = gio::Menu::new();
     for it in items.iter().filter(|c| c.class == "TMenuItem") {
@@ -794,15 +819,18 @@ fn build_menu(items: &[FormObj], actions: &gio::SimpleActionGroup, accels: &mut 
         }
         let has_sub = it.children.iter().any(|c| c.class == "TMenuItem");
         if has_sub {
-            let sub = build_menu(&it.children, actions, accels);
+            let sub = build_menu(&it.children, actions, accels, maps);
             let mi = gio::MenuItem::new_submenu(Some(&label), &sub);
             mi.set_attribute_value("pwtech-name", Some(&it.name.to_variant()));
+            maps.items.insert(it.name.clone(), (section.clone(), section.n_items(), mi.clone()));
             section.append_item(&mi);
+            maps.submenus.insert(it.name.clone(), sub);
         } else {
             let mi = gio::MenuItem::new(Some(&label), Some(&format!("m.{}", it.name)));
             if !it.bool_or("Visible", true) {
                 mi.set_attribute_value("hidden-when", Some(&"action-missing".to_variant()));
             }
+            maps.items.insert(it.name.clone(), (section.clone(), section.n_items(), mi.clone()));
             section.append_item(&mi);
         }
     }
@@ -890,9 +918,10 @@ pub fn build_form(form: FormObj, form_name: &str) -> Built {
     let actions = gio::SimpleActionGroup::new();
     let mut accels = Vec::new();
     let mut menus = HashMap::new();
+    let mut maps = MenuMaps::default();
     for c in collect_all(&form) {
         if c.class == "TMainMenu" || c.class == "TPopupMenu" {
-            let m = build_menu(&c.children, &actions, &mut accels);
+            let m = build_menu(&c.children, &actions, &mut accels, &mut maps);
             menus.insert(c.name.clone(), m);
         }
     }
@@ -911,6 +940,8 @@ pub fn build_form(form: FormObj, form_name: &str) -> Built {
         accels,
         image_lists: ctx.image_lists,
         updowns: ctx.updowns,
+        submenus: maps.submenus,
+        menu_items: RefCell::new(maps.items),
         form,
     }
 }
