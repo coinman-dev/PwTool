@@ -260,7 +260,8 @@ pub struct GenRequest {
 /// Hook for a Lua script (`TScriptingThread::CallGenerate`): receives the
 /// password number (1-based), the password generated so far and its entropy;
 /// returns the script's password and entropy.
-pub type ScriptHook<'a> = dyn FnMut(u64, Option<&str>, f64) -> Result<(Zeroizing<String>, f64), String> + 'a;
+pub type ScriptHook<'a> =
+    dyn FnMut(&mut dyn RandomGenerator, u64, Option<&str>, f64) -> Result<(Zeroizing<String>, f64), String> + 'a;
 
 /// One generated password as passed to the output.
 pub struct GeneratedPassword<'a> {
@@ -584,7 +585,7 @@ pub fn generate(
         let mut passw_len_wchars = utf16_len(&passw);
 
         if let Some((hook, _)) = script.as_mut() {
-            let (res, sec) = hook(count + 1, if has_passw { Some(&passw) } else { None }, passw_sec)?;
+            let (res, sec) = hook(rng, count + 1, if has_passw { Some(&passw) } else { None }, passw_sec)?;
             if !res.is_empty() {
                 let mut s = Zeroizing::new(String::new());
                 let mut n = 0;

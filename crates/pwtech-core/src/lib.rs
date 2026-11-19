@@ -17,6 +17,7 @@ pub mod lzo;
 pub mod mp_passw_gen;
 pub mod passw;
 pub mod random;
+pub mod scripting;
 pub mod secure_mem;
 pub mod text_file;
 pub mod unicode;

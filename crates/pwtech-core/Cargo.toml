@@ -19,6 +19,7 @@ encoding_rs = "0.8"
 
 libc = "0.2"
 thiserror = "2"
+mlua = { version = "0.12", features = ["lua55", "vendored", "send"] }
 
 [dev-dependencies]
 hex = "0.4"
