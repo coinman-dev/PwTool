@@ -5,6 +5,7 @@
 //! taken from RustCrypto crates; everything with original-specific behaviour
 //! (ChaCha variant, CBC chaining state, PBKDF2 with cancel flag) is ported.
 
+pub mod base64;
 pub mod chacha;
 
 use std::sync::atomic::{AtomicBool, Ordering};

@@ -128,6 +128,23 @@ pub fn encode_text(text: &str, enc: CharEncoding) -> Zeroizing<Vec<u8>> {
     })
 }
 
+/// Encode text in the ANSI code page, replacing unmappable characters with
+/// `?` (`WideCharToMultiByte(CP_ACP, 0, …)` without a default char).
+pub fn ansi_encode_lossy(text: &str) -> Zeroizing<Vec<u8>> {
+    let enc = ansi_encoding();
+    let mut out = Zeroizing::new(Vec::with_capacity(text.len()));
+    let mut buf = [0u8; 4];
+    for c in text.chars() {
+        let (bytes, _, had_errors) = enc.encode(c.encode_utf8(&mut buf));
+        if had_errors {
+            out.push(b'?');
+        } else {
+            out.extend_from_slice(&bytes);
+        }
+    }
+    out
+}
+
 /// BOM written for an encoding (`TStringFileStreamW` with
 /// `blWriteOrAutodetectBOM`); none for ANSI.
 pub fn bom(enc: CharEncoding) -> &'static [u8] {
