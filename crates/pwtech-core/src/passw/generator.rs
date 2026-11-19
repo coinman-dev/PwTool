@@ -234,7 +234,7 @@ fn log_factorial(n: i32) -> f64 {
     }
     let two_pi = 2.0 * (-1.0f64).acos();
     let d = n as f64;
-    d * d.ln() - d + 0.5 * (two_pi * d).ln() + 1.0 / (12.0 * d)
+    d * crate::math::dinkum_log(d) - d + 0.5 * crate::math::dinkum_log(two_pi * d) + 1.0 / (12.0 * d)
 }
 
 /// The password generator.
@@ -287,7 +287,7 @@ impl PasswordGenerator {
             word_char_sep: Vec::new(),
             word_list: Vec::new(),
             word_list_size: WORDLIST_DEFAULT_SIZE,
-            word_list_entropy: (WORDLIST_DEFAULT_SIZE as f64).log2(),
+            word_list_entropy: crate::math::delphi_log2(WORDLIST_DEFAULT_SIZE as f64),
             ambig_char_set: Vec::new(),
             ambig_groups: Vec::new(),
             phonetic_sigma: PHONETIC_SIGMA,
@@ -641,11 +641,11 @@ impl PasswordGenerator {
             self.custom_char_set_freq = freq;
             match ty {
                 CharSetType::Standard => {
-                    self.custom_char_set_entropy = (self.custom_char_set.len() as f64).log2();
+                    self.custom_char_set_entropy = crate::math::delphi_log2(self.custom_char_set.len() as f64);
                     self.custom_char_set_unique_size = self.custom_char_set.len() as i32;
                 }
                 CharSetType::StandardWithFreq => {
-                    self.custom_char_set_entropy = (self.custom_char_set.len() as f64).log2();
+                    self.custom_char_set_entropy = crate::math::delphi_log2(self.custom_char_set.len() as f64);
                     let mut chset = BTreeSet::new();
                     let mut unique = 0;
                     for (s, f) in self.custom_char_set_freq.as_ref().unwrap() {
@@ -797,7 +797,7 @@ impl PasswordGenerator {
             self.word_list = Vec::new();
         }
         self.word_list_size = num_words;
-        self.word_list_entropy = (num_words as f64).log2();
+        self.word_list_entropy = crate::math::delphi_log2(num_words as f64);
         Ok(num_words)
     }
 
@@ -1366,7 +1366,7 @@ impl PasswordGenerator {
                         if unique {
                             *sec += Self::calc_perm_set_entropy(set_size as i32, i);
                         } else {
-                            *sec += (set_size as f64).log2() * i as f64;
+                            *sec += crate::math::delphi_log2(set_size as f64) * i as f64;
                         }
                     }
                 }
@@ -1536,7 +1536,7 @@ impl PasswordGenerator {
             for &t in &tris {
                 let p = t as f64 / sigma as f64;
                 if p > 0.0 {
-                    entropy += p * p.log2();
+                    entropy += p * crate::math::delphi_log2(p);
                 }
             }
             entropy = -entropy / 3.0;
@@ -1569,7 +1569,7 @@ impl PasswordGenerator {
             sigma = u32::from_le_bytes(data[0..4].try_into().unwrap());
             entropy = f64::from_le_bytes(data[4..12].try_into().unwrap());
             tris = data[12..].chunks_exact(4).map(|c| u32::from_le_bytes(c.try_into().unwrap())).collect();
-            if sigma == 0 || !(entropy >= 1.0) || entropy > 26f64.log2() {
+            if sigma == 0 || !(entropy >= 1.0) || entropy > crate::math::delphi_log2(26f64) {
                 return Ok(false);
             }
             let check = tris.iter().fold(0u32, |a, &t| a.wrapping_add(t));
@@ -1588,7 +1588,7 @@ impl PasswordGenerator {
 
     /// `CalcPermSetEntropy()`: log2(N! / (N-M)!).
     pub fn calc_perm_set_entropy(set_size: i32, num_samples: i32) -> f64 {
-        (log_factorial(set_size) - log_factorial(set_size - num_samples)) / 2f64.ln()
+        (log_factorial(set_size) - log_factorial(set_size - num_samples)) / crate::math::LOG2_CONST
     }
 
     /// `EstimatePasswSecurity()`: rough strength estimate in bits (algorithm of
@@ -1650,7 +1650,7 @@ impl PasswordGenerator {
         if special {
             char_space += 33;
         }
-        (char_space as f64).log2() * eff_len
+        crate::math::delphi_log2(char_space as f64) * eff_len
     }
 
     // ----------------------------------------------------------------------

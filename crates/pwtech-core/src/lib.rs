@@ -16,6 +16,7 @@ pub mod generate;
 pub mod language;
 pub mod language_file;
 pub mod lzo;
+pub mod math;
 pub mod mp_passw_gen;
 pub mod passw;
 pub mod random;

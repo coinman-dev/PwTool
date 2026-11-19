@@ -126,7 +126,7 @@ pub fn generate(
     for _ in 0..length.max(0) {
         passw.push(charset[rng.get_num_range(charset.len() as u32) as usize]);
     }
-    let bits = (charset.len() as f64).log2() * length as f64;
+    let bits = crate::math::delphi_log2(charset.len() as f64) * length as f64;
     (passw, bits)
 }
 

@@ -138,7 +138,7 @@ impl CommonPasswords {
         if text.ends_with('\n') {
             set.remove("");
         }
-        let entropy = if set.is_empty() { 0.0 } else { (set.len() as f64).log2() };
+        let entropy = if set.is_empty() { 0.0 } else { crate::math::delphi_log2(set.len() as f64) };
         Ok(CommonPasswords { set, entropy })
     }
 
