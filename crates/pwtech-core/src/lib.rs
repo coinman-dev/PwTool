@@ -24,3 +24,4 @@ pub mod secure_mem;
 pub mod text_file;
 pub mod unicode;
 pub mod util;
+pub mod zxcvbn;

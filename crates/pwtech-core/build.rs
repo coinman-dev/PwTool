@@ -12,4 +12,14 @@ fn main() {
         .include("csrc/minilzo")
         .warnings(false)
         .compile("minilzo");
+
+    // zxcvbn-c by Tony Evans (MIT licence), identical to upstream/src/zxcvbn,
+    // with the dictionary compiled in. Used for "advanced password strength
+    // estimation".
+    cc::Build::new()
+        .cpp(true)
+        .file("csrc/zxcvbn/zxcvbn.cpp")
+        .include("csrc/zxcvbn")
+        .warnings(false)
+        .compile("zxcvbn");
 }
