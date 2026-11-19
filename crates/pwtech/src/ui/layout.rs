@@ -205,6 +205,16 @@ impl VclBox {
         self.queue_resize();
     }
 
+    /// Remove a child (e.g. to move it into another container).
+    pub fn remove(&self, widget: &impl IsA<gtk::Widget>) {
+        let widget = widget.as_ref();
+        self.imp().items.borrow_mut().retain(|i| &i.widget != widget);
+        if widget.parent().as_ref() == Some(self.upcast_ref()) {
+            widget.unparent();
+        }
+        self.queue_resize();
+    }
+
     pub fn child_rect(&self, widget: &impl IsA<gtk::Widget>) -> Option<(i32, i32, i32, i32)> {
         let widget = widget.as_ref();
         self.imp().items.borrow().iter().find(|i| &i.widget == widget).map(|i| (i.x, i.y, i.w, i.h))

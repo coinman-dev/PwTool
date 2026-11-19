@@ -8,6 +8,7 @@ pub mod icons;
 pub mod layout;
 pub mod main_window;
 pub mod passw_enter;
+pub mod passw_manager;
 pub mod quality_bar;
 pub mod util;
 
@@ -124,6 +125,7 @@ fn automate(w: Rc<main_window::MainWindow>, script: String) {
                         app.quit();
                     }
                 }
+                c if c.starts_with("pm") && passw_manager::automation::automate(&w, c, rest) => {}
                 _ => eprintln!("automate: unknown command {cmd}"),
             }
             glib::timeout_future(std::time::Duration::from_millis(150)).await;

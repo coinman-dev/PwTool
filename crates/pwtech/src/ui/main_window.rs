@@ -107,6 +107,9 @@ pub struct MainWindow {
     format_passw_help: String,
     default_title: String,
     mouse_move_cnt: Cell<i32>,
+    /// Edit box receiving the next single password instead of `PasswBox`
+    /// (`GeneratePassw(gpdGuiSingle, pEditBox)`).
+    pub(super) gen_target: RefCell<Option<gtk::Entry>>,
 }
 
 impl MainWindow {
@@ -157,6 +160,7 @@ impl MainWindow {
             format_passw_help,
             default_title: PROGRAM_NAME.to_string(),
             mouse_move_cnt: Cell::new(60),
+            gen_target: RefCell::new(None),
         });
         w.setup();
         w
@@ -1003,7 +1007,7 @@ impl MainWindow {
     }
 
     /// `LoadProfile(index)`.
-    fn load_profile(&self, i: usize) {
+    pub(super) fn load_profile(&self, i: usize) {
         if i >= self.core.borrow().profiles.len() {
             return;
         }
@@ -1088,8 +1092,9 @@ impl MainWindow {
     // generation
 
     /// `GeneratePassw()`.
-    fn generate_passw(self: &Rc<Self>, dest: GenDest) {
+    pub(super) fn generate_passw(self: &Rc<Self>, dest: GenDest) {
         if self.generating.get() {
+            self.gen_target.borrow_mut().take();
             return;
         }
         self.char_set_list_exit();
@@ -1100,6 +1105,7 @@ impl MainWindow {
     }
 
     async fn generate_passw_async(self: Rc<Self>, dest: GenDest) {
+        let gen_target = self.gen_target.borrow_mut().take();
         let win = self.win();
         let mut num: u64 = 1;
         let mut file: Option<(PathBuf, bool)> = None;
@@ -1435,6 +1441,11 @@ impl MainWindow {
         }
         if summary.count != 0 {
             match dest {
+                GenDest::GuiSingle if gen_target.is_some() => {
+                    if let Some(e) = &gen_target {
+                        e.set_text(&out.single);
+                    }
+                }
                 GenDest::GuiSingle => {
                     let e = self.entry("PasswBox");
                     let tag = self.passw_box_tag.get();
