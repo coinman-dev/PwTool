@@ -97,6 +97,10 @@ impl MainWindow {
         self.act("TrayMenu_About", |w| w.about());
         self.act("TrayMenu_OpenManual", |w| w.help_btn_click());
         self.act("MainMenu_File_BackupSettings", |w| w.backup_settings());
+        self.act("MainMenu_Options_Config", |w| {
+            let w = w.clone();
+            glib::spawn_future_local(async move { w.configuration().await });
+        });
         self.act("MainMenu_File_RestoreSettings", |w| w.restore_settings());
         self.connect_list_menus();
         self.update_passw_cache_menu();
@@ -137,6 +141,7 @@ impl MainWindow {
     pub(super) fn save_tools_config(&self) {
         let mut core = self.core.borrow_mut();
         let ini = &mut core.ini;
+        self.save_config_dlg_config(ini);
         if let Some(d) = self.tools.passw_enter.borrow().as_ref() {
             d.save_config(ini);
         }

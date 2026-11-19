@@ -103,6 +103,12 @@ fn automate(w: Rc<main_window::MainWindow>, script: String) {
                         None => eprintln!("automate: no widget {name}"),
                     }
                 }
+                "page" => {
+                    let (name, n) = rest.split_once(' ').unwrap_or((rest, "0"));
+                    if let Some(nb) = find_widget(&w, name).and_then(|x| x.downcast::<gtk::Notebook>().ok()) {
+                        nb.set_current_page(n.parse().ok());
+                    }
+                }
                 "clip" => {
                     clipboard::set_plain(rest);
                 }

@@ -29,8 +29,8 @@ pub fn run(cmd: CmdLineOptions) -> i32 {
     }
 
     let mut profile = app.cmd.profile_name.clone();
-    if profile.is_empty() && app.ini.read_bool("Main", "LoadProfileStartup", false) {
-        profile = app.ini.read_string("Main", "LoadProfileStartupName", "");
+    if profile.is_empty() && app.config.load_profile_startup {
+        profile = app.config.load_profile_name.clone();
     }
     if !profile.is_empty() && !app.load_profile_by_name(&profile) {
         let _ = writeln!(out, "{} - {}", trl("Error"), trl_format("Profile \"%1\" not found.", &[&profile]));

@@ -318,6 +318,7 @@ struct Ctx {
     scale: f64,
     use_tag: bool,
     form_font_height: i64,
+    form_text_height: i64,
     image_lists: HashMap<String, Vec<Option<gdk::Texture>>>,
     image_sizes: HashMap<String, i32>,
     updowns: HashMap<String, Rc<UpDown>>,
@@ -554,7 +555,14 @@ fn create(o: &FormObj, ctx: &mut Ctx, form_name: &str) -> Option<gtk::Widget> {
             let nb = gtk::Notebook::new();
             let active = o.ident("ActivePage").map(String::from);
             let mut active_idx = 0;
+            // client area of the tab sheets (`TPageControl.DisplayRect`)
+            let sheet_w = o.int_or("Width", 200) - 8;
+            let sheet_h = o.int_or("Height", 200) - (ctx.form_text_height + 10) - 6;
             for (i, sheet) in o.children.iter().filter(|c| c.class == "TTabSheet").enumerate() {
+                let mut sheet = sheet.clone();
+                sheet.props.entry("Width").or_insert(serde_json::json!(sheet_w));
+                sheet.props.entry("Height").or_insert(serde_json::json!(sheet_h));
+                let sheet = &sheet;
                 let page = create(sheet, ctx, form_name).unwrap();
                 let label = gtk::Label::with_mnemonic(&mnemonic(&tr_caption(sheet.str("Caption").unwrap_or(""))));
                 nb.append_page(&page, Some(&label));
@@ -564,6 +572,8 @@ fn create(o: &FormObj, ctx: &mut Ctx, form_name: &str) -> Option<gtk::Widget> {
                 }
             }
             nb.set_current_page(Some(active_idx));
+            // tabs scroll when they don't fit (like VCL's tab arrows)
+            nb.set_scrollable(true);
             nb.upcast()
         }
         "TListView" | "TStringGrid" | "TDrawGrid" => {
@@ -771,10 +781,96 @@ pub fn shortcut_to_accel(code: i64) -> Option<String> {
         0x28 => "Down".into(),
         0x2d => "Insert".into(),
         0x2e => "Delete".into(),
+        0x13 => "Pause".into(),
+        0x60..=0x69 => format!("KP_{}", key - 0x60),
         _ => return None,
     };
     s.push_str(&name);
     Some(s)
+}
+
+/// VCL `TShortCut` of a key press (inverse of [`shortcut_to_accel`]);
+/// `None` for keys without a virtual key code or bare modifiers.
+pub fn accel_to_shortcut(key: gdk::Key, mods: gdk::ModifierType) -> Option<u16> {
+    let kv = key.to_lower();
+    let name = kv.name().map(|n| n.to_string()).unwrap_or_default();
+    let vk: u16 = if let Some(c) = kv.to_unicode().filter(|c| c.is_ascii_alphanumeric()) {
+        c.to_ascii_uppercase() as u16
+    } else if let Some(n) = name.strip_prefix('F').and_then(|n| n.parse::<u16>().ok()).filter(|n| (1..=24).contains(n)) {
+        0x6f + n
+    } else if let Some(n) = name.strip_prefix("KP_").and_then(|n| n.parse::<u16>().ok()).filter(|n| *n <= 9) {
+        0x60 + n
+    } else {
+        match name.as_str() {
+            "BackSpace" => 0x08,
+            "Tab" | "ISO_Left_Tab" => 0x09,
+            "Return" | "KP_Enter" => 0x0d,
+            "Pause" => 0x13,
+            "Escape" => 0x1b,
+            "space" => 0x20,
+            "Page_Up" => 0x21,
+            "Page_Down" => 0x22,
+            "End" => 0x23,
+            "Home" => 0x24,
+            "Left" => 0x25,
+            "Up" => 0x26,
+            "Right" => 0x27,
+            "Down" => 0x28,
+            "Insert" => 0x2d,
+            "Delete" => 0x2e,
+            _ => return None,
+        }
+    };
+    let mut code = vk;
+    if mods.contains(gdk::ModifierType::SHIFT_MASK) {
+        code |= 0x2000;
+    }
+    if mods.contains(gdk::ModifierType::CONTROL_MASK) {
+        code |= 0x4000;
+    }
+    if mods.contains(gdk::ModifierType::ALT_MASK) {
+        code |= 0x8000;
+    }
+    Some(code)
+}
+
+/// `ShortCutToText()`: e.g. "Ctrl+Alt+P".
+pub fn shortcut_to_text(code: u16) -> String {
+    let mut s = String::new();
+    if code & 0x2000 != 0 {
+        s.push_str("Shift+");
+    }
+    if code & 0x4000 != 0 {
+        s.push_str("Ctrl+");
+    }
+    if code & 0x8000 != 0 {
+        s.push_str("Alt+");
+    }
+    let key = code & 0xff;
+    let name = match key {
+        0x30..=0x39 | 0x41..=0x5a => ((key as u8) as char).to_string(),
+        0x60..=0x69 => format!("Num {}", key - 0x60),
+        0x70..=0x87 => format!("F{}", key - 0x6f),
+        0x08 => "BkSp".into(),
+        0x09 => "Tab".into(),
+        0x0d => "Enter".into(),
+        0x13 => "Pause".into(),
+        0x1b => "Esc".into(),
+        0x20 => "Space".into(),
+        0x21 => "PgUp".into(),
+        0x22 => "PgDn".into(),
+        0x23 => "End".into(),
+        0x24 => "Home".into(),
+        0x25 => "Left".into(),
+        0x26 => "Up".into(),
+        0x27 => "Right".into(),
+        0x28 => "Down".into(),
+        0x2d => "Ins".into(),
+        0x2e => "Del".into(),
+        _ => format!("#{key}"),
+    };
+    s.push_str(&name);
+    s
 }
 
 #[derive(Default)]
@@ -849,6 +945,7 @@ pub fn build_form(form: FormObj, form_name: &str) -> Built {
         scale,
         use_tag: true,
         form_font_height: form.int_or("Font.Height", -14),
+        form_text_height: form.int_or("TextHeight", 17),
         image_lists: HashMap::new(),
         image_sizes: HashMap::new(),
         updowns: HashMap::new(),
@@ -896,11 +993,35 @@ pub fn build_form(form: FormObj, form_name: &str) -> Built {
     let cw = ctx.sc(form.int("ClientWidth").or(form.int("Width")).unwrap_or(400));
     let ch = ctx.sc(form.int("ClientHeight").or(form.int("Height")).unwrap_or(300));
     let root = VclBox::new(cw, ch);
-    let min = (
+    let mut min = (
         form.int("Constraints.MinWidth").map(|v| ctx.sc(v) - (ctx.sc(form.int_or("Width", 0)) - cw).max(0)).unwrap_or(0),
         form.int("Constraints.MinHeight").map(|v| ctx.sc(v) - (ctx.sc(form.int_or("Height", 0)) - ch).max(0)).unwrap_or(0),
     );
     build_children(&form, &root, &mut ctx, form_name);
+
+    // GTK notebook tabs are higher than VCL tabs: enlarge the window so that
+    // the pages keep their design height
+    let mut ch = ch;
+    if collect_all(&form).iter().any(|c| c.class == "TPageControl") {
+        let probe = gtk::Notebook::new();
+        probe.append_page(&gtk::Box::new(gtk::Orientation::Vertical, 0), Some(&gtk::Label::new(Some("Xg"))));
+        let (header, _, _, _) = probe.measure(gtk::Orientation::Vertical, -1);
+        let vcl_tabs = ctx.sc(form.int_or("TextHeight", 17) + 10);
+        let extra = header - vcl_tabs;
+        if extra > 0 {
+            ch += extra;
+            if min.1 > 0 {
+                min.1 += extra;
+            }
+        }
+    }
+
+    // sub-widgets ("Name.view", "Name.item0", ...) get their key as name
+    for (k, w) in &ctx.widgets {
+        if k.contains('.') && w.widget_name().starts_with("Gtk") {
+            w.set_widget_name(k);
+        }
+    }
 
     // associate up-down buttons with their edits
     for c in collect_all(&form) {

@@ -205,3 +205,116 @@ pub fn open_uri(parent: Option<&gtk::Window>, uri: &str) {
         }
     });
 }
+
+/// Font of a `FontToString()` string ("Name;Size;Style;Color"; style bits:
+/// 1 bold, 2 italic, 4 underline, 8 strikeout).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FontSpec {
+    pub name: String,
+    pub size: i32,
+    pub style: i32,
+    pub color: String,
+}
+
+impl FontSpec {
+    /// `StringToFont()`; `None` if name or size are missing.
+    pub fn parse(s: &str) -> Option<FontSpec> {
+        let mut it = s.split(';');
+        let name = it.next()?.trim().to_string();
+        let size: i32 = it.next()?.trim().parse().ok().filter(|&v| v != 0)?;
+        let style = it.next().and_then(|v| v.trim().parse().ok()).unwrap_or(0);
+        let color = it.next().unwrap_or("clWindowText").trim().to_string();
+        if name.is_empty() {
+            return None;
+        }
+        Some(FontSpec { name, size, style, color })
+    }
+
+    /// `FontToString()`.
+    pub fn to_font_string(&self) -> String {
+        format!("{};{};{};{}", self.name, self.size, self.style, self.color)
+    }
+
+    pub fn from_pango(d: &gtk::pango::FontDescription) -> FontSpec {
+        let mut style = 0;
+        if d.weight() >= gtk::pango::Weight::Bold {
+            style |= 1;
+        }
+        if d.style() != gtk::pango::Style::Normal {
+            style |= 2;
+        }
+        FontSpec {
+            name: d.family().map(|f| f.to_string()).unwrap_or_default(),
+            size: (d.size() as f64 / gtk::pango::SCALE as f64).round() as i32,
+            style,
+            color: "clWindowText".into(),
+        }
+    }
+
+    pub fn to_pango(&self) -> gtk::pango::FontDescription {
+        let mut d = gtk::pango::FontDescription::new();
+        d.set_family(&self.name);
+        d.set_size(self.size.abs() * gtk::pango::SCALE);
+        if self.style & 1 != 0 {
+            d.set_weight(gtk::pango::Weight::Bold);
+        }
+        if self.style & 2 != 0 {
+            d.set_style(gtk::pango::Style::Italic);
+        }
+        d
+    }
+
+    /// CSS declarations for this font.
+    pub fn css(&self) -> String {
+        let mut c = format!("font-family: \"{}\"; font-size: {}pt;", self.name.replace('"', ""), self.size.abs());
+        if self.style & 1 != 0 {
+            c.push_str(" font-weight: bold;");
+        }
+        if self.style & 2 != 0 {
+            c.push_str(" font-style: italic;");
+        }
+        let mut deco = Vec::new();
+        if self.style & 4 != 0 {
+            deco.push("underline");
+        }
+        if self.style & 8 != 0 {
+            deco.push("line-through");
+        }
+        if !deco.is_empty() {
+            c.push_str(&format!(" text-decoration: {};", deco.join(" ")));
+        }
+        c
+    }
+}
+
+thread_local! {
+    static GUI_FONT_CSS: std::cell::RefCell<Option<gtk::CssProvider>> = const { std::cell::RefCell::new(None) };
+}
+
+/// `ChangeGUIFont()`: font for all windows (empty string = default font).
+pub fn set_gui_font(font_string: &str) {
+    let Some(display) = gtk::gdk::Display::default() else { return };
+    GUI_FONT_CSS.with(|p| {
+        let mut p = p.borrow_mut();
+        if let Some(old) = p.take() {
+            gtk::style_context_remove_provider_for_display(&display, &old);
+        }
+        if let Some(f) = FontSpec::parse(font_string) {
+            let prov = gtk::CssProvider::new();
+            prov.load_from_data(&format!("window, window * {{ {} }}", f.css()));
+            gtk::style_context_add_provider_for_display(&display, &prov, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+            *p = Some(prov);
+        }
+    });
+}
+
+/// User interface style: "Light"/"Dark" force the colour scheme, anything
+/// else follows the desktop.
+pub fn set_ui_style(name: &str) {
+    if let Some(s) = gtk::Settings::default() {
+        match name {
+            "Dark" => s.set_gtk_application_prefer_dark_theme(true),
+            _ => s.set_gtk_application_prefer_dark_theme(false),
+        }
+    }
+}

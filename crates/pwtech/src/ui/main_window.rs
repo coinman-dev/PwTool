@@ -38,6 +38,8 @@ use crate::program::*;
 
 #[path = "main_tools.rs"]
 mod tools;
+#[path = "config_dlg.rs"]
+mod config_dlg;
 
 const ENTROPY_SYSTEM: u32 = 24;
 const ENTROPY_MOUSECLICK: u32 = 2;
@@ -111,6 +113,8 @@ pub struct MainWindow {
     default_title: String,
     mouse_move_cnt: Cell<i32>,
     tools: tools::ToolsState,
+    config_dlg: RefCell<Option<Rc<config_dlg::ConfigDlg>>>,
+    hot_keys_active: RefCell<crate::app_config::HotKeyList>,
 }
 
 impl MainWindow {
@@ -162,6 +166,8 @@ impl MainWindow {
             default_title: PROGRAM_NAME.to_string(),
             mouse_move_cnt: Cell::new(60),
             tools: tools::ToolsState::new(),
+            config_dlg: RefCell::new(None),
+            hot_keys_active: RefCell::new(Default::default()),
         });
         w.setup();
         w
@@ -260,6 +266,14 @@ impl MainWindow {
         status.set_text(&format!("{PROGRAM_NAME} {}", version_string()));
         b.get::<gtk::Button>("TogglePasswBtn").add_css_class("flat");
 
+        {
+            let core = self.core.borrow();
+            super::util::set_gui_font(&core.config.gui_font_string);
+            super::util::set_ui_style(&core.config.ui_style_name);
+            let keys = core.config.hot_keys.clone();
+            drop(core);
+            self.activate_hot_keys(&keys);
+        }
         self.load_config_to_controls();
         self.connect_events();
         self.connect_tools();
@@ -279,9 +293,8 @@ impl MainWindow {
         super::clipboard::on_set_data(move || {
             if let Some(w) = w.upgrade() {
                 let core = w.core.borrow();
-                if core.ini.read_bool("Main", "AutoClearClipboard", true) {
-                    let t = core.ini.read_int("Main", "AutoClearClipboardTime", 10);
-                    w.auto_clear_clip_cnt.set(if (3..=32767).contains(&t) { t } else { 10 });
+                if core.config.auto_clear_clip {
+                    w.auto_clear_clip_cnt.set(core.config.auto_clear_clip_time);
                 }
             }
         });
@@ -1447,9 +1460,8 @@ impl MainWindow {
                     self.show_passw_info(summary.last_len, summary.last_security, summary.last_common_match, false);
                     e.grab_focus();
                     let core = self.core.borrow();
-                    if core.ini.read_bool("Main", "AutoClearPasswBox", true) {
-                        let t = core.ini.read_int("Main", "AutoClearPasswBoxTime", 30);
-                        self.auto_clear_passw_cnt.set(if (3..=32767).contains(&t) { t } else { 30 });
+                    if core.config.auto_clear_passw {
+                        self.auto_clear_passw_cnt.set(core.config.auto_clear_passw_time);
                     }
                 }
                 GenDest::GuiList => {

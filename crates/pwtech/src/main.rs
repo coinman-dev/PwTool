@@ -1,6 +1,7 @@
 //! Password Tech for Linux — entry point.
 
 mod app;
+mod app_config;
 mod cli;
 mod program;
 mod ui;

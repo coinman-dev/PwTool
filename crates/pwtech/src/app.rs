@@ -195,6 +195,8 @@ pub struct AppCore {
     pub cmd: CmdLineOptions,
     pub ini: IniFile,
     pub fake_ini: bool,
+    /// `g_config`.
+    pub config: crate::app_config::Configuration,
     pub settings: GeneratorSettings,
     pub profiles: Vec<PwGenProfile>,
     pub passw_gen: PasswordGenerator,
@@ -240,11 +242,11 @@ impl AppCore {
             (IniFile::new(), false)
         };
 
-        let enc = ini.read_int(CONFIG_ID, "FileEncoding", CharEncoding::Utf8 as i32);
-        let file_encoding = CharEncoding::from_index(enc).unwrap_or(CharEncoding::Utf8);
         // The original defaults to Windows line endings; on Linux LF is the
-        // default unless PwTech.ini says otherwise.
-        let newline = if ini.read_int(CONFIG_ID, "FileNewlineChar", 1) == 0 { "\r\n" } else { "\n" }.to_string();
+        // default unless PwTech.ini says otherwise (see `app_config`).
+        let config = crate::app_config::Configuration::load(&ini);
+        let file_encoding = config.file_encoding;
+        let newline = config.newline().to_string();
 
         let mut app = AppCore {
             paths,
@@ -255,8 +257,9 @@ impl AppCore {
             common_passw: None,
             file_encoding,
             newline,
-            test_common_passw: ini.read_bool(CONFIG_ID, "TestCommonPassw", true),
-            use_advanced_passw_est: ini.read_bool(CONFIG_ID, "UseAdvancedPasswEst", true),
+            test_common_passw: config.test_common_passw,
+            use_advanced_passw_est: config.use_advanced_passw_est,
+            config,
             languages: Vec::new(),
             language: 0,
             help_file_name: PathBuf::new(),
@@ -274,8 +277,7 @@ impl AppCore {
         // random pool: cipher, seed file, system entropy
         {
             let mut pool = RandomPool::global();
-            let c = app.ini.read_int(CONFIG_ID, "RandomPoolCipher", PoolCipherType::ChaCha20 as i32);
-            if let Some(c) = PoolCipherType::from_index(c) {
+            if let Some(c) = PoolCipherType::from_index(app.config.random_pool_cipher) {
                 pool.set_cipher(c);
             }
             let seed = app.paths.data_dir.join(PROGRAM_RANDSEEDFILE);
@@ -361,6 +363,7 @@ impl AppCore {
         if idx != 0 && self.change_language(idx) {
             self.language = idx;
         }
+        self.config.language_code = self.languages[self.language].code.clone();
         self.help_file_name = self.paths.resources.join(PROGRAM_HELPFILE);
     }
 
@@ -414,14 +417,19 @@ impl AppCore {
         }
 
         if self.test_common_passw {
-            let p = self.paths.resolve("common_passwords.txt");
-            match CommonPasswords::load(&p) {
-                Ok(c) => self.common_passw = Some(c),
-                Err(e) => self.startup_errors.push(trl_format(
-                    "Error while loading list of common passwords:\n%1.",
-                    &[&e.to_string()],
-                )),
-            }
+            self.load_common_passwords();
+        }
+    }
+
+    /// Load the list of common passwords (errors go to `startup_errors`).
+    pub fn load_common_passwords(&mut self) {
+        let p = self.paths.resolve("common_passwords.txt");
+        match CommonPasswords::load(&p) {
+            Ok(c) => self.common_passw = Some(c),
+            Err(e) => self.startup_errors.push(trl_format(
+                "Error while loading list of common passwords:\n%1.",
+                &[&e.to_string()],
+            )),
         }
     }
 
@@ -436,8 +444,14 @@ impl AppCore {
         if path.is_none() && (self.cmd.config_readonly || self.fake_ini) {
             return Ok(());
         }
+        self.config.save(&mut self.ini);
         self.ini.write_string(CONFIG_ID, "LastVersion", PROGRAM_VERSION);
-        self.ini.write_string(CONFIG_ID, "Language", &self.languages[self.language].code);
+        let code = if self.config.language_code.is_empty() {
+            self.languages[self.language].code.clone()
+        } else {
+            self.config.language_code.clone()
+        };
+        self.ini.write_string(CONFIG_ID, "Language", &code);
         self.settings.save(&mut self.ini);
         let sections: Vec<String> = self
             .ini
