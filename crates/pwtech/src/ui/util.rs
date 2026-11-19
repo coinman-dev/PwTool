@@ -318,3 +318,36 @@ pub fn set_ui_style(name: &str) {
         }
     }
 }
+
+thread_local! {
+    static CLASS_FONTS: std::cell::RefCell<std::collections::HashMap<String, gtk::CssProvider>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// Font for all widgets with the CSS class `class` (`None` = default font).
+pub fn set_class_font(class: &str, font: Option<&FontSpec>) {
+    let Some(display) = gtk::gdk::Display::default() else { return };
+    CLASS_FONTS.with(|m| {
+        let mut m = m.borrow_mut();
+        if let Some(old) = m.remove(class) {
+            gtk::style_context_remove_provider_for_display(&display, &old);
+        }
+        if let Some(f) = font {
+            let prov = gtk::CssProvider::new();
+            prov.load_from_data(&format!(".{class}, .{class} text {{ {} }}", f.css()));
+            gtk::style_context_add_provider_for_display(&display, &prov, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
+            m.insert(class.to_string(), prov);
+        }
+    });
+}
+
+/// Font dialog (`TFontDialog::Execute()`); calls `done` with the chosen font.
+pub fn choose_font(parent: &gtk::Window, current: Option<&FontSpec>, done: impl FnOnce(FontSpec) + 'static) {
+    let dlg = gtk::FontDialog::new();
+    let cur = current.map(|f| f.to_pango());
+    dlg.choose_font(Some(parent), cur.as_ref(), gtk::gio::Cancellable::NONE, move |r| {
+        if let Ok(d) = r {
+            done(FontSpec::from_pango(&d));
+        }
+    });
+}

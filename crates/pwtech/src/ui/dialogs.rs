@@ -217,7 +217,12 @@ pub struct PasswListWindow {
     pub b: Built,
     pub win: gtk::Window,
     pub view: gtk::TextView,
+    /// Font set by the user (`m_pDefaultPasswFont != nullptr`).
+    pub font: RefCell<Option<super::util::FontSpec>>,
 }
+
+/// CSS class of the password list font.
+pub const PASSW_LIST_FONT_CLASS: &str = "pwtech-passwlist-font";
 
 impl PasswListWindow {
     pub fn new(parent: &gtk::Window) -> Rc<Self> {
@@ -232,7 +237,39 @@ impl PasswListWindow {
             attach_context_menu(&view, m);
         }
         let app_accels = b.accels.clone();
-        let w = Rc::new(PasswListWindow { b, win, view });
+        view.add_css_class(PASSW_LIST_FONT_CLASS);
+        let w = Rc::new(PasswListWindow { b, win, view, font: RefCell::new(None) });
+        let ww = w.clone();
+        w.b.action("PasswListMenu_ChangeFont").connect_activate(move |_, _| {
+            let w2 = ww.clone();
+            let cur = ww.font.borrow().clone();
+            super::util::choose_font(&ww.win, cur.as_ref(), move |f| {
+                super::util::set_class_font(PASSW_LIST_FONT_CLASS, Some(&f));
+                *w2.font.borrow_mut() = Some(f);
+            });
+        });
+        let ww = w.clone();
+        w.b.action("PasswListMenu_ResetFont").connect_activate(move |_, _| {
+            if ww.font.borrow_mut().take().is_some() {
+                super::util::set_class_font(PASSW_LIST_FONT_CLASS, None);
+            }
+        });
+        let esc = gtk::EventControllerKey::new();
+        let ww = w.clone();
+        esc.connect_key_pressed(move |_, k, _, _| {
+            if k == gtk::gdk::Key::Escape {
+                ww.win.close();
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        });
+        w.win.add_controller(esc);
+        let ww = w.clone();
+        w.win.connect_close_request(move |_| {
+            // `FormClose()`: clear the list
+            ww.view.buffer().set_text("");
+            glib::Propagation::Proceed
+        });
         let ww = w.clone();
         w.b.action("PasswListMenu_Copy").connect_activate(move |_, _| {
             let buf = ww.view.buffer();
@@ -269,6 +306,38 @@ impl PasswListWindow {
         }
         w.win.add_controller(sc);
         w
+    }
+
+    /// `LoadConfig()`.
+    pub fn load_config(&self, ini: &pwtech_core::config::IniFile) {
+        self.win.set_default_size(
+            ini.read_int("PasswList", "WindowWidth", self.b.client.0).max(100),
+            ini.read_int("PasswList", "WindowHeight", self.b.client.1).max(100),
+        );
+        if let Some(f) = super::util::FontSpec::parse(&ini.read_string("PasswList", "Font", "")) {
+            super::util::set_class_font(PASSW_LIST_FONT_CLASS, Some(&f));
+            *self.font.borrow_mut() = Some(f);
+        }
+    }
+
+    /// `SaveConfig()`.
+    pub fn save_config(&self, ini: &mut pwtech_core::config::IniFile) {
+        ini.write_integer("PasswList", "WindowHeight", self.win.default_height() as i64);
+        ini.write_integer("PasswList", "WindowWidth", self.win.default_width() as i64);
+        ini.write_string(
+            "PasswList",
+            "Font",
+            &self.font.borrow().as_ref().map(|f| f.to_font_string()).unwrap_or_default(),
+        );
+    }
+
+    /// Selected text (`GetRichEditSelTextBuf()`).
+    pub fn selected_text(&self) -> zeroize::Zeroizing<String> {
+        let buf = self.view.buffer();
+        match buf.selection_bounds() {
+            Some((s, e)) => zeroize::Zeroizing::new(buf.text(&s, &e, false).to_string()),
+            None => zeroize::Zeroizing::new(String::new()),
+        }
     }
 
     /// `Execute()`: show the list.

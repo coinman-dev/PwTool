@@ -28,7 +28,12 @@ pub(super) struct ToolsState {
     profile_accels: RefCell<Vec<String>>,
     last_cache_countdown: Cell<i64>,
     last_total_bits: Cell<i64>,
+    /// Font of the password boxes set by the user.
+    pub passw_font: RefCell<Option<crate::ui::util::FontSpec>>,
 }
+
+/// CSS class of the password boxes (main window and MP generator).
+pub const PASSW_FONT_CLASS: &str = "pwtech-passw-font";
 
 impl ToolsState {
     pub fn new() -> Self {
@@ -43,6 +48,7 @@ impl ToolsState {
             profile_accels: RefCell::new(Vec::new()),
             last_cache_countdown: Cell::new(-1),
             last_total_bits: Cell::new(-1),
+            passw_font: RefCell::new(None),
         }
     }
 }
@@ -131,6 +137,25 @@ impl MainWindow {
         });
         self.act("MainMenu_File_RestoreSettings", |w| w.restore_settings());
         self.connect_list_menus();
+        // password box font
+        self.entry("PasswBox").add_css_class(PASSW_FONT_CLASS);
+        if let Some(f) = crate::ui::util::FontSpec::parse(&self.core.borrow().ini.read_string("Main", "PasswBoxFont", "")) {
+            crate::ui::util::set_class_font(PASSW_FONT_CLASS, Some(&f));
+            *self.tools.passw_font.borrow_mut() = Some(f);
+        }
+        self.act("PasswBoxMenu_ChangeFont", |w| {
+            let w2 = w.clone();
+            let cur = w.tools.passw_font.borrow().clone();
+            crate::ui::util::choose_font(&w.win(), cur.as_ref(), move |f| {
+                crate::ui::util::set_class_font(PASSW_FONT_CLASS, Some(&f));
+                *w2.tools.passw_font.borrow_mut() = Some(f);
+            });
+        });
+        self.act("PasswBoxMenu_ResetFont", |w| {
+            if w.tools.passw_font.borrow_mut().take().is_some() {
+                crate::ui::util::set_class_font(PASSW_FONT_CLASS, None);
+            }
+        });
         self.update_passw_cache_menu();
         self.update_total_ent_bits_menu();
         if let Some(b) = self.b.try_get::<gtk::Button>("CryptTextBtn") {
@@ -173,6 +198,14 @@ impl MainWindow {
         self.save_profile_editor_config(ini);
         self.save_char_set_builder_config(ini);
         self.save_mp_passw_gen_config(ini);
+        if let Some(pl) = self.passw_list.borrow().as_ref() {
+            pl.save_config(ini);
+        }
+        ini.write_string(
+            "Main",
+            "PasswBoxFont",
+            &self.tools.passw_font.borrow().as_ref().map(|f| f.to_font_string()).unwrap_or_default(),
+        );
         if let Some(d) = self.tools.passw_enter.borrow().as_ref() {
             d.save_config(ini);
         }
@@ -467,8 +500,8 @@ impl MainWindow {
             let w2 = w.clone();
             glib::spawn_future_local(async move {
                 if !failed.is_empty() {
-                    let m = format!("{}\n{}", trl("The following files could not be copied:"), failed.join("\n"));
-                    msg_box(Some(&w2.win()), &m, MsgIcon::Error, MsgButtons::Ok, false).await;
+                    let m = trl_format("Could not copy the following language file(s):\n%1", &[&failed.join("\n")]);
+                    msg_box(Some(&w2.win()), &m, MsgIcon::Warning, MsgButtons::Ok, false).await;
                 }
                 msg_box(
                     Some(&w2.win()),
@@ -558,8 +591,8 @@ impl MainWindow {
             }
         }
         if !failed.is_empty() {
-            let m = format!("{}\n{}", trl("The following files could not be copied:"), failed.join("\n"));
-            msg_box(Some(&parent), &m, MsgIcon::Error, MsgButtons::Ok, false).await;
+            let m = trl_format("Could not copy the following language file(s):\n%1", &[&failed.join("\n")]);
+            msg_box(Some(&parent), &m, MsgIcon::Warning, MsgButtons::Ok, false).await;
         }
         // ensure that the restored file will not be overwritten during runtime
         self.core.borrow_mut().fake_ini = true;

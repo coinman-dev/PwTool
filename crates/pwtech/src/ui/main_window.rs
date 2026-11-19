@@ -127,6 +127,7 @@ pub struct MainWindow {
     profile_list_guard: Cell<bool>,
     char_set_builder: RefCell<Option<Rc<char_set_builder::CharSetBuilderWin>>>,
     mp_passw_gen: RefCell<Option<Rc<mp_passw_gen::MpPasswGenWin>>>,
+    close_confirmed: Cell<bool>,
 }
 
 impl MainWindow {
@@ -184,6 +185,7 @@ impl MainWindow {
             profile_list_guard: Cell::new(false),
             char_set_builder: RefCell::new(None),
             mp_passw_gen: RefCell::new(None),
+            close_confirmed: Cell::new(false),
         });
         w.setup();
         w
@@ -291,6 +293,7 @@ impl MainWindow {
             self.activate_hot_keys(&keys);
         }
         self.load_config_to_controls();
+        self.startup_profile();
         self.connect_events();
         self.connect_tools();
         self.connect_profile_editor();
@@ -300,9 +303,34 @@ impl MainWindow {
         self.set_advanced_btn_caption();
 
         let w = Rc::downgrade(self);
-        self.window.connect_close_request(move |_| {
+        self.window.connect_close_request(move |win| {
             if let Some(w) = w.upgrade() {
+                // `FormCloseQuery()`
+                if !w.close_confirmed.get() && w.core.borrow().config.confirm_exit && !crate::app::restart_requested() {
+                    let (w2, win2) = (w.clone(), win.clone());
+                    glib::spawn_future_local(async move {
+                        if msg_box(
+                            Some(win2.upcast_ref()),
+                            &trl_format("Are you sure you want to exit\n%1?", &[PROGRAM_NAME]),
+                            MsgIcon::Question,
+                            MsgButtons::YesNo,
+                            true,
+                        )
+                        .await
+                            == MsgResult::Yes
+                        {
+                            w2.close_confirmed.set(true);
+                            win2.close();
+                        }
+                    });
+                    return glib::Propagation::Stop;
+                }
                 w.on_close();
+                // closing the main window terminates the program, also
+                // when other windows are open
+                if let Some(app) = w.window.application() {
+                    glib::idle_add_local_once(move || app.quit());
+                }
             }
             glib::Propagation::Proceed
         });
@@ -1494,7 +1522,26 @@ impl MainWindow {
                 }
                 GenDest::GuiList => {
                     if self.passw_list.borrow().is_none() {
-                        *self.passw_list.borrow_mut() = Some(PasswListWindow::new(&win));
+                        let pl = PasswListWindow::new(&win);
+                        pl.load_config(&self.core.borrow().ini);
+                        self.attach_entropy_events(&pl.win);
+                        let w = Rc::downgrade(&self);
+                        let pl2 = Rc::downgrade(&pl);
+                        pl.b.action("PasswListMenu_EncryptCopy").connect_activate(move |_, _| {
+                            if let (Some(w), Some(pl)) = (w.upgrade(), pl2.upgrade()) {
+                                let text = pl.selected_text();
+                                let parent = pl.win.clone();
+                                glib::spawn_future_local(async move { w.crypt_text(true, Some(text), Some(parent)).await });
+                            }
+                        });
+                        let w = Rc::downgrade(&self);
+                        let pl2 = Rc::downgrade(&pl);
+                        pl.b.action("PasswListMenu_AddToDb").connect_activate(move |_, _| {
+                            if let (Some(w), Some(pl)) = (w.upgrade(), pl2.upgrade()) {
+                                w.add_passw_to_db(&pl.selected_text(), true, None);
+                            }
+                        });
+                        *self.passw_list.borrow_mut() = Some(pl);
                     }
                     self.passw_list.borrow().as_ref().unwrap().show_list(&out.list);
                 }
@@ -1781,7 +1828,9 @@ impl MainWindow {
     }
 
     fn on_close(&self) {
-        if self.action_checked("MainMenu_Options_SaveSettingsOnExit") {
+        if (self.action_checked("MainMenu_Options_SaveSettingsOnExit") && !self.core.borrow().cmd.config_readonly)
+            || crate::app::restart_requested()
+        {
             self.save_config();
         }
         self.core.borrow().write_rand_seed_file();
@@ -1789,6 +1838,35 @@ impl MainWindow {
         self.passw_box_tag.set(0);
         self.entry("PasswBox").set_text("");
         self.passw_box_tag.set(tag);
+    }
+
+    /// Profile given on the command line or configured for start-up
+    /// (`StartupAction()`).
+    fn startup_profile(&self) {
+        let (name, from_cmd) = {
+            let core = self.core.borrow();
+            if !core.cmd.profile_name.is_empty() {
+                (core.cmd.profile_name.clone(), true)
+            } else if core.config.load_profile_startup && !core.config.load_profile_name.is_empty() {
+                (core.config.load_profile_name.clone(), false)
+            } else {
+                return;
+            }
+        };
+        let idx = pwtech_core::config::find_profile(&self.core.borrow().profiles, &name);
+        match idx {
+            Some(i) => self.load_profile(i),
+            None => {
+                let mut core = self.core.borrow_mut();
+                core.startup_errors.push(trl_format("Profile \"%1\" not found.", &[&name]));
+                if from_cmd {
+                    core.cmd.profile_name.clear();
+                } else {
+                    core.config.load_profile_startup = false;
+                    core.config.load_profile_name.clear();
+                }
+            }
+        }
     }
 
     /// Show start-up errors (`FormActivate`).

@@ -82,6 +82,7 @@ impl MpPasswGenWin {
         pb.set_buffer(&gtk::PasswordEntryBuffer::new().upcast::<gtk::EntryBuffer>());
         pb.set_invisible_char(Some(PASSWORD_CHAR));
         super::super::builder::add_css(&pb, "font-family: monospace;");
+        pb.add_css_class(super::tools::PASSW_FONT_CLASS);
         d.entry("PasswStatusBox").set_editable(false);
         if let Some(t) = main.b.try_get::<gtk::Label>("PasswInfoLbl").and_then(|l| l.tooltip_text()) {
             d.b.w("PasswInfoLbl").set_tooltip_text(Some(&t));
