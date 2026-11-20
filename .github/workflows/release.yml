@@ -35,7 +35,7 @@ jobs:
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
       DRY_RUN: ${{ inputs.dry_run || false }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.dry_run && github.sha || inputs.tag || github.sha }}
           fetch-depth: 0
@@ -79,16 +79,17 @@ jobs:
             bash packaging/build-deb.sh
           deb="target/release-files/pwtool_${v//-/.}_amd64.deb"
           dpkg-deb -f "$deb" Package Version Architecture Depends
-          dpkg-deb -c "$deb" | grep -E "bin/pwtool|manual\.pdf|scripting\.pdf|hicolor/.*/io\.github\.coinman_dev\.PwTool\.png"
-          dpkg-deb -c "$deb" | grep -q "usr/share/pwtool/manual.pdf"
-          dpkg-deb -c "$deb" | grep -q "usr/share/pwtool/scripting.pdf"
-      - uses: actions/upload-artifact@v4
+          contents="$(dpkg-deb -c "$deb")"
+          grep -E "bin/pwtool|manual\.pdf|scripting\.pdf|hicolor/.*/io\.github\.coinman_dev\.PwTool\.png" <<< "$contents"
+          grep -q "usr/share/pwtool/manual.pdf" <<< "$contents"
+          grep -q "usr/share/pwtool/scripting.pdf" <<< "$contents"
+      - uses: actions/upload-artifact@v7
         with:
           name: linux-release
           path: target/release-files/*.deb
           if-no-files-found: error
           retention-days: 3
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-notes
           path: target/notes/release-notes.md
@@ -108,11 +109,11 @@ jobs:
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
       GH_REPO: ${{ github.repository }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: linux-release
           path: dist
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: release-notes
           path: notes
