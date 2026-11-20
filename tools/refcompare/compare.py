@@ -1168,6 +1168,27 @@ def fmt_val(v, n=300):
     return t if len(t) <= n else t[:n] + '…(%d chars)' % len(t)
 
 
+def sanitize(text):
+    """Remove local details from the report: absolute paths (also as seen by
+    wine), the home directory and user name, and values that contain
+    uninitialized memory of the reference harness (control characters)."""
+    home = os.path.expanduser('~')
+    user = os.path.basename(home)
+    win_root = 'Z:' + ROOT.replace('/', '\\\\')
+    text = text.replace(win_root, 'Z:\\\\<repo>').replace(win_root.replace('\\\\', '\\'), 'Z:\\<repo>')
+    text = text.replace(ROOT + '/', '').replace(ROOT, '.')
+    text = text.replace(home, '~')
+    if user:
+        text = re.sub(r'\b%s\b' % re.escape(user), '<user>', text)
+
+    def mask(m):
+        v = m.group(0)
+        if re.search(r'\\x[01][0-9a-f]', v):
+            return "<uninitialized memory, %d characters>" % len(v)
+        return v
+    return re.sub(r"'[^'\n]{8,}'", mask, text)
+
+
 def write_report(path, areas, cases, cross_results, extra_notes, runtime):
     lines = []
     lines.append('# Сверка Rust-порта с оригинальным ядром Password Tech 3.6.1')
@@ -1244,7 +1265,7 @@ def write_report(path, areas, cases, cross_results, extra_notes, runtime):
             lines.append('- %s #%d: %s' % (c.area, c.id, c.note))
         lines.append('')
     with open(path, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(lines) + '\n')
+        f.write(sanitize('\n'.join(lines) + '\n'))
 
 
 # ---------------------------------------------------------------------------
