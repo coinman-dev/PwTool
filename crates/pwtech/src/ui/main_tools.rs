@@ -145,6 +145,17 @@ impl MainWindow {
         });
         self.act("MainMenu_File_RestoreSettings", |w| w.restore_settings());
         self.connect_list_menus();
+        // drag & drop of the password (`PasswGroupMouseMove` / `PasswInfoLblMouseMove`)
+        for name in ["PasswInfoLbl", "PasswGauge"] {
+            let w = Rc::downgrade(self);
+            crate::ui::util::add_text_drag_source(&self.b.w(name), move || {
+                w.upgrade().map(|w| Zeroizing::new(w.entry("PasswBox").text().to_string())).unwrap_or_default()
+            });
+        }
+        // Always on Top: not possible on Wayland
+        if gdk::Display::default().is_some_and(|d| d.type_().name().contains("Wayland")) {
+            self.b.action("MainMenu_Options_AlwaysOnTop").set_enabled(false);
+        }
         // password box font
         self.entry("PasswBox").add_css_class(PASSW_FONT_CLASS);
         if let Some(f) = crate::ui::util::FontSpec::parse(&self.core.borrow().ini.read_string("Main", "PasswBoxFont", "")) {

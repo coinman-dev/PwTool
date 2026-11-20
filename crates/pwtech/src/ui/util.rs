@@ -351,3 +351,19 @@ pub fn choose_font(parent: &gtk::Window, current: Option<&FontSpec>, done: impl 
         }
     });
 }
+
+/// Drag the text returned by `text` from `widget` to other programs
+/// (`StartEditBoxDragDrop()`: the password is dragged from the quality bar or
+/// the info label while the left mouse button is held).
+pub fn add_text_drag_source(widget: &impl IsA<gtk::Widget>, text: impl Fn() -> zeroize::Zeroizing<String> + 'static) {
+    let src = gtk::DragSource::new();
+    src.set_actions(gtk::gdk::DragAction::COPY);
+    src.connect_prepare(move |_, _, _| {
+        let t = text();
+        if t.is_empty() {
+            return None;
+        }
+        Some(gtk::gdk::ContentProvider::for_value(&t.as_str().to_value()))
+    });
+    widget.add_controller(src);
+}

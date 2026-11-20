@@ -89,6 +89,16 @@ impl MpPasswGenWin {
         }
         d.load_config(&main.core.borrow().ini);
         d.connect();
+        for name in ["PasswInfoLbl", "PasswGauge"] {
+            let dd = Rc::downgrade(&d);
+            crate::ui::util::add_text_drag_source(&d.b.w(name), move || {
+                dd.upgrade().map(|d| Zeroizing::new(d.entry("PasswBox").text().to_string())).unwrap_or_default()
+            });
+        }
+        let dd = Rc::downgrade(&d);
+        crate::ui::util::add_text_drag_source(&d.b.w("ParameterLbl"), move || {
+            dd.upgrade().map(|d| Zeroizing::new(d.entry("ParameterBox").text().to_string())).unwrap_or_default()
+        });
         main.attach_entropy_events(&d.win);
         d
     }
