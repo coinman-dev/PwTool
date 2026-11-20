@@ -48,6 +48,7 @@ mod char_set_builder;
 mod mp_passw_gen;
 #[path = "main_integration.rs"]
 mod integration;
+pub use integration::show_tray_info;
 #[path = "main_tray.rs"]
 mod tray_main;
 

@@ -1,5 +1,6 @@
 //! GTK 4 user interface.
 
+pub mod active_window;
 pub mod autotype;
 pub mod builder;
 pub mod clipboard;
@@ -125,6 +126,11 @@ fn automate(w: Rc<main_window::MainWindow>, script: String) {
                     let (name, n) = rest.split_once(' ').unwrap_or((rest, "0"));
                     if let Some(nb) = find_widget(&w, name).and_then(|x| x.downcast::<gtk::Notebook>().ok()) {
                         nb.set_current_page(n.parse().ok());
+                    }
+                }
+                "activetitle" => {
+                    if let Some(app) = w.window.application() {
+                        println!("activetitle={:?}", active_window::active_window_title(&app).await);
                     }
                 }
                 "clip" => {

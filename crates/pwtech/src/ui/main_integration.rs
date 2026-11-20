@@ -146,6 +146,16 @@ impl MainWindow {
     }
 }
 
+/// `ShowTrayInfo()` / message box: information while the windows may be
+/// hidden.
+pub fn show_tray_info(w: &Rc<MainWindow>, text: &str, warning: bool) {
+    if w.window.is_visible() {
+        msg(Some(&w.win()), text, if warning { MsgIcon::Warning } else { MsgIcon::Info });
+    } else {
+        super::tray_main::show_notification(&w.window, text, warning);
+    }
+}
+
 /// Error while the windows may be hidden: notification or message box.
 fn show_error_somewhere(w: &Rc<MainWindow>, text: &str) {
     if w.window.is_visible() {

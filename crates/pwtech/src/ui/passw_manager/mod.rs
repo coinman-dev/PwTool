@@ -1020,15 +1020,77 @@ impl PasswManager {
         self.save_database(&save_name)
     }
 
-    /// Search the database for the keyword of the active window
-    /// (`SearchDbForKeyword()`). Not possible on Wayland: the title of the
-    /// foreground window is not available to applications.
-    pub fn search_db_for_keyword(&self, _autotype: bool) {
-        super::util::msg(
-            Some(&self.gwin()),
-            &trl("This function is not available on this system."),
-            super::util::MsgIcon::Warning,
-        );
+    /// Search the database for the keyword contained in the title of the
+    /// active window (`SearchDbForKeyword()`); with `autotype` the first
+    /// matching entry is typed. The title comes from KWin (KDE Plasma).
+    pub fn search_db_for_keyword(self: &Rc<Self>, autotype: bool) {
+        if !self.is_db_open() || self.item_changed.get() {
+            return;
+        }
+        let m = self.clone();
+        glib::spawn_future_local(async move {
+            let Some(main) = m.main.upgrade() else { return };
+            let Some(app) = main.window.application() else { return };
+            let title = crate::ui::active_window::active_window_title(&app).await;
+            let Some(title) = title else {
+                let text = trl("This function is not available on this system.");
+                if autotype {
+                    crate::ui::util::msg(Some(&main.window.clone().upcast()), &text, super::util::MsgIcon::Warning);
+                } else {
+                    m.show();
+                    super::util::msg(Some(&m.gwin()), &text, super::util::MsgIcon::Warning);
+                }
+                return;
+            };
+            use helpers::lower;
+            use pwtech_core::language::trl_format;
+            use pwtech_core::passw::database::FieldType;
+            let title_lc = lower(&title);
+            let mut found: Option<usize> = None;
+            {
+                let mut dbb = m.db.borrow_mut();
+                let Some(db) = dbb.as_mut() else { return };
+                for i in 0..db.len() {
+                    if !autotype {
+                        db.entry_mut(i).user_flags &= !DB_FLAG_FOUND;
+                    }
+                    let kw = db.entry(i).string(FieldType::Keyword).to_string();
+                    if !kw.is_empty() && title_lc.contains(lower(&kw).as_str()) {
+                        if found.is_none() {
+                            found = Some(i);
+                        }
+                        if autotype {
+                            break;
+                        }
+                        db.entry_mut(i).user_flags |= DB_FLAG_FOUND;
+                    }
+                }
+            }
+            let not_found = trl_format("No matching keyword found for window text\n\"%1\".", &[&title]);
+            if autotype {
+                match found {
+                    Some(i) => m.perform_autotype_for(i),
+                    None => crate::ui::main_window::show_tray_info(&main, &not_found, true),
+                }
+                return;
+            }
+            if let Some(i) = found {
+                m.search_mode.set(SEARCH_MODE_NORMAL);
+                m.apply_fonts();
+                m.reset_list_view(RELOAD_TAGS);
+                m.reset_nav_controls();
+                let kw = m.db.borrow().as_ref().map(|db| db.entry(i).string(pwtech_core::passw::database::FieldType::Keyword).to_string()).unwrap_or_default();
+                if let Some(sb) = m.b.try_get::<gtk::ComboBoxText>("SearchBox") {
+                    crate::ui::util::set_combo_text(&sb, &kw);
+                }
+                m.search_label.set_text(&trl("Search via hot key."));
+                m.update_menu_states();
+            }
+            m.show();
+            if found.is_none() {
+                super::util::msg(Some(&m.gwin()), &not_found, super::util::MsgIcon::Warning);
+            }
+        });
     }
 }
 
