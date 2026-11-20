@@ -129,6 +129,29 @@ pub fn language_names(code: &str) -> Option<(&'static str, &'static str)> {
         "ko" => ("Korean", "한국어"),
         "ar" => ("Arabic", "العربية"),
         "he" => ("Hebrew", "עברית"),
+        "vi" => ("Vietnamese", "Tiếng Việt"),
+        "id" => ("Indonesian", "Bahasa Indonesia"),
+        "ms" => ("Malay", "Bahasa Melayu"),
+        "th" => ("Thai", "ไทย"),
+        "fa" => ("Persian", "فارسی"),
+        "sr" => ("Serbian", "српски"),
+        "hr" => ("Croatian", "hrvatski"),
+        "bs" => ("Bosnian", "bosanski"),
+        "sl" => ("Slovenian", "slovenščina"),
+        "et" => ("Estonian", "eesti"),
+        "lt" => ("Lithuanian", "lietuvių"),
+        "lv" => ("Latvian", "latviešu"),
+        "ca" => ("Catalan", "català"),
+        "eu" => ("Basque", "euskara"),
+        "gl" => ("Galician", "galego"),
+        "is" => ("Icelandic", "íslenska"),
+        "sq" => ("Albanian", "shqip"),
+        "mk" => ("Macedonian", "македонски"),
+        "hi" => ("Hindi", "हिन्दी"),
+        "ka" => ("Georgian", "ქართული"),
+        "hy" => ("Armenian", "հայերեն"),
+        "az" => ("Azerbaijani", "azərbaycan"),
+        "kk" => ("Kazakh", "қазақ тілі"),
         _ => return None,
     })
 }
@@ -178,7 +201,8 @@ impl LanguageFile {
         let mut header = false;
         let mut line_no = 0;
 
-        for line in text.split('\n') {
+        let body = text.strip_suffix('\n').unwrap_or(text);
+        for line in body.split('\n') {
             line_no += 1;
             let l: Vec<char> = line.chars().collect();
             let starts = |p: &str| line.starts_with(p);
@@ -576,5 +600,28 @@ mod tests {
         let back = LanguageFile::load(&out, false).unwrap();
         assert!(back.map().len() + 5 >= gr.map().len());
         std::fs::remove_file(out).unwrap();
+    }
+
+    #[test]
+    fn po_trailing_empty_msgstr_succeeds() {
+        let path = std::env::temp_dir().join(format!("pwtool-po-trail-{}.po", std::process::id()));
+        let content = concat!(
+            "msgid \"\"\n",
+            "msgstr \"\"\n",
+            "\"Project-Id-Version: Password Tech 3.6.1\\n\"\n",
+            "\"Content-Type: text/plain; charset=UTF-8\\n\"\n",
+            "\"Language: ja\\n\"\n\n",
+            "msgid \"Hello\"\n",
+            "msgstr \"Konnichiwa\"\n\n",
+            "msgid \"Untranslated\"\n",
+            "msgstr \"\"\n",
+        );
+        std::fs::write(&path, content).unwrap();
+        let lf = LanguageFile::load(&path, false).unwrap();
+        assert_eq!(lf.code, "ja");
+        assert!(lf.name.contains("Japanese"), "name={}", lf.name);
+        assert_eq!(lf.translate("Hello"), Some("Konnichiwa"));
+        assert_eq!(lf.translate("Untranslated"), None);
+        std::fs::remove_file(path).unwrap();
     }
 }

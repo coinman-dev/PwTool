@@ -19,7 +19,7 @@ thread_local! {
 
 fn digest(text: &str) -> [u8; 32] {
     let units: Zeroizing<Vec<u8>> = Zeroizing::new(text.encode_utf16().flat_map(u16::to_le_bytes).collect());
-    pwtool_core::crypto::sha256(&units[..units.len().min(2_000_000)])
+    pwtool_core::crypto::sha256(&units[..units.len().min(1_000_000)])
 }
 
 fn clipboard() -> Option<gdk::Clipboard> {
@@ -91,7 +91,7 @@ pub fn clear_data(force: bool, done: impl FnOnce(bool) + 'static) {
         let current = r.ok().flatten().map(|s| Zeroizing::new(s.to_string()));
         let clear = match &current {
             Some(t) if !t.is_empty() => force || DIGEST.with(|d| *d.borrow() == Some(digest(t))),
-            _ => force,
+            _ => false,
         };
         if clear {
             let _ = cb2.set_content(None::<&gdk::ContentProvider>);

@@ -10,7 +10,6 @@
 //! The original runs scripts in a separate thread and kills it if the user
 //! cancels; here an instruction-count hook checks a cancel flag instead.
 
-use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -80,10 +79,181 @@ fn lua_error_message(e: &mlua::Error) -> String {
     if msg.is_empty() { format!("{E_LUA_ERROR}{kind}") } else { format!("{E_LUA_ERROR}{kind}\n{msg}") }
 }
 
+#[derive(Clone, Copy)]
+struct ApiCtx {
+    pg: Option<*const PasswordGenerator>,
+    rng: *mut (dyn RandomGenerator + 'static),
+}
+
+thread_local! {
+    static API_CTX: std::cell::Cell<Option<ApiCtx>> = const { std::cell::Cell::new(None) };
+}
+
+fn with_ctx<R>(f: impl FnOnce(Option<&PasswordGenerator>, &mut dyn RandomGenerator) -> mlua::Result<R>) -> mlua::Result<R> {
+    let ctx = API_CTX.get().ok_or_else(|| mlua::Error::runtime("pwtech API called outside script execution"))?;
+    // SAFETY: `API_CTX` is only set for the synchronous duration of `with_api`
+    // on the current thread and restored by `Guard::drop`, and Lua callbacks
+    // on a single Lua state do not run concurrently.
+    let pg = ctx.pg.map(|p| unsafe { &*p });
+    let rng = unsafe { &mut *ctx.rng };
+    f(pg, rng)
+}
+
+fn register_api(lua: &Lua) -> mlua::Result<()> {
+    let g = lua.globals();
+    g.set(
+        "pwtech_random",
+        lua.create_function(|lua, args: MultiValue| {
+            with_ctx(|_, r| {
+                if args.is_empty() {
+                    return Ok(MultiValue::from_vec(vec![Value::Number(randbl_52new(r))]));
+                }
+                let mut start = 1;
+                let mut end = to_int(lua, args.front());
+                if args.len() >= 2 {
+                    start = end;
+                    end = to_int(lua, args.get(1));
+                }
+                if end < start {
+                    return Ok(MultiValue::new());
+                }
+                let range = (end as i64 - start as i64 + 1) as u32;
+                let v = r.get_num_range(range) as i64 + start as i64;
+                Ok(MultiValue::from_vec(vec![Value::Integer(v as i32 as i64)]))
+            })
+        })?,
+    )?;
+    g.set(
+        "pwtech_password",
+        lua.create_function(|lua, args: MultiValue| {
+            with_ctx(|pg, r| {
+                let Some(pg) = pg else { return Ok(MultiValue::new()) };
+                if args.is_empty() {
+                    return Ok(MultiValue::new());
+                }
+                let len = to_int(lua, args.front());
+                if len <= 0 {
+                    return Ok(MultiValue::new());
+                }
+                let flags = to_int(lua, args.get(1)) as u32;
+                let p = pg.get_password(r, len.min(MAX_PASSW_CHARS as i32), flags);
+                let s = Zeroizing::new(w32_to_string(&p));
+                Ok(MultiValue::from_vec(vec![
+                    Value::String(lua.create_string(s.as_bytes())?),
+                    Value::Number(pg.custom_char_set_entropy() * len as f64),
+                ]))
+            })
+        })?,
+    )?;
+    g.set(
+        "pwtech_passphrase",
+        lua.create_function(|lua, args: MultiValue| {
+            with_ctx(|pg, r| {
+                let Some(pg) = pg else { return Ok(MultiValue::new()) };
+                if args.is_empty() {
+                    return Ok(MultiValue::new());
+                }
+                let words = to_int(lua, args.front()).min(100);
+                if words <= 0 {
+                    return Ok(MultiValue::new());
+                }
+                let chars = to_str(lua, args.get(1)).unwrap_or_default();
+                let chars = Zeroizing::new(str_to_w32(&chars));
+                let flags = to_int(lua, args.get(2)) as u32;
+                let (p, _) = pg.get_passphrase(r, words, &chars, flags);
+                let s = Zeroizing::new(w32_to_string(&p));
+                Ok(MultiValue::from_vec(vec![
+                    Value::String(lua.create_string(s.as_bytes())?),
+                    Value::Number(pg.word_list_entropy() * words as f64),
+                ]))
+            })
+        })?,
+    )?;
+    g.set(
+        "pwtech_phonetic",
+        lua.create_function(|lua, args: MultiValue| {
+            with_ctx(|pg, r| {
+                let Some(pg) = pg else { return Ok(MultiValue::new()) };
+                if args.is_empty() {
+                    return Ok(MultiValue::new());
+                }
+                let len = to_int(lua, args.front()).min(MAX_PASSW_CHARS as i32);
+                if len <= 0 {
+                    return Ok(MultiValue::new());
+                }
+                let flags = to_int(lua, args.get(1)) as u32;
+                let p = pg.get_phonetic_passw(r, len, flags);
+                let s = Zeroizing::new(w32_to_string(&p));
+                let e = pg.phonetic_entropy();
+                let sec = len as f64 * if flags & PASSW_FLAG_PHONETICMIXEDCASE != 0 { e + 1.0 } else { e };
+                Ok(MultiValue::from_vec(vec![
+                    Value::String(lua.create_string(s.as_bytes())?),
+                    Value::Number(sec),
+                ]))
+            })
+        })?,
+    )?;
+    g.set(
+        "pwtech_word",
+        lua.create_function(|lua, args: MultiValue| {
+            with_ctx(|pg, r| {
+                let Some(pg) = pg else { return Ok(MultiValue::new()) };
+                let index = if args.is_empty() {
+                    r.get_num_range(pg.word_list_size() as u32) as i32
+                } else {
+                    let i = to_int(lua, args.front()) - 1;
+                    if i < 0 || i >= pg.word_list_size() {
+                        return Ok(MultiValue::new());
+                    }
+                    i
+                };
+                let w = pg.get_word(index);
+                Ok(MultiValue::from_vec(vec![Value::String(lua.create_string(w.as_bytes())?)]))
+            })
+        })?,
+    )?;
+    g.set(
+        "pwtech_numwords",
+        lua.create_function(|_, _: MultiValue| {
+            with_ctx(|pg, _| {
+                let Some(pg) = pg else { return Ok(MultiValue::new()) };
+                Ok(MultiValue::from_vec(vec![Value::Integer(pg.word_list_size() as i64)]))
+            })
+        })?,
+    )?;
+    g.set(
+        "pwtech_format",
+        lua.create_function(|lua, args: MultiValue| {
+            with_ctx(|pg, r| {
+                let Some(pg) = pg else { return Ok(MultiValue::new()) };
+                if args.is_empty() {
+                    return Ok(MultiValue::new());
+                }
+                let Some(fmt) = to_str(lua, args.front()).filter(|s| !s.is_empty()) else {
+                    return Ok(MultiValue::new());
+                };
+                let flags = to_int(lua, args.get(1)) as u32;
+                let mut sec = 0.0;
+                let res = pg.get_format_passw(r, &str_to_w32(&fmt), flags, None, MAX_PASSW_CHARS, Some(&mut sec));
+                if res.passw.is_empty() {
+                    return Ok(MultiValue::new());
+                }
+                let s = Zeroizing::new(w32_to_string(&res.passw));
+                Ok(MultiValue::from_vec(vec![
+                    Value::String(lua.create_string(s.as_bytes())?),
+                    Value::Number(sec),
+                ]))
+            })
+        })?,
+    )?;
+    Ok(())
+}
+
 impl LuaScript {
-    /// New interpreter with the standard libraries.
+    /// New interpreter with the standard libraries and permanent `pwtech_*` API.
     pub fn new() -> Self {
         let lua = Lua::new();
+        let _ = register_api(&lua);
         let cancel = Arc::new(AtomicBool::new(false));
         let c = cancel.clone();
         let _ = lua.set_hook(HookTriggers::new().every_nth_instruction(10_000), move |_, _| {
@@ -110,159 +280,24 @@ impl LuaScript {
         self.flags
     }
 
-    /// Run `f` with the `pwtech_*` functions (Lua API of the original) bound to `pg` and `rng`.
+    /// Run `f` with the thread-local `pwtech_*` API context bound to `pg` and `rng`.
     fn with_api<R>(
         &self,
         pg: Option<&PasswordGenerator>,
         rng: &mut dyn RandomGenerator,
         f: impl FnOnce(&Lua) -> mlua::Result<R>,
     ) -> mlua::Result<R> {
-        let rng = RefCell::new(rng);
-        let lua = &self.lua;
-        lua.scope(|scope| {
-            let g = lua.globals();
-            let rngr = &rng;
-            g.set(
-                "pwtech_random",
-                scope.create_function(move |lua, args: MultiValue| {
-                    let mut r = rngr.borrow_mut();
-                    if args.is_empty() {
-                        return Ok(MultiValue::from_vec(vec![Value::Number(randbl_52new(&mut **r))]));
-                    }
-                    let mut start = 1;
-                    let mut end = to_int(lua, args.front());
-                    if args.len() >= 2 {
-                        start = end;
-                        end = to_int(lua, args.get(1));
-                    }
-                    if end < start {
-                        return Ok(MultiValue::new());
-                    }
-                    let range = (end as i64 - start as i64 + 1) as u32;
-                    let v = r.get_num_range(range) as i64 + start as i64;
-                    Ok(MultiValue::from_vec(vec![Value::Integer(v as i32 as i64)]))
-                })?,
-            )?;
-            g.set(
-                "pwtech_password",
-                scope.create_function(move |lua, args: MultiValue| {
-                    let Some(pg) = pg else { return Ok(MultiValue::new()) };
-                    if args.is_empty() {
-                        return Ok(MultiValue::new());
-                    }
-                    let len = to_int(lua, args.front());
-                    if len <= 0 {
-                        return Ok(MultiValue::new());
-                    }
-                    let flags = to_int(lua, args.get(1)) as u32;
-                    let p = pg.get_password(&mut **rngr.borrow_mut(), len.min(MAX_PASSW_CHARS as i32), flags);
-                    let s = Zeroizing::new(w32_to_string(&p));
-                    Ok(MultiValue::from_vec(vec![
-                        Value::String(lua.create_string(s.as_bytes())?),
-                        Value::Number(pg.custom_char_set_entropy() * len as f64),
-                    ]))
-                })?,
-            )?;
-            g.set(
-                "pwtech_passphrase",
-                scope.create_function(move |lua, args: MultiValue| {
-                    let Some(pg) = pg else { return Ok(MultiValue::new()) };
-                    if args.is_empty() {
-                        return Ok(MultiValue::new());
-                    }
-                    let words = to_int(lua, args.front()).min(100);
-                    if words <= 0 {
-                        return Ok(MultiValue::new());
-                    }
-                    let chars = to_str(lua, args.get(1)).unwrap_or_default();
-                    let chars = Zeroizing::new(str_to_w32(&chars));
-                    let flags = to_int(lua, args.get(2)) as u32;
-                    let (p, _) = pg.get_passphrase(&mut **rngr.borrow_mut(), words, &chars, flags);
-                    let s = Zeroizing::new(w32_to_string(&p));
-                    Ok(MultiValue::from_vec(vec![
-                        Value::String(lua.create_string(s.as_bytes())?),
-                        Value::Number(pg.word_list_entropy() * words as f64),
-                    ]))
-                })?,
-            )?;
-            g.set(
-                "pwtech_phonetic",
-                scope.create_function(move |lua, args: MultiValue| {
-                    let Some(pg) = pg else { return Ok(MultiValue::new()) };
-                    if args.is_empty() {
-                        return Ok(MultiValue::new());
-                    }
-                    let len = to_int(lua, args.front()).min(MAX_PASSW_CHARS as i32);
-                    if len <= 0 {
-                        return Ok(MultiValue::new());
-                    }
-                    let flags = to_int(lua, args.get(1)) as u32;
-                    let p = pg.get_phonetic_passw(&mut **rngr.borrow_mut(), len, flags);
-                    let s = Zeroizing::new(w32_to_string(&p));
-                    let e = pg.phonetic_entropy();
-                    let sec = len as f64 * if flags & PASSW_FLAG_PHONETICMIXEDCASE != 0 { e + 1.0 } else { e };
-                    Ok(MultiValue::from_vec(vec![
-                        Value::String(lua.create_string(s.as_bytes())?),
-                        Value::Number(sec),
-                    ]))
-                })?,
-            )?;
-            g.set(
-                "pwtech_word",
-                scope.create_function(move |lua, args: MultiValue| {
-                    let Some(pg) = pg else { return Ok(MultiValue::new()) };
-                    let index = if args.is_empty() {
-                        rngr.borrow_mut().get_num_range(pg.word_list_size() as u32) as i32
-                    } else {
-                        let i = to_int(lua, args.front()) - 1;
-                        if i < 0 || i >= pg.word_list_size() {
-                            return Ok(MultiValue::new());
-                        }
-                        i
-                    };
-                    let w = pg.get_word(index);
-                    Ok(MultiValue::from_vec(vec![Value::String(lua.create_string(w.as_bytes())?)]))
-                })?,
-            )?;
-            g.set(
-                "pwtech_numwords",
-                scope.create_function(move |_, _: MultiValue| {
-                    let Some(pg) = pg else { return Ok(MultiValue::new()) };
-                    Ok(MultiValue::from_vec(vec![Value::Integer(pg.word_list_size() as i64)]))
-                })?,
-            )?;
-            g.set(
-                "pwtech_format",
-                scope.create_function(move |lua, args: MultiValue| {
-                    let Some(pg) = pg else { return Ok(MultiValue::new()) };
-                    if args.is_empty() {
-                        return Ok(MultiValue::new());
-                    }
-                    let Some(fmt) = to_str(lua, args.front()).filter(|s| !s.is_empty()) else {
-                        return Ok(MultiValue::new());
-                    };
-                    let flags = to_int(lua, args.get(1)) as u32;
-                    let mut sec = 0.0;
-                    let res = pg.get_format_passw(
-                        &mut **rngr.borrow_mut(),
-                        &str_to_w32(&fmt),
-                        flags,
-                        None,
-                        MAX_PASSW_CHARS,
-                        Some(&mut sec),
-                    );
-                    if res.passw.is_empty() {
-                        return Ok(MultiValue::new());
-                    }
-                    let s = Zeroizing::new(w32_to_string(&res.passw));
-                    Ok(MultiValue::from_vec(vec![
-                        Value::String(lua.create_string(s.as_bytes())?),
-                        Value::Number(sec),
-                    ]))
-                })?,
-            )?;
-            f(lua)
-        })
+        struct Guard(Option<ApiCtx>);
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                API_CTX.set(self.0);
+            }
+        }
+        // SAFETY: lifetime erasure is strictly scoped to this function call via `Guard`.
+        let rng_ptr: *mut (dyn RandomGenerator + 'static) = unsafe { std::mem::transmute(rng as *mut dyn RandomGenerator) };
+        let prev = API_CTX.replace(Some(ApiCtx { pg: pg.map(|p| p as *const _), rng: rng_ptr }));
+        let _guard = Guard(prev);
+        f(&self.lua)
     }
 
     /// `LoadFile()`: load and run the script's top-level code.
@@ -320,13 +355,16 @@ impl LuaScript {
         num_words: i32,
         format: &str,
     ) -> Result<bool, LuaError> {
-        self.initialized = true;
         let f: Option<mlua::Function> = self.lua.globals().get("init").ok();
-        let Some(f) = f else { return Ok(false) };
+        let Some(f) = f else {
+            self.initialized = true;
+            return Ok(false);
+        };
         self.with_api(Some(pg), rng, |_| {
             f.call::<()>((num_passw as i64, dest_type, gen_flags, advanced_flags as i64, num_chars, num_words, format))
         })
         .map_err(|e| LuaError(lua_error_message(&e)))?;
+        self.initialized = true;
         Ok(true)
     }
 
@@ -469,5 +507,43 @@ mod tests {
         for f in [p, p2, p3] {
             let _ = std::fs::remove_file(f);
         }
+    }
+
+    #[test]
+    fn cached_api_fn_and_reset_init() {
+        let pg = PasswordGenerator::new();
+        let mut rng = AesCtrPrng::from_seed(b"cached");
+        let p = script(
+            r#"
+            local rnd = pwtech_random
+            local inits = 0
+            function init(num)
+              if num == 0 then error("fail") end
+              inits = inits + 1
+            end
+            function generate(num)
+              return tostring(inits) .. ":" .. tostring(rnd(10, 20)), 1.0
+            end
+            "#,
+        );
+        let mut s = LuaScript::new();
+        s.load_file(&p, Some(&pg), &mut rng).unwrap();
+        assert!(!s.is_initialized());
+        // Failed init() must leave initialized == false
+        assert!(s.init_generate(&pg, &mut rng, 0, 0, 1, 0, 8, 0, "").is_err());
+        assert!(!s.is_initialized());
+        // Successful init() marks initialized == true and cached rnd works in generate()
+        s.init_generate(&pg, &mut rng, 1, 0, 1, 0, 8, 0, "").unwrap();
+        assert!(s.is_initialized());
+        let (pw1, _) = s.call_generate(&pg, &mut rng, 1, None, 0.0).unwrap();
+        assert!(pw1.starts_with("1:"), "{:?}", pw1.as_str());
+        // reset_init clears initialized flag
+        s.reset_init();
+        assert!(!s.is_initialized());
+        s.init_generate(&pg, &mut rng, 1, 0, 1, 0, 8, 0, "").unwrap();
+        assert!(s.is_initialized());
+        let (pw2, _) = s.call_generate(&pg, &mut rng, 1, None, 0.0).unwrap();
+        assert!(pw2.starts_with("2:"), "{:?}", pw2.as_str());
+        let _ = std::fs::remove_file(p);
     }
 }

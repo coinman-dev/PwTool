@@ -84,6 +84,11 @@ pub fn run(cmd: CmdLineOptions) -> i32 {
         .map(|s| s.flags() & pwtool_core::scripting::FLAG_STANDALONE_PASSW_GEN != 0)
         .unwrap_or(false);
     let has_script = script.is_some();
+    if req.chars_len == 0 && req.num_words == 0 && req.format.is_empty() && !has_script {
+        drop(pool);
+        app.write_rand_seed_file();
+        return 0;
+    }
     let mut hook_state = script.as_mut().map(|s| {
         let standalone = s.flags() & pwtool_core::scripting::FLAG_STANDALONE_PASSW_GEN != 0;
         (s, standalone)

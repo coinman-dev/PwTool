@@ -251,6 +251,20 @@ impl DbList {
         self.store.splice(0, self.store.n_items(), &objs);
     }
 
+    pub fn replace_row(&self, i: u32, row: RowData) {
+        if (i as usize) < self.keys.borrow().len() {
+            self.keys.borrow_mut()[i as usize] = row.key;
+            let obj: glib::Object = glib::BoxedAnyObject::new(row).upcast();
+            self.store.splice(i, 1, &[obj]);
+        }
+    }
+
+    pub fn append_row(&self, row: RowData) {
+        self.keys.borrow_mut().push(row.key);
+        let obj: glib::Object = glib::BoxedAnyObject::new(row).upcast();
+        self.store.append(&obj);
+    }
+
     pub fn clear(&self) {
         self.keys.borrow_mut().clear();
         self.store.remove_all();

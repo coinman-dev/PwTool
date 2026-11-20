@@ -24,6 +24,7 @@ impl ColSelectDlg {
         let b = build_form(load_form("PasswMngColSelect"), "PasswMngColSelect");
         let win = form_window(&b, Some(parent), true);
         win.set_hide_on_close(true);
+        super::helpers::close_on_escape(&win);
         Rc::new(ColSelectDlg { b, win })
     }
 

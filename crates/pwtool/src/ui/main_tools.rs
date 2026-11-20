@@ -28,8 +28,8 @@ pub(super) struct ToolsState {
     profile_accels: RefCell<Vec<String>>,
     last_cache_countdown: Cell<i64>,
     last_total_bits: Cell<i64>,
-    /// Number of visible windows when "Always on Top" was last applied.
-    top_windows: Cell<usize>,
+    /// Identity of visible windows when "Always on Top" was last applied.
+    top_windows: RefCell<Vec<usize>>,
     /// Font of the password boxes set by the user.
     pub passw_font: RefCell<Option<crate::ui::util::FontSpec>>,
 }
@@ -50,7 +50,7 @@ impl ToolsState {
             profile_accels: RefCell::new(Vec::new()),
             last_cache_countdown: Cell::new(-1),
             last_total_bits: Cell::new(-1),
-            top_windows: Cell::new(0),
+            top_windows: RefCell::new(Vec::new()),
             passw_font: RefCell::new(None),
         }
     }
@@ -119,8 +119,11 @@ impl MainWindow {
         }
         self.click("PasswMngBtn", |w| w.show_passw_manager());
         self.act("PasswBoxMenu_AddToDb", |w| {
-            let passw = Zeroizing::new(w.entry("PasswBox").text().to_string());
-            w.add_passw_to_db(&passw, true, None);
+            let e = w.entry("PasswBox");
+            if let Some((s, end)) = e.selection_bounds() {
+                let passw = Zeroizing::new(e.chars(s, end).to_string());
+                w.add_passw_to_db(&passw, false, None);
+            }
         });
         self.act("PasswBoxMenu_PerformAutotype", |w| {
             let passw = Zeroizing::new(w.entry("PasswBox").text().to_string());
@@ -164,7 +167,7 @@ impl MainWindow {
         });
         // Always on Top (`TopMostManager`): KWin keeps the windows above
         self.act("MainMenu_Options_AlwaysOnTop", |w| {
-            w.tools.top_windows.set(0);
+            w.tools.top_windows.borrow_mut().clear();
             w.apply_always_on_top();
         });
         // password box font
@@ -285,13 +288,16 @@ impl MainWindow {
         self.update_total_ent_bits_menu();
         // new windows also have to stay on top
         if self.action_checked("MainMenu_Options_AlwaysOnTop") {
-            let n = gtk::Window::list_toplevels()
+            use gtk::glib::object::ObjectType;
+            let mut ids: Vec<usize> = gtk::Window::list_toplevels()
                 .into_iter()
                 .filter_map(|x| x.downcast::<gtk::Window>().ok())
                 .filter(|x| x.is_visible())
-                .count();
-            if n != self.tools.top_windows.get() {
-                self.tools.top_windows.set(n);
+                .map(|x| x.as_ptr() as usize)
+                .collect();
+            ids.sort_unstable();
+            if *self.tools.top_windows.borrow() != ids {
+                *self.tools.top_windows.borrow_mut() = ids;
                 self.apply_always_on_top();
             }
         }
@@ -339,6 +345,7 @@ impl MainWindow {
         if let Some(pl) = self.passw_list.borrow().as_ref() {
             pl.save_config(ini);
         }
+        super::super::dialogs::save_quick_help_config(ini);
         ini.write_string(
             "Main",
             "PasswBoxFont",
@@ -473,7 +480,11 @@ impl MainWindow {
         match result {
             Ok(()) => {
                 let m = trl(if encrypt { "Text successfully encrypted." } else { "Text successfully decrypted." });
-                info_box(&parent, &m);
+                if self.tray.hidden.get() {
+                    show_tray_info(self, &m, false);
+                } else {
+                    info_box(&parent, &m);
+                }
             }
             Err(e) => {
                 let m = match e {
@@ -559,8 +570,11 @@ impl MainWindow {
         remove.connect_activate(move |_, p| {
             let (Some(w), Some(name)) = (w.upgrade(), p.and_then(|p| p.get::<String>())) else { return };
             let cb = w.combo(&name);
-            if let Some(i) = cb.active() {
-                let text = combo_text(&cb);
+            let text = combo_text(&cb);
+            let idx = cb.active().or_else(|| {
+                w.combo_items(&name).iter().position(|s| s == &text).map(|i| i as u32)
+            });
+            if let Some(i) = idx {
                 cb.remove(i as i32);
                 set_combo_text(&cb, &text);
             }
@@ -585,9 +599,8 @@ impl MainWindow {
                 .await
                     == MsgResult::Yes
                 {
-                    let text = combo_text(&cb);
                     cb.remove_all();
-                    set_combo_text(&cb, &text);
+                    set_combo_text(&cb, "");
                 }
             });
         });
@@ -612,6 +625,24 @@ impl MainWindow {
             menu.append_item(&item);
             e.set_extra_menu(Some(&menu));
             e.set_enable_undo(true);
+            // update Remove/Clear enabled states when opening the context menu
+            let gesture = gtk::GestureClick::new();
+            gesture.set_button(gdk::BUTTON_SECONDARY);
+            gesture.set_propagation_phase(gtk::PropagationPhase::Capture);
+            let w = Rc::downgrade(self);
+            let (rem_a, clr_a) = (remove.clone(), clear.clone());
+            let cname = name.to_string();
+            gesture.connect_pressed(move |_, _, _, _| {
+                if let Some(w) = w.upgrade() {
+                    let cb = w.combo(&cname);
+                    let items = w.combo_items(&cname);
+                    let text = combo_text(&cb);
+                    let has_entry = cb.active().is_some() || items.iter().any(|s| s == &text);
+                    rem_a.set_enabled(has_entry);
+                    clr_a.set_enabled(!items.is_empty());
+                }
+            });
+            e.add_controller(gesture);
         }
     }
 
@@ -777,13 +808,6 @@ impl MainWindow {
             let b = build_form(load_form("ProvideEntropy"), "ProvideEntropy");
             let win = super::super::dialogs::form_window(&b, Some(&self.win()), true);
             win.set_hide_on_close(true);
-            {
-                let core = self.core.borrow();
-                win.set_default_size(
-                    core.ini.read_int("ProvideEntropy", "WindowWidth", b.client.0).max(b.client.0),
-                    core.ini.read_int("ProvideEntropy", "WindowHeight", b.client.1).max(b.client.1),
-                );
-            }
             if let Some(l) = b.try_get::<gtk::Label>("InfoLbl") {
                 l.set_wrap(true);
             }
@@ -817,6 +841,7 @@ impl MainWindow {
             let view2 = view.clone();
             win.connect_hide(move |_| view2.buffer().set_text(""));
             win.set_default_widget(Some(&ok));
+            crate::ui::util::close_on_escape(&win);
             self.attach_entropy_events(&win);
             *self.tools.provide_entropy.borrow_mut() = Some((b, win));
         }
@@ -834,10 +859,6 @@ impl MainWindow {
             win.set_hide_on_close(true);
             {
                 let core = self.core.borrow();
-                win.set_default_size(
-                    core.ini.read_int("CreateRandDataFile", "WindowWidth", b.client.0).max(b.client.0),
-                    b.client.1,
-                );
                 b.get::<gtk::Entry>("FileSizeBox").set_text(&core.ini.read_string("CreateRandDataFile", "FileSize", ""));
                 let units: gtk::ComboBoxText = b.get("SizeUnitList");
                 let items: Vec<String> = b.obj("SizeUnitList").map(|o| o.strings("Items.Strings")).unwrap_or_default().iter().map(|s| trl(s)).collect();
@@ -849,6 +870,8 @@ impl MainWindow {
             let create: gtk::Button = b.get("CreateFileBtn");
             let name_box: gtk::Entry = b.get("FileNameBox");
             let size_box: gtk::Entry = b.get("FileSizeBox");
+            name_box.set_activates_default(true);
+            size_box.set_activates_default(true);
             let update = {
                 let (create, name_box, size_box) = (create.clone(), name_box.clone(), size_box.clone());
                 move || create.set_sensitive(name_box.text_length() != 0 && size_box.text_length() != 0)
@@ -879,6 +902,7 @@ impl MainWindow {
                 }
             });
             win.set_default_widget(Some(&create));
+            crate::ui::util::close_on_escape(&win);
             self.attach_entropy_events(&win);
             *self.tools.rand_data_file.borrow_mut() = Some((b, win));
         }
@@ -1000,10 +1024,10 @@ impl MainWindow {
         if let GenRng::Det(g) = rng {
             *self.key_seeded_prng.borrow_mut() = Some(g);
         }
-        let err = match r {
-            Err(e) => Some(e.to_string()),
-            Ok(()) if cancel.load(Ordering::Relaxed) => Some(trl("Process cancelled by user")),
-            Ok(()) => None,
+        let err = if cancel.load(Ordering::Relaxed) {
+            Some(trl("Process was cancelled by the user"))
+        } else {
+            r.err().map(|e| e.to_string())
         };
         match err {
             Some(e) => {
@@ -1040,13 +1064,11 @@ impl MainWindow {
             let b = build_form(load_form("CreateTrigramFile"), "CreateTrigramFile");
             let win = super::super::dialogs::form_window(&b, Some(&self.win()), true);
             win.set_hide_on_close(true);
-            win.set_default_size(
-                self.core.borrow().ini.read_int("CreateTrigramFile", "WindowWidth", b.client.0).max(b.client.0),
-                b.client.1,
-            );
             let create: gtk::Button = b.get("CreateFileBtn");
             let src: gtk::Entry = b.get("SourceFileBox");
             let dest: gtk::Entry = b.get("DestFileBox");
+            src.set_activates_default(true);
+            dest.set_activates_default(true);
             let update = {
                 let (create, src, dest) = (create.clone(), src.clone(), dest.clone());
                 move || create.set_sensitive(src.text_length() != 0 && dest.text_length() != 0)
@@ -1129,6 +1151,7 @@ impl MainWindow {
                 msg(Some(&win2), &m, icon);
             });
             win.set_default_widget(Some(&create));
+            crate::ui::util::close_on_escape(&win);
             self.attach_entropy_events(&win);
             *self.tools.trigram_file.borrow_mut() = Some((b, win));
         }
@@ -1144,7 +1167,6 @@ impl MainWindow {
             let b = build_form(load_form("About"), "About");
             let win = super::super::dialogs::form_window(&b, Some(&self.win()), true);
             win.set_hide_on_close(true);
-            win.set_resizable(false);
             win.set_title(Some(&trl_format("About %1", &[PROGRAM_NAME])));
             b.get::<gtk::Label>("ProgramLbl").set_text(PROGRAM_NAME);
             b.get::<gtk::Label>("VersionLbl").set_text(&format!(
@@ -1181,7 +1203,7 @@ impl MainWindow {
                 let le = &core.languages[core.language];
                 if le.file_name.is_some() {
                     (
-                        format!("{} (v{})", le.name, le.version),
+                        le.name.clone(),
                         pwtool_core::language::translator_name().unwrap_or_default(),
                     )
                 } else {
@@ -1198,6 +1220,8 @@ impl MainWindow {
                 l.set_text(&trl("Community"));
             }
             if let Some(p) = b.try_get::<gtk::Picture>("Logo") {
+                p.set_can_shrink(true);
+                p.set_content_fit(gtk::ContentFit::Contain);
                 let bytes = glib::Bytes::from_static(include_bytes!("../../../../assets/about_logo.png"));
                 if let Ok(t) = gdk::Texture::from_bytes(&bytes) {
                     p.set_paintable(Some(&t));
@@ -1207,6 +1231,7 @@ impl MainWindow {
             let ok: gtk::Button = b.get("OKBtn");
             ok.connect_clicked(move |_| win2.close());
             win.set_default_widget(Some(&ok));
+            crate::ui::util::close_on_escape(&win);
             *self.tools.about.borrow_mut() = Some((b, win));
         }
         if let Some((_, win)) = self.tools.about.borrow().as_ref() {

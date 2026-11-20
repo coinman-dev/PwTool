@@ -814,7 +814,8 @@ impl PasswordGenerator {
                     dest.push(ch);
                     if flags & PASSW_FLAG_EACHCHARONLYONCE != 0 && dest.len() < length {
                         for set in freq.iter_mut().skip(item_idx) {
-                            if let Ok(pos) = set.0.binary_search(&ch) {
+                            let pos = set.0.partition_point(|&c| c < ch);
+                            if set.0.get(pos) == Some(&ch) {
                                 set.0.remove(pos);
                             }
                         }
@@ -1858,5 +1859,19 @@ mod tests {
             Err(WordListError::TooFewWords)
         ));
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn unsorted_subset_freq_each_char_once() {
+        let mut g = PasswordGenerator::new();
+        // <punct> is unsorted; partition_point matches std::lower_bound
+        g.setup_char_sets("<punct>:2<09>", "", "", false, false, false);
+        let mut r = rng();
+        for _ in 0..20 {
+            let p = s(&g.get_password(&mut r, 8, PASSW_FLAG_EACHCHARONLYONCE));
+            assert_eq!(p.chars().count(), 8);
+            let uniq: HashSet<char> = p.chars().collect();
+            assert_eq!(uniq.len(), 8);
+        }
     }
 }

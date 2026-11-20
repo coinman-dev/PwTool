@@ -128,7 +128,7 @@ impl MainWindow {
                             let mng = w.passw_mng.borrow().clone();
                             if let Some(m) = mng {
                                 let t = m.win.title().map(|t| t.to_string()).unwrap_or_default();
-                                if t == caption && w.core.borrow().config.database.lock_minimize {
+                                if t == caption && w.core.borrow().config.database.lock_minimize && !w.is_autotype_active() {
                                     m.lock_if_open();
                                 }
                             }
@@ -156,8 +156,8 @@ impl MainWindow {
 
     /// `AppMinimize()`.
     fn app_minimize(self: &Rc<Self>) {
-        // lock the database (`LockMinimize`)
-        if self.core.borrow().config.database.lock_minimize {
+        // lock the database (`LockMinimize`), except while minimizing for autotype
+        if self.core.borrow().config.database.lock_minimize && !self.is_autotype_active() {
             let mng = self.passw_mng.borrow().clone();
             if let Some(m) = mng {
                 m.lock_if_open();
@@ -176,16 +176,20 @@ impl MainWindow {
     }
 
     /// Show the main window again (`RestoreAction()` / `AppRestore()`).
-    pub fn restore_from_tray(&self) {
+    pub fn restore_from_tray(self: &Rc<Self>) {
         self.tray.hidden.set(false);
         self.window.set_visible(true);
         self.window.unminimize();
         self.window.present();
         self.update_tray_icon();
+        if !self.startup_shown.get() {
+            let w = self.clone();
+            glib::idle_add_local_once(move || w.show_startup_errors());
+        }
     }
 
     /// `TrayIconDblClick()`.
-    fn tray_activate(&self) {
+    fn tray_activate(self: &Rc<Self>) {
         if self.tray.hidden.get() || !self.window.is_visible() {
             self.restore_from_tray();
         } else {

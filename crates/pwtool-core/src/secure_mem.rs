@@ -57,8 +57,8 @@ unsafe impl Send for LockedPage {}
 unsafe impl Sync for LockedPage {}
 
 impl LockedPage {
-    /// Allocate a new zero-filled page.
-    pub fn new() -> Self {
+    /// Allocate a new zero-filled page, locking it into RAM if `lock` is true.
+    pub fn alloc(lock: bool) -> Self {
         // SAFETY: anonymous private mapping, checked for failure below.
         let ptr = unsafe {
             libc::mmap(
@@ -76,9 +76,14 @@ impl LockedPage {
         // SAFETY: ptr is a valid mapping of PAGE_SIZE bytes.
         let locked = unsafe {
             libc::madvise(ptr, PAGE_SIZE, libc::MADV_DONTDUMP);
-            libc::mlock(ptr, PAGE_SIZE) == 0
+            lock && libc::mlock(ptr, PAGE_SIZE) == 0
         };
         LockedPage { ptr: NonNull::new(ptr.cast()).unwrap(), locked }
+    }
+
+    /// Allocate a new zero-filled locked page.
+    pub fn new() -> Self {
+        Self::alloc(true)
     }
 
     pub fn is_locked(&self) -> bool {

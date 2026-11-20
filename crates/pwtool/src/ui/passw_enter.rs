@@ -95,8 +95,6 @@ impl PasswEnterDlg {
         if let Some(l) = b.try_get::<gtk::Label>("KeyFileLbl") {
             l.add_css_class("heading");
         }
-        // the dialog is only resizable horizontally
-        win.set_default_size(ini.read_int(CONFIG_ID, "WindowWidth", b.client.0).max(b.client.0), b.client.1);
         let d = Rc::new(PasswEnterDlg {
             b,
             win,

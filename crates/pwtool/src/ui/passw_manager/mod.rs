@@ -133,6 +133,15 @@ impl FilterType {
             _ => FilterType::None,
         }
     }
+
+    fn id(self) -> &'static str {
+        match self {
+            FilterType::None => "none",
+            FilterType::Expired => "expired",
+            FilterType::ExpireSoon => "soon",
+            FilterType::WeakPassw => "weak",
+        }
+    }
 }
 
 /// The password manager window (`TPasswMngForm`).
@@ -962,10 +971,10 @@ impl PasswManager {
         self.is_db_open() && (self.db_changed.get() || self.item_changed.get())
     }
 
-    /// "Add to Database" of the main window and the password list
-    /// (`AddPassw(passw, blShowNumPassw)`): one entry per line.
-    pub fn add_passw_to_db(self: &Rc<Self>, passw: &str, show_num_passw: bool) -> usize {
-        self.add_passw(passw, show_num_passw, None)
+    /// "Add to Database" of the main window, MP generator, and password list
+    /// (`AddPassw(passw, blShowNumPassw, param)`): one entry per line.
+    pub fn add_passw_to_db(self: &Rc<Self>, passw: &str, show_num_passw: bool, param: Option<&str>) -> usize {
+        self.add_passw(passw, show_num_passw, param)
     }
 
     /// `CloseQuery()` of the main window: close the database (asking to
@@ -1069,7 +1078,7 @@ impl PasswManager {
             let not_found = trl_format("No matching keyword found for window text\n\"%1\".", &[&title]);
             if autotype {
                 match found {
-                    Some(i) => m.perform_autotype_for(i),
+                    Some(i) => m.perform_autotype_for_inner(i, false),
                     None => crate::ui::main_window::show_tray_info(&main, &not_found, true),
                 }
                 return;
@@ -1099,10 +1108,13 @@ impl PasswManager {
     /// selected entry (key-value "Autotype" or the default sequence).
     pub(super) fn perform_autotype_for(self: &Rc<Self>, index: usize) {
         let Some(main) = self.main.upgrade() else { return };
-        let (delay, minimize) = {
-            let c = &main.core.borrow().config;
-            (c.autotype_delay.clamp(0, 10000) as u32, c.minimize_autotype)
-        };
+        let minimize = main.core.borrow().config.minimize_autotype;
+        self.perform_autotype_for_inner(index, minimize);
+    }
+
+    fn perform_autotype_for_inner(self: &Rc<Self>, index: usize, minimize: bool) {
+        let Some(main) = self.main.upgrade() else { return };
+        let delay = main.core.borrow().config.autotype_delay.clamp(0, 10000) as u32;
         let default_seq = self.db_config().default_autotype_sequence;
         let strokes = {
             let db = self.db.borrow();

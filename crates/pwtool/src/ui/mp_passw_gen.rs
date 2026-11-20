@@ -116,10 +116,6 @@ impl MpPasswGenWin {
     }
 
     fn load_config(&self, ini: &pwtool_core::config::IniFile) {
-        self.win.set_default_size(
-            ini.read_int(CONFIG_ID, "WindowWidth", self.b.client.0).max(self.b.client.0),
-            ini.read_int(CONFIG_ID, "WindowHeight", self.b.client.1).max(self.b.client.1),
-        );
         self.check("ConfirmPasswCheck").set_active(ini.read_bool(CONFIG_ID, "ConfirmPassw", false));
         self.check("ShowPasswHashCheck").set_active(ini.read_bool(CONFIG_ID, "ShowPasswHash", true));
         let h = ini.read_int(CONFIG_ID, "PasswHashType", PasswHashType::Hex16Bit as i32);
@@ -234,7 +230,36 @@ impl MpPasswGenWin {
         });
         // password box menu
         if let Some(m) = self.b.menus.get("PasswBoxMenu") {
-            self.entry("PasswBox").set_extra_menu(Some(m));
+            let pop = super::super::builder::attach_context_menu_capture(&self.entry("PasswBox"), m);
+            let d = Rc::downgrade(self);
+            pop.connect_show(move |_| {
+                if let Some(d) = d.upgrade() {
+                    let e = d.entry("PasswBox");
+                    let editable = e.is_editable();
+                    let selected = e.selection_bounds().is_some();
+                    let has_text = e.text_length() > 0;
+                    let db_open = d
+                        .main
+                        .upgrade()
+                        .and_then(|m| m.passw_mng.borrow().as_ref().map(|pm| pm.is_db_open()))
+                        .unwrap_or(false);
+                    for (name, en) in [
+                        ("PasswBoxMenu_Undo", editable),
+                        ("PasswBoxMenu_Cut", editable && selected),
+                        ("PasswBoxMenu_Copy", selected),
+                        ("PasswBoxMenu_EncryptCopy", selected),
+                        ("PasswBoxMenu_Paste", editable),
+                        ("PasswBoxMenu_Delete", editable && selected),
+                        ("PasswBoxMenu_PerformAutotype", has_text),
+                        ("PasswBoxMenu_AddToDatabase", has_text && db_open),
+                        ("PasswBoxMenu_SelectAll", has_text),
+                    ] {
+                        if d.b.has_action(name) {
+                            d.b.action(name).set_enabled(en);
+                        }
+                    }
+                }
+            });
         }
         let acts: [(&str, fn(&Rc<Self>)); 5] = [
             ("PasswBoxMenu_Copy", |d| {
@@ -256,6 +281,9 @@ impl MpPasswGenWin {
             }),
             ("PasswBoxMenu_PerformAutotype", |d| {
                 let passw = Zeroizing::new(d.entry("PasswBox").text().to_string());
+                if passw.is_empty() {
+                    return;
+                }
                 let param = Zeroizing::new(d.entry("ParameterBox").text().to_string());
                 let seq = d.entry("AutotypeBox").text().to_string();
                 if let Some(m) = d.main.upgrade() {

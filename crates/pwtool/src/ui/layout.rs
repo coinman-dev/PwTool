@@ -50,6 +50,9 @@ mod imp {
         pub design_h: Cell<i32>,
         pub min_w: Cell<i32>,
         pub min_h: Cell<i32>,
+        /// Fixed size of the container (0 = none), see `set_fixed_size()`.
+        pub fix_w: Cell<i32>,
+        pub fix_h: Cell<i32>,
     }
 
     #[glib::object_subclass]
@@ -69,11 +72,12 @@ mod imp {
 
     impl WidgetImpl for VclBox {
         fn measure(&self, orientation: gtk::Orientation, _for_size: i32) -> (i32, i32, i32, i32) {
-            if orientation == gtk::Orientation::Horizontal {
-                (self.min_w.get(), self.design_w.get().max(self.min_w.get()), -1, -1)
+            let (fix, min, design) = if orientation == gtk::Orientation::Horizontal {
+                (self.fix_w.get(), self.min_w.get(), self.design_w.get())
             } else {
-                (self.min_h.get(), self.design_h.get().max(self.min_h.get()), -1, -1)
-            }
+                (self.fix_h.get(), self.min_h.get(), self.design_h.get())
+            };
+            if fix > 0 { (fix, fix, -1, -1) } else { (min, design.max(min), -1, -1) }
         }
 
         fn size_allocate(&self, width: i32, height: i32, _baseline: i32) {
@@ -167,6 +171,15 @@ impl VclBox {
     pub fn set_min_size(&self, w: i32, h: i32) {
         self.imp().min_w.set(w);
         self.imp().min_h.set(h);
+        self.queue_resize();
+    }
+
+    /// Fixed size: minimum and natural size are both `w` × `h`, whatever the
+    /// design size is (the children are laid out by their anchors as if the
+    /// form had been resized to it). Used for windows that cannot be resized.
+    pub fn set_fixed_size(&self, w: i32, h: i32) {
+        self.imp().fix_w.set(w);
+        self.imp().fix_h.set(h);
         self.queue_resize();
     }
 

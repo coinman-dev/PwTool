@@ -33,14 +33,41 @@ impl MainWindow {
         self.send_keys(parent, strokes, minimize);
     }
 
+    /// Abort any running autotype sequence.
+    pub(super) fn abort_autotype(&self) {
+        if let Some(a) = self.autotype_abort.borrow_mut().take() {
+            a.set(true);
+        }
+    }
+
+    /// Whether an autotype sequence is currently in progress (suppresses
+    /// `LockMinimize` when minimizing for autotype).
+    pub fn is_autotype_active(&self) -> bool {
+        self.autotype_active.get()
+    }
+
     /// Type key strokes into the window that gets the focus next.
     pub(super) fn send_keys(self: &Rc<Self>, parent: &gtk::Window, strokes: Vec<autotype::KeyStroke>, minimize: bool) {
         if strokes.is_empty() {
             return;
         }
+        // abort any previously running autotype before starting a new one
+        self.abort_autotype();
+        let abort = Rc::new(Cell::new(false));
+        *self.autotype_abort.borrow_mut() = Some(abort.clone());
         let w = self.clone();
         let parent = parent.clone();
         glib::spawn_future_local(async move {
+            struct ActiveGuard(Rc<MainWindow>, Rc<Cell<bool>>);
+            impl Drop for ActiveGuard {
+                fn drop(&mut self) {
+                    self.0.autotype_active.set(false);
+                    let mut slot = self.0.autotype_abort.borrow_mut();
+                    if slot.as_ref().is_some_and(|cur| Rc::ptr_eq(cur, &self.1)) {
+                        slot.take();
+                    }
+                }
+            }
             let token = w.core.borrow().ini.read_string("Main", AUTOTYPE_TOKEN_KEY, "");
             // permission first: the desktop may show a dialog
             match autotype::prepare(Some(&parent), &token).await {
@@ -58,27 +85,33 @@ impl MainWindow {
                     return;
                 }
             }
+            if abort.get() {
+                return;
+            }
+            w.autotype_active.set(true);
+            let _guard = ActiveGuard(w.clone(), abort.clone());
             if minimize {
                 parent.minimize();
                 w.window.minimize();
-            } else {
-                // `TSendKeysThread`: wait until another window is active
-                let start = std::time::Instant::now();
-                loop {
-                    let ours_active = gtk::Window::list_toplevels()
-                        .into_iter()
-                        .filter_map(|x| x.downcast::<gtk::Window>().ok())
-                        .any(|x| x.is_visible() && x.is_active());
-                    if !ours_active {
-                        break;
-                    }
-                    if start.elapsed().as_secs() >= 10 {
-                        return;
-                    }
-                    glib::timeout_future(std::time::Duration::from_millis(100)).await;
-                }
             }
-            let abort = Rc::new(Cell::new(false));
+            // `TSendKeysThread`: wait until another window is active (even after minimize)
+            let start = std::time::Instant::now();
+            loop {
+                if abort.get() {
+                    return;
+                }
+                let ours_active = gtk::Window::list_toplevels()
+                    .into_iter()
+                    .filter_map(|x| x.downcast::<gtk::Window>().ok())
+                    .any(|x| x.is_visible() && x.is_active());
+                if !ours_active {
+                    break;
+                }
+                if start.elapsed().as_secs() >= 10 {
+                    return;
+                }
+                glib::timeout_future(std::time::Duration::from_millis(100)).await;
+            }
             if let Err(e) = autotype::send(None, "", strokes, abort).await {
                 show_error_somewhere(&w, &format!("{}\n\n{e}", trl("Autotype failed.")));
             }
@@ -104,12 +137,11 @@ impl MainWindow {
     /// `TPasswMngForm::AddPassw()`: add passwords to the open database
     /// (`show_num`: report the number of added passwords).
     pub(super) fn add_passw_to_db(self: &Rc<Self>, passw: &str, show_num: bool, param: Option<&str>) {
-        let _ = param;
         let m = self.passw_manager();
         if !m.is_db_open() {
             return;
         }
-        m.add_passw_to_db(passw, show_num);
+        m.add_passw_to_db(passw, show_num, param);
     }
 
     /// `PasswMngBtnClick()`.

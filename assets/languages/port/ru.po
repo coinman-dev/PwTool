@@ -83,7 +83,7 @@ msgid "Dark"
 msgstr "Тёмный"
 
 msgid "Default (dark)"
-msgstr "Стандартный (тёмный)"
+msgstr "Стандартный"
 
 msgid "Blue"
 msgstr "Синий"
@@ -111,3 +111,6 @@ msgstr "Для переводчиков: в формат PO..."
 
 msgid "Community"
 msgstr "Сообщество"
+
+msgid "Reset to default"
+msgstr "Установить по умолчанию"

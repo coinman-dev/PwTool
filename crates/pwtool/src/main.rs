@@ -17,7 +17,7 @@ fn main() {
     if app::restart_requested() {
         use std::os::unix::process::CommandExt;
         if let Ok(exe) = std::env::current_exe() {
-            let err = std::process::Command::new(exe).args(std::env::args_os().skip(1)).exec();
+            let err = std::process::Command::new(exe).exec();
             eprintln!("pwtool: restart failed: {err}");
         }
     }

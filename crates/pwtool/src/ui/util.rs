@@ -127,8 +127,30 @@ pub async fn msg_box(
     dlg.add_controller(key);
     dlg.present();
     let _ = rx.recv().await;
+    pwtool_core::random::EntropyManager::global().add_event(
+        &mut pwtool_core::random::RandomPool::global(),
+        pwtool_core::random::EntropyEventType::Other,
+        0,
+        0,
+        &[],
+        1,
+    );
     let r = result.borrow().unwrap_or(esc);
     r
+}
+
+/// Close a dialog window with Escape (`Cancel = true` buttons of VCL).
+pub fn close_on_escape(win: &gtk::Window) {
+    let key = gtk::EventControllerKey::new();
+    let w = win.clone();
+    key.connect_key_pressed(move |_, k, _, _| {
+        if k == gtk::gdk::Key::Escape {
+            w.close();
+            return glib::Propagation::Stop;
+        }
+        glib::Propagation::Proceed
+    });
+    win.add_controller(key);
 }
 
 /// Fire-and-forget message box.
@@ -187,21 +209,96 @@ pub fn set_combo_items(cb: &gtk::ComboBoxText, items: &[String]) {
 /// Open a URL or file with the desktop's default application
 /// (`ExecuteShellOp`).
 pub fn open_uri(parent: Option<&gtk::Window>, uri: &str) {
-    let uri = if uri.contains("://") || uri.starts_with("mailto:") {
+    let uri = uri.trim();
+    if uri.is_empty() {
+        return;
+    }
+    let p = parent.cloned();
+    // In GTK4, `UriLauncher` rejects `file://` URIs (especially via the
+    // xdg-desktop-portal OpenURI interface); local files must use `FileLauncher`.
+    let local_file = if uri.starts_with("file://") {
+        Some(gio::File::for_uri(uri))
+    } else if uri.contains("://") || uri.starts_with("mailto:") {
+        None
+    } else if std::path::Path::new(uri).exists()
+        || uri.starts_with('/')
+        || uri.starts_with("./")
+        || uri.starts_with("../")
+    {
+        Some(gio::File::for_path(uri))
+    } else if uri.contains('.') && !uri.contains(char::is_whitespace) {
+        None
+    } else {
+        Some(gio::File::for_path(uri))
+    };
+    if let Some(file) = local_file {
+        open_local_file(parent, file);
+        return;
+    }
+    let target = if uri.contains("://") || uri.starts_with("mailto:") {
         uri.to_string()
     } else {
-        gio::File::for_path(uri).uri().to_string()
+        format!("http://{uri}")
     };
-    let launcher = gtk::UriLauncher::new(&uri);
-    let p = parent.cloned();
-    let u = uri.clone();
+    let ctx = gtk::gdk::Display::default().map(|d| d.app_launch_context());
+    if gio::AppInfo::launch_default_for_uri(&target, ctx.as_ref()).is_ok() {
+        return;
+    }
+    let launcher = gtk::UriLauncher::new(&target);
+    let u = target.clone();
     launcher.launch(parent, gio::Cancellable::NONE, move |r| {
-        if r.is_err() {
-            msg(
-                p.as_ref(),
-                &pwtool_core::language::trl_format("Could not open file/execute operation\n\"%1\".", &[&u]),
-                MsgIcon::Error,
-            );
+        if let Err(e) = r {
+            eprintln!("pwtool: UriLauncher failed: {e}");
+            let spawned = std::process::Command::new("xdg-open").arg(&u).spawn().is_ok();
+            if !spawned {
+                msg(
+                    p.as_ref(),
+                    &pwtool_core::language::trl_format("Could not open file/execute operation\n\"%1\".", &[&u]),
+                    MsgIcon::Error,
+                );
+            }
+        }
+    });
+}
+
+/// Open a local file with the default application. Tries, in this order:
+/// the default handler of the file type via GIO (spawns e.g. Okular
+/// directly), `gtk::FileLauncher` (OpenURI portal) and `xdg-open`.
+fn open_local_file(parent: Option<&gtk::Window>, file: gio::File) {
+    let p = parent.cloned();
+    // canonical path for the handler and for the error message
+    let file = file
+        .path()
+        .and_then(|path| std::fs::canonicalize(path).ok())
+        .map(gio::File::for_path)
+        .unwrap_or(file);
+    let display = file.path().map(|x| x.to_string_lossy().into_owned()).unwrap_or_else(|| file.uri().to_string());
+    let fail = move |p: Option<&gtk::Window>| {
+        msg(
+            p,
+            &pwtool_core::language::trl_format("Could not open file/execute operation\n\"%1\".", &[&display]),
+            MsgIcon::Error,
+        );
+    };
+    if file.path().is_some_and(|x| !x.exists()) {
+        fail(p.as_ref());
+        return;
+    }
+    let ctx = gtk::gdk::Display::default().map(|d| d.app_launch_context());
+    if gio::AppInfo::launch_default_for_uri(&file.uri(), ctx.as_ref()).is_ok() {
+        return;
+    }
+    let launcher = gtk::FileLauncher::new(Some(&file));
+    launcher.launch(parent, gio::Cancellable::NONE, move |r| {
+        if let Err(e) = r {
+            eprintln!("pwtool: FileLauncher failed: {e}");
+            let spawned = file
+                .path()
+                .and_then(|path| std::process::Command::new("xdg-open").arg(path).spawn().ok())
+                .is_some();
+            if !spawned {
+                fail(p.as_ref());
+            }
         }
     });
 }

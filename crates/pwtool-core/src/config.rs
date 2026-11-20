@@ -94,7 +94,7 @@ impl IniFile {
             } else if let Some(i) = cur {
                 if let Some(eq) = s.find('=') {
                     let k = s[..eq].trim().to_string();
-                    let v = s[eq + 1..].to_string();
+                    let v = s[eq + 1..].trim().to_string();
                     let sec = &mut ini.sections[i].1;
                     if let Some(e) = sec.iter_mut().find(|(kk, _)| kk.eq_ignore_ascii_case(&k)) {
                         e.1 = v;
@@ -441,16 +441,20 @@ pub struct GeneratorSettings {
     pub include_chars: bool,
     pub chars_length: i32,
     pub char_set_list: Vec<String>,
+    pub char_set_text: String,
     pub include_words: bool,
     pub words_num: i32,
     pub wlfn_list: Vec<String>,
+    pub wlfn_text: String,
     pub combine_words_chars: bool,
     pub passphr_spec_len: bool,
     pub passphr_spec_len_string: String,
     pub format_passw: bool,
     pub format_list: Vec<String>,
+    pub format_text: String,
     pub run_script: bool,
     pub script_list: Vec<String>,
+    pub script_text: String,
     pub num_passw: String,
     pub include_header: bool,
     pub passw_options: PasswOptions,
@@ -493,20 +497,32 @@ impl GeneratorSettings {
         if format_list.is_empty() {
             format_list = FORMATLIST_DEFAULTENTRIES.iter().map(|x| x.to_string()).collect();
         }
+        let char_set_list = limit_list(char_set_list);
+        let wlfn_list = limit_list(wlfn_list);
+        let format_list = limit_list(format_list);
+        let script_list = limit_list(parse_comma_text(&ini.read_string(s, "ScriptListEntries", "")));
+        let char_set_text = char_set_list.first().cloned().unwrap_or_default();
+        let wlfn_text = wlfn_list.first().cloned().unwrap_or_default();
+        let format_text = format_list.first().cloned().unwrap_or_default();
+        let script_text = script_list.first().cloned().unwrap_or_default();
         GeneratorSettings {
             include_chars: ini.read_bool(s, "IncludeChars", true),
             chars_length: ini.read_int(s, "CharsLength", 16) as i16 as i32,
-            char_set_list: limit_list(char_set_list),
+            char_set_list,
+            char_set_text,
             include_words: ini.read_bool(s, "IncludeWords", false),
             words_num: ini.read_int(s, "WordsNum", 8),
-            wlfn_list: limit_list(wlfn_list),
+            wlfn_list,
+            wlfn_text,
             combine_words_chars: ini.read_bool(s, "CombineWordsChars", false),
             passphr_spec_len: ini.read_bool(s, "PassphrSpecLen", false),
             passphr_spec_len_string: ini.read_string(s, "PassphrSpecLenString", ""),
             format_passw: ini.read_bool(s, "FormatPassw", false),
-            format_list: limit_list(format_list),
+            format_list,
+            format_text,
             run_script: ini.read_bool(s, "RunScript", false),
-            script_list: limit_list(parse_comma_text(&ini.read_string(s, "ScriptListEntries", ""))),
+            script_list,
+            script_text,
             num_passw: ini.read_string(s, "NumPassw", "100"),
             include_header: ini.read_bool(s, "PasswListIncludeHeader", true),
             passw_options,
@@ -534,54 +550,47 @@ impl GeneratorSettings {
         write_passw_options(ini, s, &self.passw_options);
     }
 
-    /// `CreateProfile()`: current settings as a profile; the "current" entry
-    /// of each list is its first element.
+    /// `CreateProfile()`: current settings as a profile, using the current box
+    /// texts (not mutating or falling back to history lists).
     pub fn to_profile(&self, name: &str, save_advanced_options: bool) -> PwGenProfile {
         PwGenProfile {
             profile_name: name.to_string(),
             include_chars: self.include_chars,
             chars_length: self.chars_length,
-            char_set: self.char_set_list.first().cloned().unwrap_or_default(),
+            char_set: self.char_set_text.clone(),
             include_words: self.include_words,
             words_num: self.words_num,
-            word_list_file_name: self.wlfn_list.first().cloned().unwrap_or_default(),
+            word_list_file_name: self.wlfn_text.clone(),
             combine_words_chars: self.combine_words_chars,
             specify_length: self.passphr_spec_len,
             specify_length_string: self.passphr_spec_len_string.clone(),
             format_passw: self.format_passw,
-            format_string: self.format_list.first().cloned().unwrap_or_default(),
+            format_string: self.format_text.clone(),
             run_script: self.run_script,
-            script_file_name: self.script_list.first().cloned().unwrap_or_default(),
+            script_file_name: self.script_text.clone(),
             num_passw: self.num_passw.clone(),
             include_header: self.include_header,
             advanced_passw_options: save_advanced_options.then(|| self.passw_options.clone()),
         }
     }
 
-    /// `LoadProfile()`: apply a profile. List texts become the first entry.
+    /// `LoadProfile()`: apply a profile to the current box texts without
+    /// polluting the history lists (entries are only added to history on
+    /// successful load/use, as in upstream `Main.cpp:1892-1903`).
     pub fn apply_profile(&mut self, p: &PwGenProfile) {
-        fn set_first(list: &mut Vec<String>, v: &str) {
-            if let Some(i) = list.iter().position(|x| x == v) {
-                list.remove(i);
-            }
-            list.insert(0, v.to_string());
-            list.truncate(LISTS_MAX_ENTRIES);
-        }
         self.include_chars = p.include_chars;
         self.chars_length = p.chars_length;
-        set_first(&mut self.char_set_list, &p.char_set);
+        self.char_set_text = p.char_set.clone();
         self.include_words = p.include_words;
         self.words_num = p.words_num;
-        set_first(&mut self.wlfn_list, &p.word_list_file_name);
+        self.wlfn_text = p.word_list_file_name.clone();
         self.combine_words_chars = p.combine_words_chars;
         self.passphr_spec_len = p.specify_length;
         self.passphr_spec_len_string = p.specify_length_string.clone();
         self.format_passw = p.format_passw;
-        set_first(&mut self.format_list, &p.format_string);
+        self.format_text = p.format_string.clone();
         self.run_script = p.run_script;
-        if !p.script_file_name.is_empty() {
-            set_first(&mut self.script_list, &p.script_file_name);
-        }
+        self.script_text = p.script_file_name.clone();
         self.num_passw = p.num_passw.clone();
         self.include_header = p.include_header;
         if let Some(o) = &p.advanced_passw_options {
@@ -628,5 +637,19 @@ mod tests {
         assert_eq!(limit_string_len("abcdefghijklm", 10), "abcdefghij");
         assert_eq!(str_to_int_def("0x1F", 0), 31);
         assert_eq!(str_to_int_def("abc", 7), 7);
+    }
+
+    #[test]
+    fn ini_trims_values_and_profile_preserves_history() {
+        let ini = IniFile::parse("[Main]\nKey =   value with spaces   \n");
+        assert_eq!(ini.read_string("Main", "Key", ""), "value with spaces");
+
+        let mut gs = GeneratorSettings::load(&ini);
+        let orig_list = gs.char_set_list.clone();
+        let mut prof = gs.to_profile("P1", false);
+        prof.char_set = "<09>".to_string();
+        gs.apply_profile(&prof);
+        assert_eq!(gs.char_set_text, "<09>");
+        assert_eq!(gs.char_set_list, orig_list, "applying a profile must not mutate history list");
     }
 }

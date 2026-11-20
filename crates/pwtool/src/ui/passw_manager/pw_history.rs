@@ -11,7 +11,6 @@ use pwtool_core::language::trl;
 use pwtool_core::passw::database::{MAX_PASSW_HISTORY_SIZE, PasswHistory};
 use zeroize::Zeroizing;
 
-use super::helpers::close_on_escape;
 use super::table::Table;
 use crate::ui::builder::{Built, build_form};
 use crate::ui::dialogs::form_window;
@@ -52,12 +51,9 @@ impl PwHistoryDlg {
         let table = Table::new(&[trl("Set Date/Time"), trl("Password")], &widths);
         let sw: gtk::ScrolledWindow = b.get("HistoryView");
         sw.set_child(Some(&table.view));
-        let h = ini.read_int(CONFIG_ID, "WindowHeight", -1);
-        let w = ini.read_int(CONFIG_ID, "WindowWidth", -1);
-        if w > 0 && h > 0 {
-            win.set_default_size(w, h);
+        if let Some(e) = b.try_get::<gtk::Entry>("HistorySizeBox") {
+            e.set_activates_default(true);
         }
-        close_on_escape(&win);
         let d = Rc::new(PwHistoryDlg { b, win, table });
         let dd = d.clone();
         d.b.get::<gtk::CheckButton>("EnableHistoryCheck").connect_toggled(move |_| dd.enable_history_check());
@@ -114,7 +110,7 @@ impl PwHistoryDlg {
                 s.push_str(&r.cells[1]);
             }
         }
-        crate::ui::clipboard::set_data(&s);
+        crate::ui::clipboard::set_hidden(&s);
     }
 
     /// Show the history; `None` if cancelled.

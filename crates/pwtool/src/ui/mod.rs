@@ -47,15 +47,35 @@ pub fn run(cmd: CmdLineOptions) -> i32 {
             return;
         }
         let core = AppCore::new(cmd.clone());
+        // window icon (X11; on Wayland the compositor takes it from the
+        // desktop file): the installed hicolor icon, or the bundled PNGs
+        // when running from the build tree
+        if let Some(display) = gtk::gdk::Display::default() {
+            let theme = gtk::IconTheme::for_display(&display);
+            if !theme.has_icon(APP_ID) {
+                let dev = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/dev-icons");
+                for s in [16, 32, 48, 64, 128, 256] {
+                    let dir = dev.join(format!("hicolor/{s}x{s}/apps"));
+                    let src = core.paths.resources.join(format!("appicons/pwtool_default_{s}.png"));
+                    if src.is_file() && std::fs::create_dir_all(&dir).is_ok() {
+                        let _ = std::fs::copy(&src, dir.join(format!("{APP_ID}.png")));
+                    }
+                }
+                theme.add_search_path(&dev);
+            }
+        }
+        gtk::Window::set_default_icon_name(APP_ID);
         let silent = core.cmd.silent;
         let w = main_window::MainWindow::new(app, core);
+        let w_mng = w.clone();
+        glib::idle_add_local_once(move || w_mng.startup_open_manager());
         if !silent {
             w.window.present();
+            let w2 = w.clone();
+            glib::idle_add_local_once(move || w2.show_startup_errors());
         } else {
             w.start_hidden();
         }
-        let w2 = w.clone();
-        glib::idle_add_local_once(move || w2.show_startup_errors());
         if let Ok(script) = std::env::var("PWTOOL_AUTOMATE") {
             automate(w.clone(), script);
         }
@@ -84,7 +104,8 @@ pub fn run(cmd: CmdLineOptions) -> i32 {
 /// Test automation for headless runs (`PWTOOL_AUTOMATE`): commands separated
 /// by `;` — `click NAME`, `act NAME`, `text NAME VALUE`, `wait MS`,
 /// `snap PATH` (main window), `snapall DIR` (all windows), `print NAME`
-/// (text of a label/entry to stdout), `quit`.
+/// (text of a label/entry to stdout), `sizes` (sizes of the visible
+/// windows), `quit`.
 fn automate(w: Rc<main_window::MainWindow>, script: String) {
     let cmds: Vec<String> = script.split(';').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
     glib::spawn_future_local(async move {
@@ -113,7 +134,10 @@ fn automate(w: Rc<main_window::MainWindow>, script: String) {
                         Some(x) => {
                             if let Some(e) = x.downcast_ref::<gtk::Entry>() {
                                 e.set_text(val);
-                            } else if let Some(cb) = x.downcast_ref::<gtk::ComboBoxText>() {
+                            } else if let Some(cb) = {
+                                #[allow(deprecated)]
+                                x.downcast_ref::<gtk::ComboBoxText>()
+                            } {
                                 util::set_combo_text(cb, val);
                             } else if let Some(tv) = x.downcast_ref::<gtk::TextView>() {
                                 tv.buffer().set_text(val);
@@ -191,6 +215,22 @@ fn automate(w: Rc<main_window::MainWindow>, script: String) {
                     }
                     None => eprintln!("automate: no widget {rest}"),
                 },
+                "sizes" => {
+                    println!("scale={}", w.b.scale);
+                    for win in gtk::Window::list_toplevels() {
+                        if let Ok(win) = win.downcast::<gtk::Window>() {
+                            if win.is_visible() {
+                                println!(
+                                    "size: {} {}x{} resizable={}",
+                                    win.title().unwrap_or_default(),
+                                    win.width(),
+                                    win.height(),
+                                    win.is_resizable()
+                                );
+                            }
+                        }
+                    }
+                }
                 "windows" => {
                     for win in gtk::Window::list_toplevels() {
                         if let Ok(win) = win.downcast::<gtk::Window>() {

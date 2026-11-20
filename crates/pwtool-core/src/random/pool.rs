@@ -193,7 +193,7 @@ impl RandomPool {
     /// with `lock_phys_mem`, the data starts at a random offset of the page.
     pub fn new(cipher: PoolCipherType, fast_rng: Option<Jsf32>, lock_phys_mem: bool) -> Self {
         let mut pool = RandomPool {
-            page: LockedPage::new(),
+            page: LockedPage::alloc(lock_phys_mem),
             offset: 0,
             lock_phys_mem,
             randomize_fixed_items_added: false,
@@ -501,25 +501,32 @@ impl RandomPool {
 
     /// Write 64 random bytes to the seed file (`WriteSeedFile()`).
     pub fn write_seed_file(&mut self, path: &Path) -> bool {
+        let Ok(mut f) = fs::File::create(path) else {
+            return false;
+        };
         self.set_key();
         let mut buf = Zeroizing::new([0u8; 2 * POOL_SIZE]);
         self.get_data(&mut buf[..]);
         self.flush();
-        fs::File::create(path).and_then(|mut f| f.write_all(&buf[..])).is_ok()
+        f.write_all(&buf[..]).is_ok()
     }
 
     /// Add the contents of the seed file to the pool (`ReadSeedFile()`);
     /// returns `true` if at least `POOL_SIZE` bytes were read.
     pub fn read_seed_file(&mut self, path: &Path) -> bool {
-        match fs::read(path) {
-            Ok(data) => {
-                let data = Zeroizing::new(data);
-                let n = data.len().min(2 * POOL_SIZE);
-                self.add_data(&data[..n]);
-                n >= POOL_SIZE
-            }
-            Err(_) => false,
+        use std::io::Read;
+        let Ok(f) = fs::File::open(path) else {
+            return false;
+        };
+        let mut data = Zeroizing::new(Vec::with_capacity(2 * POOL_SIZE));
+        if f.take((2 * POOL_SIZE) as u64).read_to_end(&mut data).is_err() {
+            return false;
         }
+        let n = data.len();
+        if n > 0 {
+            self.add_data(&data[..n]);
+        }
+        n >= POOL_SIZE
     }
 }
 

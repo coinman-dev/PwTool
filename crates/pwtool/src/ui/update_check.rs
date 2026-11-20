@@ -59,35 +59,39 @@ fn dechunk(mut body: &[u8]) -> Vec<u8> {
 }
 
 /// HTTPS GET with GIO (TLS from glib-networking). Returns status and body.
-async fn https_get(host: &str, path: &str) -> Result<(u32, Vec<u8>), String> {
+async fn https_get(host: &str, path: &str, timeout_secs: u32) -> Result<(u32, Vec<u8>), (String, bool)> {
     let client = gio::SocketClient::new();
     client.set_tls(true);
-    client.set_timeout(15);
-    let conn = client.connect_to_host_future(host, 443).await.map_err(|e| e.to_string())?;
+    client.set_timeout(timeout_secs);
+    let map_err = |e: glib::Error| {
+        let timed_out = e.matches(gio::IOErrorEnum::TimedOut);
+        (e.to_string(), timed_out)
+    };
+    let conn = client.connect_to_host_future(host, 443).await.map_err(map_err)?;
     let req = format!(
         "GET {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: pwtool-update-check\r\nAccept: application/vnd.github+json\r\nConnection: close\r\n\r\n"
     );
     conn.output_stream()
         .write_all_future(req.into_bytes(), glib::Priority::DEFAULT)
         .await
-        .map_err(|(_, e)| e.to_string())?;
+        .map_err(|(_, e)| map_err(e))?;
     let input = conn.input_stream();
     let mut data = Vec::new();
     loop {
         let buf = vec![0u8; 16384];
-        let (buf, n) = input.read_future(buf, glib::Priority::DEFAULT).await.map_err(|(_, e)| e.to_string())?;
+        let (buf, n) = input.read_future(buf, glib::Priority::DEFAULT).await.map_err(|(_, e)| map_err(e))?;
         if n == 0 {
             break;
         }
         data.extend_from_slice(&buf[..n]);
         if data.len() > 4 << 20 {
-            return Err("response too large".into());
+            return Err(("response too large".into(), false));
         }
     }
     let _ = conn.close_future(glib::Priority::DEFAULT).await;
-    let head_end = data.windows(4).position(|w| w == b"\r\n\r\n").ok_or("invalid HTTP response")?;
+    let head_end = data.windows(4).position(|w| w == b"\r\n\r\n").ok_or(("invalid HTTP response".into(), false))?;
     let head = String::from_utf8_lossy(&data[..head_end]).to_string();
-    let status: u32 = head.split_whitespace().nth(1).and_then(|s| s.parse().ok()).ok_or("invalid HTTP response")?;
+    let status: u32 = head.split_whitespace().nth(1).and_then(|s| s.parse().ok()).ok_or(("invalid HTTP response".into(), false))?;
     let mut body = data[head_end + 4..].to_vec();
     if head.lines().any(|l| l.to_ascii_lowercase().replace(' ', "") == "transfer-encoding:chunked") {
         body = dechunk(&body);
@@ -95,19 +99,19 @@ async fn https_get(host: &str, path: &str) -> Result<(u32, Vec<u8>), String> {
     Ok((status, body))
 }
 
-async fn latest_release(repo: &str) -> Result<Release, String> {
-    let (status, body) = https_get("api.github.com", &format!("/repos/{repo}/releases/latest")).await?;
+async fn latest_release(repo: &str, timeout_secs: u32) -> Result<Release, (String, bool)> {
+    let (status, body) = https_get("api.github.com", &format!("/repos/{repo}/releases/latest"), timeout_secs).await?;
     if !(200..=299).contains(&status) {
-        return Err(format!("{} ({status})", trl("Could not download version file")));
+        return Err((format!("{} ({status})", trl("Could not download version file")), false));
     }
-    let v: serde_json::Value = serde_json::from_slice(&body).map_err(|e| e.to_string())?;
+    let v: serde_json::Value = serde_json::from_slice(&body).map_err(|e| (e.to_string(), false))?;
     let tag = v.get("tag_name").and_then(|t| t.as_str()).unwrap_or("");
     let version = tag.trim_start_matches(['v', 'V']).to_string();
     let url = v.get("html_url").and_then(|t| t.as_str()).unwrap_or("").to_string();
     let note = v.get("name").and_then(|t| t.as_str()).unwrap_or("").to_string();
     let parts: Vec<&str> = version.split('.').collect();
     if parts.len() != 3 || parts.iter().any(|p| p.parse::<u32>().is_err()) || url.is_empty() {
-        return Err(trl("Version or URL not specified in version file, or unknown file format"));
+        return Err((trl("Version or URL not specified in version file, or unknown file format"), false));
     }
     Ok(Release { version, url, note })
 }
@@ -116,7 +120,9 @@ async fn latest_release(repo: &str) -> Result<Release, String> {
 /// reported by the caller/here.
 pub async fn check_for_updates(parent: Option<&gtk::Window>, show_error: bool) -> CheckResult {
     let Some(repo) = repo_path() else { return CheckResult::NotConfigured };
-    match latest_release(&repo).await {
+    // Automatic startup check uses a short 3s timeout; manual check uses 15s
+    let timeout_secs = if show_error { 15 } else { 3 };
+    match latest_release(&repo, timeout_secs).await {
         Ok(r) => {
             if crate::app::compare_versions(&r.version, PORT_VERSION) > 0 {
                 let mut m = trl_format(
@@ -135,7 +141,7 @@ pub async fn check_for_updates(parent: Option<&gtk::Window>, show_error: bool) -
                 CheckResult::Negative
             }
         }
-        Err(e) => {
+        Err((e, timed_out)) => {
             if show_error {
                 msg_box(
                     parent,
@@ -146,7 +152,7 @@ pub async fn check_for_updates(parent: Option<&gtk::Window>, show_error: bool) -
                 )
                 .await;
             }
-            if e.contains("timed out") { CheckResult::Timeout } else { CheckResult::Error }
+            if timed_out { CheckResult::Timeout } else { CheckResult::Error }
         }
     }
 }

@@ -32,10 +32,6 @@ impl ProfileEditDlg {
         win.set_hide_on_close(true);
         {
             let core = main.core.borrow();
-            win.set_default_size(
-                core.ini.read_int(CONFIG_ID, "WindowWidth", b.client.0).max(b.client.0),
-                core.ini.read_int(CONFIG_ID, "WindowHeight", b.client.1).max(b.client.1),
-            );
             b.get::<gtk::CheckButton>("ConfirmCheck").set_active(core.ini.read_bool(CONFIG_ID, "Confirm", true));
         }
         let list: gtk::ListBox = b.get("ProfileList.list");

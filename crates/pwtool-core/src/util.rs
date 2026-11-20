@@ -92,6 +92,22 @@ pub fn time_stamp_to_string(ft: u64) -> String {
     }
 }
 
+/// `FileTimeToString(..., true)`: long date and time in the user's locale.
+pub fn time_stamp_to_long_string(ft: u64) -> String {
+    match filetime_to_tm(ft) {
+        Some(tm) => format!("{} {}", strftime(c"%A, %e %B %Y", &tm).replace("  ", " "), strftime(c"%X", &tm)),
+        None => String::new(),
+    }
+}
+
+fn current_local_year() -> i64 {
+    unsafe {
+        let t = libc::time(std::ptr::null_mut());
+        let mut tm: libc::tm = std::mem::zeroed();
+        if libc::localtime_r(&t, &mut tm).is_null() { 2026 } else { tm.tm_year as i64 + 1900 }
+    }
+}
+
 /// Short date of the user's locale (`GetDateFormatEx(DATE_SHORTDATE)`).
 pub fn format_short_date(year: i32, month: u32, day: u32) -> String {
     // SAFETY: zeroed tm is a valid value; fields set below.
@@ -128,9 +144,25 @@ pub fn parse_short_date(s: &str) -> Option<(i32, u32, u32)> {
         }
     }
     if y < 100 {
-        y += 2000;
+        let cur_year = current_local_year();
+        let pivot = cur_year - 50;
+        let century = (pivot / 100) * 100;
+        y += century;
+        if y < pivot {
+            y += 100;
+        }
     }
-    if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+    if !(1..=12).contains(&m) {
+        return None;
+    }
+    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    let dim = match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        _ => 28,
+    };
+    if d < 1 || d > dim {
         return None;
     }
     Some((y as i32, m as u32, d as u32))
@@ -146,6 +178,18 @@ mod tests {
         let s = format_short_date(2026, 11, 20);
         assert_eq!(parse_short_date(&s), Some((2026, 11, 20)));
         assert_eq!(parse_short_date("garbage"), None);
+        // Reject impossible dates (e.g., Feb 31, non-leap Feb 29)
+        let bad = format_short_date(2026, 2, 28).replace("28", "31");
+        assert_eq!(parse_short_date(&bad), None);
+        let non_leap = format_short_date(2025, 2, 28).replace("28", "29");
+        assert_eq!(parse_short_date(&non_leap), None);
+        let leap = format_short_date(2024, 2, 29);
+        assert_eq!(parse_short_date(&leap), Some((2024, 2, 29)));
+        // 2-digit year sliding 50-year window
+        let two_digit = format_short_date(2026, 11, 20).replace("2026", "26");
+        let parsed = parse_short_date(&two_digit).unwrap();
+        assert_eq!(parsed.0 % 100, 26);
+        assert!(parsed.0 >= 1970 && parsed.0 <= 2100);
     }
 
     #[test]

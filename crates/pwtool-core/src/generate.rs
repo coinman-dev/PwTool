@@ -16,7 +16,7 @@ use crate::language::{trl, trl_format};
 use crate::passw::generator::*;
 use crate::random::RandomGenerator;
 use crate::random::pool::MAX_ENTROPY;
-use crate::text_file::{CharEncoding, read_text_file, split_tokens};
+use crate::text_file::{CharEncoding, read_text_file};
 use crate::unicode::{W32String, str_to_w32, utf16_len, w32_to_string_secure};
 use crate::util::{floor_entropy_bits, format_float_1};
 
@@ -122,21 +122,38 @@ impl CommonPasswords {
     /// Load the list: one password per line, ANSI unless a BOM says
     /// otherwise; at most 1,000,000 entries.
     pub fn load(path: &Path) -> io::Result<Self> {
-        let (text, _) = read_text_file(path, CharEncoding::Ansi)?;
+        let (text, enc) = read_text_file(path, CharEncoding::Ansi)?;
         let mut set = HashSet::new();
-        for line in split_tokens(&text, &['\n']) {
-            if set.len() >= 1_000_000 {
-                break;
-            }
-            if utf16_len(line) + 1 > 255 {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "Unicode string too long"));
-            }
-            set.insert(line.trim_matches([' ', '\n', '\r', '\t']).to_string());
-        }
-        // The last token after a final newline is empty and not read by the
-        // original (ReadString returns 0 at the end of the file).
-        if text.ends_with('\n') {
-            set.remove("");
+        let mut rest = text.as_str();
+        while !rest.is_empty() && set.len() < 1_000_000 {
+            let (line, has_sep, next) = match rest.find('\n') {
+                Some(i) => (&rest[..i], true, &rest[i + 1..]),
+                None => (rest, false, ""),
+            };
+            let units = utf16_len(line) + usize::from(has_sep);
+            let item = if units > 255 {
+                match enc {
+                    CharEncoding::Ansi | CharEncoding::Utf8 => {
+                        return Err(io::Error::new(io::ErrorKind::InvalidData, "Unicode string too long"));
+                    }
+                    _ => {
+                        let mut n = 0;
+                        let mut end = 0;
+                        for (i, ch) in line.char_indices() {
+                            n += ch.len_utf16();
+                            if n > 255 {
+                                break;
+                            }
+                            end = i + ch.len_utf8();
+                        }
+                        &line[..end]
+                    }
+                }
+            } else {
+                line
+            };
+            set.insert(item.trim_matches([' ', '\n', '\r', '\t']).to_string());
+            rest = next;
         }
         let entropy = if set.is_empty() { 0.0 } else { crate::math::delphi_log2(set.len() as f64) };
         Ok(CommonPasswords { set, entropy })

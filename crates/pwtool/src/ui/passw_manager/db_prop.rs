@@ -7,7 +7,6 @@ use gtk::prelude::*;
 use pwtool_core::config::IniFile;
 use pwtool_core::language::trl;
 
-use super::helpers::close_on_escape;
 use super::table::Table;
 use crate::ui::builder::{Built, build_form};
 use crate::ui::dialogs::{form_window, wait_closed};
@@ -69,15 +68,9 @@ impl DbPropDlg {
         let table = Table::new(&[trl("Property"), trl("Value")], &widths);
         let sw: gtk::ScrolledWindow = b.get("PropView");
         sw.set_child(Some(&table.view));
-        let h = ini.read_int(CONFIG_ID, "WindowHeight", -1);
-        let w = ini.read_int(CONFIG_ID, "WindowWidth", -1);
-        if w > 0 && h > 0 {
-            win.set_default_size(w, h);
-        }
         let d = Rc::new(DbPropDlg { b, win, table, values: Default::default() });
         let w = d.win.clone();
         d.b.get::<gtk::Button>("CloseBtn").connect_clicked(move |_| w.close());
-        close_on_escape(&d.win);
         d
     }
 

@@ -49,8 +49,11 @@ impl Drop for Filling<'_> {
     }
 }
 
-/// Format password generated with the main random pool.
-fn format_passw(format: &str) -> Option<Zeroizing<String>> {
+/// Format password generated with the active RNG (deterministic if active, else pool).
+fn format_passw(main: Option<&Rc<crate::ui::main_window::MainWindow>>, format: &str) -> Option<Zeroizing<String>> {
+    if let Some(m) = main {
+        return m.format_passw_with_active_rng(format);
+    }
     let pg = PasswordGenerator::new();
     let f = str_to_w32(format);
     let r = pg.get_format_passw(&mut *RandomPool::global(), &f, 0, None, 16000, None);
@@ -302,10 +305,17 @@ impl PasswManager {
                 m.tag_view.set_sort(m.tags_sort_by_idx.get(), f);
             }
         });
-        radio("filter", |m, p| {
-            m.filter.set(FilterType::from_id(&p.get::<String>().unwrap_or_default()));
-            m.reset_list_view(0);
-        });
+        if let Some(a) = self.action("filter") {
+            let w = w.clone();
+            a.connect_activate(move |a, p| {
+                let (Some(m), Some(p)) = (w.upgrade(), p) else { return };
+                let clicked = FilterType::from_id(&p.get::<String>().unwrap_or_default());
+                let next = if clicked == m.filter.get() { FilterType::None } else { clicked };
+                m.filter.set(next);
+                a.set_state(&next.id().to_variant());
+                m.reset_list_view(0);
+            });
+        }
         if let Some(a) = self.action("recent") {
             let w = w.clone();
             a.connect_activate(move |_, p| {
@@ -638,8 +648,9 @@ impl PasswManager {
                 let is_min = st.contains(gdk::ToplevelState::MINIMIZED);
                 prev.set(st);
                 if is_min && !was_min {
-                    // `OnWindowPosChanging`: lock when minimized
-                    if m.is_db_open() && m.db_config().lock_minimize && !m.busy.get() {
+                    // `OnWindowPosChanging`: lock when minimized (except while minimizing for autotype)
+                    let autotyping = m.main.upgrade().is_some_and(|mw| mw.is_autotype_active());
+                    if m.is_db_open() && m.db_config().lock_minimize && !m.busy.get() && !autotyping {
                         let m = m.clone();
                         glib::spawn_future_local(async move { m.lock_or_unlock_database(false).await });
                     }
@@ -1184,7 +1195,7 @@ impl PasswManager {
         let c = gtk::EntryCompletion::new();
         c.set_model(Some(&store));
         c.set_text_column(0);
-        c.set_inline_completion(true);
+        c.set_inline_completion(false);
         c.set_popup_completion(true);
         c.set_match_func(|c, key, iter| {
             let Some(m) = c.model() else { return false };
@@ -1328,7 +1339,7 @@ impl PasswManager {
         };
         self.entry("UserNameBox").set_text(&user);
         if !fmt.is_empty() {
-            if let Some(p) = format_passw(&fmt) {
+            if let Some(p) = format_passw(self.main.upgrade().as_ref(), &fmt) {
                 self.entry("PasswBox").set_text(&p);
                 if self.toggle("PasswQualityBtn").is_active() {
                     self.estimate_passw_quality(Some(&p));
@@ -1635,7 +1646,7 @@ impl PasswManager {
                     return;
                 }
             } else if let Some(f) = format {
-                if let Some(passw) = format_passw(&f) {
+                if let Some(passw) = format_passw(self.main.upgrade().as_ref(), &f) {
                     self.set_generated_passw(&passw);
                 }
                 gen_main = false;
@@ -1839,12 +1850,22 @@ impl PasswManager {
                 if t.is_empty() {
                     continue;
                 }
-                let mut chars: Vec<char> = t.chars().collect();
-                if chars.len() > DB_MAX_TAG_LEN {
-                    chars.truncate(DB_MAX_TAG_LEN);
+                let mut u16_len = 0usize;
+                let mut truncated = String::new();
+                let mut over = false;
+                for c in t.chars() {
+                    let clen = c.len_utf16();
+                    if u16_len + clen > DB_MAX_TAG_LEN {
+                        over = true;
+                        break;
+                    }
+                    truncated.push(c);
+                    u16_len += clen;
+                }
+                if over {
                     num_overlong += 1;
                 }
-                let tag: String = chars.into_iter().collect::<String>().trim_end_matches(' ').to_string();
+                let tag = truncated.trim_end_matches(' ').to_string();
                 let ci = lower(&tag);
                 match self.global_casei_tags.borrow().get(&ci) {
                     Some(g) => {
@@ -1902,9 +1923,67 @@ impl PasswManager {
             let e = db.entry_mut(idx);
             e.passw_expiry_date = expiry;
             e.update_modification_time(passw_changed);
+            let (cur_date, soon_date) = helpers::expiry_check_dates(self.db_config().warn_expire_num_days);
+            e.user_flags &= !(DB_FLAG_EXPIRED | DB_FLAG_EXPIRES_SOON);
+            if e.passw_expiry_date != 0 {
+                if cur_date >= e.passw_expiry_date {
+                    e.user_flags |= DB_FLAG_EXPIRED;
+                } else if soon_date >= e.passw_expiry_date {
+                    e.user_flags |= DB_FLAG_EXPIRES_SOON;
+                }
+            }
             self.selected.set(Some(RowKey::Entry(new_id)));
         }
-        self.reset_list_view(RELOAD_TAGS);
+        // In-place list row update when no tags/filter/search/sort are active
+        let can_in_place = self.tags.borrow().is_empty()
+            && self.filter.get() == FilterType::None
+            && self.search_mode.get() == SEARCH_MODE_OFF
+            && self.sort_by_idx.get() < 0
+            && self.show_col_mask.get() != 0
+            && self.db.borrow().as_ref().is_some_and(|db| {
+                self.selected.get().and_then(|k| match k {
+                    RowKey::Entry(id) => db.index_of_id(id).map(|i| db.entry(i).tags().is_empty()),
+                    _ => None,
+                }).unwrap_or(false)
+            });
+        if can_in_place {
+            let row = {
+                let dbb = self.db.borrow();
+                let db = dbb.as_ref().unwrap();
+                match self.selected.get() {
+                    Some(RowKey::Entry(id)) => db.index_of_id(id).map(|i| self.make_row(db, i)),
+                    _ => None,
+                }
+            };
+            if let Some(row) = row {
+                let key = row.key;
+                match sel {
+                    RowKey::Entry(id) => {
+                        if let Some(pos) = self.list.index_of(RowKey::Entry(id)) {
+                            self.list.replace_row(pos, row);
+                            self.list.select_only(pos);
+                        } else {
+                            self.reset_list_view(RELOAD_TAGS);
+                        }
+                    }
+                    RowKey::New => {
+                        if let Some(pos) = self.list.index_of(RowKey::New) {
+                            self.list.replace_row(pos, row);
+                            self.list.append_row(self.new_entry_row());
+                            if let Some(p) = self.list.index_of(key) {
+                                self.list.select_only(p);
+                            }
+                        } else {
+                            self.reset_list_view(RELOAD_TAGS);
+                        }
+                    }
+                }
+            } else {
+                self.reset_list_view(RELOAD_TAGS);
+            }
+        } else {
+            self.reset_list_view(RELOAD_TAGS);
+        }
         self.set_item_changed(false);
         self.set_db_changed(true, true);
         if num_overlong > 0 {
@@ -2219,7 +2298,7 @@ impl PasswManager {
                     }
                 }
             }
-            items.retain(|x| *x != text);
+            items.retain(|x| !x.eq_ignore_ascii_case(&text));
             items.insert(0, text.clone());
             cb.remove_all();
             for s in &items {
@@ -2537,7 +2616,11 @@ impl PasswManager {
                 || std::fs::metadata(&file).map(|m| m.permissions().readonly()).unwrap_or(false);
             self.db_read_only.set(ro);
         } else {
-            self.list.set_rows(vec![self.new_entry_row()]);
+            if self.show_col_mask.get() != 0 {
+                self.list.set_rows(vec![self.new_entry_row()]);
+            } else {
+                self.list.clear();
+            }
             self.db_file_name.borrow_mut().clear();
             self.update_recent_files();
             self.db_read_only.set(false);
@@ -2767,51 +2850,60 @@ impl PasswManager {
         }
     }
 
+    fn create_backup_if_enabled(&self, path: &Path) -> Option<String> {
+        let c = self.db_config();
+        if !c.create_backup || !path.is_file() {
+            return None;
+        }
+        const BACKUP_EXT: &str = ".bak";
+        let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+        let mut base = path.with_file_name(&stem).to_string_lossy().to_string();
+        let backup = if c.number_backups {
+            let max = c.max_num_backups;
+            if max > 1 {
+                base.push('_');
+                let mut num = 1;
+                let mut oldest_num = 0;
+                let mut oldest_age: Option<std::time::SystemTime> = None;
+                while num <= max {
+                    let check = format!("{base}{num:03}{BACKUP_EXT}");
+                    match std::fs::metadata(&check).and_then(|m| m.modified()) {
+                        Ok(age) => {
+                            if oldest_num == 0 || oldest_age.is_some_and(|o| age < o) {
+                                oldest_age = Some(age);
+                                oldest_num = num;
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                    num += 1;
+                }
+                if num > max {
+                    num = oldest_num.max(1);
+                }
+                format!("{base}{num:03}{BACKUP_EXT}")
+            } else {
+                format!("{base}{BACKUP_EXT}")
+            }
+        } else {
+            let t = format!("{base}_{}{BACKUP_EXT}", helpers::time_stamp_string(false));
+            if Path::new(&t).exists() { format!("{base}_{}{BACKUP_EXT}", helpers::time_stamp_string(true)) } else { t }
+        };
+        if let Some(db) = self.db.borrow_mut().as_mut() {
+            db.release_file();
+        }
+        if std::fs::copy(path, &backup).is_err() {
+            Some(backup)
+        } else {
+            None
+        }
+    }
+
     /// `SaveDatabase()`.
     pub(super) fn save_database(&self, file: &str) -> bool {
-        let c = self.db_config();
         let path = Path::new(file);
-        if c.create_backup && path.is_file() {
-            const BACKUP_EXT: &str = ".bak";
-            let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-            let mut base = path.with_file_name(&stem).to_string_lossy().to_string();
-            let backup = if c.number_backups {
-                let max = c.max_num_backups;
-                if max > 1 {
-                    base.push('_');
-                    let mut num = 1;
-                    let mut oldest_num = 0;
-                    let mut oldest_age: Option<std::time::SystemTime> = None;
-                    while num <= max {
-                        let check = format!("{base}{num:03}{BACKUP_EXT}");
-                        match std::fs::metadata(&check).and_then(|m| m.modified()) {
-                            Ok(age) => {
-                                if oldest_num == 0 || oldest_age.is_some_and(|o| age < o) {
-                                    oldest_age = Some(age);
-                                    oldest_num = num;
-                                }
-                            }
-                            Err(_) => break,
-                        }
-                        num += 1;
-                    }
-                    if num > max {
-                        num = oldest_num.max(1);
-                    }
-                    format!("{base}{num:03}{BACKUP_EXT}")
-                } else {
-                    format!("{base}{BACKUP_EXT}")
-                }
-            } else {
-                let t = format!("{base}_{}{BACKUP_EXT}", helpers::time_stamp_string(false));
-                if Path::new(&t).exists() { format!("{base}_{}{BACKUP_EXT}", helpers::time_stamp_string(true)) } else { t }
-            };
-            if let Some(db) = self.db.borrow_mut().as_mut() {
-                db.release_file();
-            }
-            if std::fs::copy(path, &backup).is_err() {
-                msg(Some(&self.gwin()), &trl_format("Could not save backup file\n\"%1\".", &[&backup]), MsgIcon::Error);
-            }
+        if let Some(backup) = self.create_backup_if_enabled(path) {
+            msg(Some(&self.gwin()), &trl_format("Could not save backup file\n\"%1\".", &[&backup]), MsgIcon::Error);
         }
         let r = match self.db.borrow_mut().as_mut() {
             Some(db) => db.save(path),
@@ -2826,6 +2918,39 @@ impl PasswManager {
         }
     }
 
+    /// Modal-reporting async version of `save_database` for interactive Save / Save As.
+    async fn save_database_modal(&self, file: &str) -> bool {
+        let path = Path::new(file);
+        if let Some(backup) = self.create_backup_if_enabled(path) {
+            msg_box(
+                Some(&self.gwin()),
+                &trl_format("Could not save backup file\n\"%1\".", &[&backup]),
+                MsgIcon::Error,
+                MsgButtons::Ok,
+                false,
+            )
+            .await;
+        }
+        let r = match self.db.borrow_mut().as_mut() {
+            Some(db) => db.save(path),
+            None => return false,
+        };
+        match r {
+            Ok(()) => true,
+            Err(e) => {
+                msg_box(
+                    Some(&self.gwin()),
+                    &trl_format("Error while saving database file:\n%1.", &[&e.to_string()]),
+                    MsgIcon::Error,
+                    MsgButtons::Ok,
+                    false,
+                )
+                .await;
+                false
+            }
+        }
+    }
+
     /// `MainMenu_File_SaveClick()`.
     async fn save_click(self: &Rc<Self>) {
         self.notify_user_action();
@@ -2835,7 +2960,7 @@ impl PasswManager {
         let file = self.db_file_name.borrow().clone();
         if file.is_empty() || self.db_read_only.get() {
             Box::pin(self.save_as_click()).await;
-        } else if self.save_database(&file) {
+        } else if self.save_database_modal(&file).await {
             self.set_db_changed(false, false);
         }
     }
@@ -2855,9 +2980,12 @@ impl PasswManager {
             dlg.set_initial_name(Some(&format!("{}{PWDB_FILE_EXT}", trl("Untitled"))));
         }
         let Ok(f) = dlg.save_future(Some(&self.win)).await else { return };
-        let Some(p) = f.path() else { return };
+        let Some(mut p) = f.path() else { return };
+        if p.extension().is_none() {
+            p.set_extension("pwdb");
+        }
         let file = p.to_string_lossy().to_string();
-        if self.save_database(&file) {
+        if self.save_database_modal(&file).await {
             *self.db_file_name.borrow_mut() = file;
             self.update_recent_files();
             self.db_read_only.set(false);
@@ -3233,11 +3361,17 @@ impl PasswManager {
                         );
                         let c3 = cancel.clone();
                         let pc = p.cancel.clone();
+                        let bar = p.bar.clone();
+                        let win_weak = p.win.downgrade();
                         glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+                            if win_weak.upgrade().is_none() {
+                                return glib::ControlFlow::Break;
+                            }
                             if pc.get() {
                                 c3.store(true, Ordering::Relaxed);
                                 return glib::ControlFlow::Break;
                             }
+                            bar.pulse();
                             glib::ControlFlow::Continue
                         });
                         p.win.present();
@@ -3251,7 +3385,7 @@ impl PasswManager {
         }
         *self.db.borrow_mut() = Some(db);
         if cancel.load(Ordering::Relaxed) {
-            msg_box(Some(&parent), &trl("Process cancelled by user"), MsgIcon::Error, MsgButtons::Ok, false).await;
+            msg_box(Some(&parent), &trl("Process was cancelled by the user"), MsgIcon::Error, MsgButtons::Ok, false).await;
             return false;
         }
         if let Err(e) = r {
@@ -3283,13 +3417,13 @@ impl PasswManager {
                     if let Ok(t) = ct {
                         dlg.set_property(
                             DbProperty::CreationTime,
-                            &pwtool_core::util::time_stamp_to_string(helpers::system_time_to_local_filetime(t)),
+                            &pwtool_core::util::time_stamp_to_long_string(helpers::system_time_to_local_filetime(t)),
                         );
                     }
                     if let Ok(t) = md.modified() {
                         dlg.set_property(
                             DbProperty::ModificationTime,
-                            &pwtool_core::util::time_stamp_to_string(helpers::system_time_to_local_filetime(t)),
+                            &pwtool_core::util::time_stamp_to_long_string(helpers::system_time_to_local_filetime(t)),
                         );
                     }
                 }
@@ -3351,7 +3485,10 @@ impl PasswManager {
             dlg.set_default_filter(Some(&f));
         }
         let Ok(f) = dlg.save_future(Some(&self.win)).await else { return };
-        let Some(path) = f.path() else { return };
+        let Some(mut path) = f.path() else { return };
+        if path.extension().is_none() {
+            path.set_extension("csv");
+        }
         let Some(mask) = self.col_dlg().execute(&self.ui_field_names, self.csv_col_mask.get(), false).await else { return };
         self.csv_col_mask.set(mask);
         let (enc, newline) = {

@@ -18,7 +18,7 @@ use pwtool_core::random::fast::Jsf32;
 use pwtool_core::unicode::{str_to_w32, w32_to_string_secure};
 use zeroize::Zeroizing;
 
-use super::helpers::{DatePicker, close_on_escape, crlf_to_lf, lf_to_crlf, text_view_text, today};
+use super::helpers::{DatePicker, crlf_to_lf, lf_to_crlf, text_view_text, today};
 use crate::ui::builder::{Built, build_form};
 use crate::ui::dialogs::form_window;
 use crate::ui::form::load_form;
@@ -56,7 +56,7 @@ pub struct DbSettingsDlg {
 }
 
 impl DbSettingsDlg {
-    pub fn new(parent: &gtk::Window, ini: &IniFile) -> Rc<Self> {
+    pub fn new(parent: &gtk::Window, _ini: &IniFile) -> Rc<Self> {
         let b = build_form(load_form("PasswMngDbSettings"), "PasswMngDbSettings");
         let win = form_window(&b, Some(parent), true);
         win.set_hide_on_close(true);
@@ -74,12 +74,11 @@ impl DbSettingsDlg {
         }
         crate::ui::builder::add_css(&b.get::<gtk::Label>("ExpiryInfoLbl"), "color: red;");
         let expiry = DatePicker::new(b.get("ExpiryDatePicker"), b.get("ExpiryDatePicker.calendar"));
-        let h = ini.read_int(CONFIG_ID, "WindowHeight", -1);
-        let w = ini.read_int(CONFIG_ID, "WindowWidth", -1);
-        if w > 0 && h > 0 {
-            win.set_default_size(w, h);
+        for name in ["DefUserNameBox", "PasswFormatSeqBox", "DefaultExpiryBox", "PasswHistoryBox", "NumKdfRoundsBox"] {
+            if let Some(e) = b.try_get::<gtk::Entry>(name) {
+                e.set_activates_default(true);
+            }
         }
-        close_on_escape(&win);
         let d = Rc::new(DbSettingsDlg { b, win, expiry, has_recovery: Cell::new(false) });
         let dd = d.clone();
         d.b.get::<gtk::CheckButton>("EnableCompressionCheck").connect_toggled(move |_| dd.enable_compression_check());

@@ -339,6 +339,45 @@ impl Drop for SymmetricCipher {
     }
 }
 
+/// Startup known-answer self-tests matching `TMainForm::TMainForm`
+/// (`aes_self_test`, `chacha_self_test`, `sha256`, `sha512`, `blake2b`, `base64`).
+pub fn self_test() -> Result<(), &'static str> {
+    let key = [
+        0x60, 0x3d, 0xeb, 0x10, 0x15, 0xca, 0x71, 0xbe, 0x2b, 0x73, 0xae, 0xf0, 0x85, 0x7d, 0x77, 0x81,
+        0x1f, 0x35, 0x2c, 0x07, 0x3b, 0x61, 0x08, 0xd7, 0x2d, 0x98, 0x10, 0xa3, 0x09, 0x14, 0xdf, 0xf4,
+    ];
+    let mut iv = [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f];
+    let mut blk = [0x6b, 0xc1, 0xbe, 0xe2, 0x2e, 0x40, 0x9f, 0x96, 0xe9, 0x3d, 0x7e, 0x11, 0x73, 0x93, 0x17, 0x2a];
+    let aes = Aes::new(&key);
+    aes.cbc_encrypt(&mut iv, &mut blk);
+    if blk != [0xf5, 0x8c, 0x4c, 0x04, 0xd6, 0xe5, 0xf1, 0xba, 0x77, 0x9e, 0xab, 0xfb, 0x5f, 0x7b, 0xfb, 0xd6] {
+        return Err("AES self test failed");
+    }
+    let mut cc = ChaCha::new(&[0u8; 32]);
+    let mut out = [0u8; 16];
+    cc.encrypt_bytes(&[0u8; 16], &mut out);
+    if out != [0x76, 0xb8, 0xe0, 0xad, 0xa0, 0xf1, 0x3d, 0x90, 0x40, 0x5d, 0x6a, 0xe5, 0x53, 0x86, 0xbd, 0x28] {
+        return Err("ChaCha20 self test failed");
+    }
+    if sha256(b"abc")[..4] != [0xba, 0x78, 0x16, 0xbf] {
+        return Err("SHA-256 self test failed");
+    }
+    if sha512(b"abc")[..4] != [0xdd, 0xaf, 0x35, 0xa1] {
+        return Err("SHA-512 self test failed");
+    }
+    {
+        use blake2::{Blake2b512, Digest as _};
+        if Blake2b512::digest(b"abc")[..4] != [0xba, 0x80, 0xa5, 0x3f] {
+            return Err("BLAKE2 self test failed");
+        }
+    }
+    let enc = base64::encode(b"foobar", 0);
+    if enc != "Zm9vYmFy" || base64::decode(enc.as_bytes()).ok().as_deref() != Some(b"foobar".as_slice()) {
+        return Err("Base64 self test failed");
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -411,5 +450,10 @@ mod tests {
         let mut c = [0u8, 0xff, 0xff];
         increment_counter(&mut c);
         assert_eq!(c, [1, 0, 0]);
+    }
+
+    #[test]
+    fn runtime_self_test_passes() {
+        assert_eq!(self_test(), Ok(()));
     }
 }

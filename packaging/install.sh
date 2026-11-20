@@ -45,7 +45,7 @@ done
 
 install -Dm644 "$HERE/$APP_ID.desktop" "$DEST/share/applications/$APP_ID.desktop"
 install -Dm644 "$HERE/$APP_ID.metainfo.xml" "$DEST/share/metainfo/$APP_ID.metainfo.xml"
-for s in 16 32 48 256; do
+for s in 16 32 48 64 128 256; do
   install -Dm644 "$ROOT/assets/appicons/pwtool_default_$s.png" "$DEST/share/icons/hicolor/${s}x${s}/apps/$APP_ID.png"
 done
 echo "installed to $DEST"

@@ -11,7 +11,6 @@ use pwtool_core::config::IniFile;
 use pwtool_core::language::trl;
 use zeroize::Zeroizing;
 
-use super::helpers::close_on_escape;
 use crate::ui::builder::{Built, build_form};
 use crate::ui::dialogs::form_window;
 use crate::ui::form::load_form;
@@ -69,12 +68,6 @@ impl KeyValDlg {
         }
         let sw: gtk::ScrolledWindow = b.get("KeyValueGrid");
         sw.set_child(Some(&grid));
-        let h = ini.read_int(CONFIG_ID, "WindowHeight", -1);
-        let w = ini.read_int(CONFIG_ID, "WindowWidth", -1);
-        if w > 0 && h > 0 {
-            win.set_default_size(w, h);
-        }
-        close_on_escape(&win);
         let okb: gtk::Button = b.get("OKBtn");
         for e in &value_boxes {
             let okb = okb.clone();

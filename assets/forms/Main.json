@@ -8,12 +8,12 @@
   "ActiveControl": {
    "id": "PasswBox"
   },
-  "ClientHeight": 694,
+  "ClientHeight": 721,
   "ClientWidth": 588,
   "Color": {
    "id": "clBtnFace"
   },
-  "Constraints.MinHeight": 617,
+  "Constraints.MinHeight": 644,
   "Constraints.MinWidth": 488,
   "Font.Charset": {
    "id": "DEFAULT_CHARSET"
@@ -56,7 +56,7 @@
    "class": "TLabel",
    "props": {
     "Left": 10,
-    "Top": 80,
+    "Top": 107,
     "Width": 149,
     "Height": 16,
     "Margins.Left": 4,
@@ -92,7 +92,7 @@
    "props": {
     "Tag": 6,
     "Left": 453,
-    "Top": 74,
+    "Top": 101,
     "Width": 28,
     "Height": 27,
     "Hint": "Reload profile",
@@ -121,7 +121,7 @@
    "props": {
     "Tag": 6,
     "Left": 483,
-    "Top": 74,
+    "Top": 101,
     "Width": 27,
     "Height": 27,
     "Hint": "Add profile",
@@ -149,7 +149,7 @@
     "Left": 0,
     "Top": 0,
     "Width": 588,
-    "Height": 61,
+    "Height": 88,
     "Margins.Left": 4,
     "Margins.Top": 4,
     "Margins.Right": 4,
@@ -168,39 +168,62 @@
     "DesignSize": {
      "list": [
       588,
-      61
+      88
      ]
     }
    },
    "children": [
     {
      "kind": "object",
+     "name": "LogoImg",
+     "class": "TImage",
+     "props": {
+      "Left": 8,
+      "Top": 12,
+      "Width": 74,
+      "Height": 74,
+      "Margins.Left": 4,
+      "Margins.Top": 4,
+      "Margins.Right": 4,
+      "Margins.Bottom": 4
+     },
+     "children": []
+    },
+    {
+     "kind": "object",
      "name": "LogoLbl",
      "class": "TLabel",
      "props": {
-      "Left": 10,
-      "Top": 18,
-      "Width": 162,
-      "Height": 23,
+      "Left": 86,
+      "Top": 34,
+      "Width": 86,
+      "Height": 29,
       "Margins.Left": 4,
       "Margins.Top": 4,
       "Margins.Right": 4,
       "Margins.Bottom": 4,
-      "Caption": "PW GENERATOR",
+      "Caption": "PW GEN",
       "Font.Charset": {
        "id": "ANSI_CHARSET"
       },
       "Font.Color": {
        "id": "clBlack"
       },
-      "Font.Height": -20,
+      "Font.Height": -19,
       "Font.Name": "Times New Roman",
       "Font.Style": {
        "set": [
         "fsBold"
        ]
       },
-      "ParentFont": false
+      "ParentFont": false,
+      "Alignment": {
+       "id": "taCenter"
+      },
+      "Layout": {
+       "id": "tlCenter"
+      },
+      "AutoSize": false
      },
      "children": []
     },
@@ -209,8 +232,8 @@
      "name": "MPPasswGenBtn",
      "class": "TSpeedButton",
      "props": {
-      "Left": 268,
-      "Top": 5,
+      "Left": 272,
+      "Top": 23,
       "Width": 51,
       "Height": 51,
       "Hint": "Generate passwords based on a master password",
@@ -244,8 +267,8 @@
      "name": "ClearClipBtn",
      "class": "TSpeedButton",
      "props": {
-      "Left": 422,
-      "Top": 5,
+      "Left": 426,
+      "Top": 23,
       "Width": 51,
       "Height": 51,
       "Hint": "Clear clipboard (text contents only)",
@@ -279,8 +302,8 @@
      "name": "ConfigBtn",
      "class": "TSpeedButton",
      "props": {
-      "Left": 473,
-      "Top": 5,
+      "Left": 477,
+      "Top": 23,
       "Width": 51,
       "Height": 51,
       "Hint": "Main configuration of the program",
@@ -314,8 +337,8 @@
      "name": "CryptTextBtn",
      "class": "TSpeedButton",
      "props": {
-      "Left": 371,
-      "Top": 5,
+      "Left": 375,
+      "Top": 23,
       "Width": 51,
       "Height": 51,
       "Hint": "Clipboard text encryption (left-click) or decryption (right-click)",
@@ -352,8 +375,8 @@
      "name": "HelpBtn",
      "class": "TSpeedButton",
      "props": {
-      "Left": 524,
-      "Top": 5,
+      "Left": 528,
+      "Top": 23,
       "Width": 52,
       "Height": 51,
       "Hint": "Open user manual",
@@ -387,8 +410,8 @@
      "name": "ProfileEditorBtn",
      "class": "TSpeedButton",
      "props": {
-      "Left": 319,
-      "Top": 5,
+      "Left": 323,
+      "Top": 23,
       "Width": 52,
       "Height": 51,
       "Hint": "Load, create or delete profiles",
@@ -422,8 +445,8 @@
      "name": "PasswMngBtn",
      "class": "TSpeedButton",
      "props": {
-      "Left": 217,
-      "Top": 5,
+      "Left": 221,
+      "Top": 23,
       "Width": 51,
       "Height": 51,
       "Hint": "Manage passwords in encrypted databases",
@@ -461,7 +484,7 @@
    "props": {
     "Tag": 7,
     "Left": 13,
-    "Top": 561,
+    "Top": 588,
     "Width": 562,
     "Height": 95,
     "Margins.Left": 4,
@@ -669,7 +692,7 @@
    "props": {
     "Tag": 7,
     "Left": 13,
-    "Top": 109,
+    "Top": 136,
     "Width": 562,
     "Height": 445,
     "Margins.Left": 4,
@@ -1726,7 +1749,7 @@
    "props": {
     "AlignWithMargins": true,
     "Left": 4,
-    "Top": 665,
+    "Top": 692,
     "Width": 580,
     "Height": 25,
     "Margins.Left": 4,
@@ -1774,7 +1797,7 @@
    "props": {
     "Tag": 7,
     "Left": 166,
-    "Top": 75,
+    "Top": 102,
     "Width": 283,
     "Height": 25,
     "Margins.Left": 4,

@@ -168,14 +168,34 @@ pub fn read_string_tokens<'a>(
     Ok(out)
 }
 
+/// Detect the encoding of an existing file by inspecting its leading BOM
+/// (`TStringFileStreamW` in `fmOpenReadWrite` mode).
+pub fn detect_file_encoding(path: &Path, default_enc: CharEncoding) -> io::Result<CharEncoding> {
+    let mut f = File::open(path)?;
+    let mut head = [0u8; 3];
+    let n = f.read(&mut head)?;
+    let bytes = &head[..n];
+    Ok(if bytes.len() >= 2 && bytes[..2] == UNICODE_BOM {
+        CharEncoding::Utf16
+    } else if bytes.len() >= 2 && bytes[..2] == UNICODE_BOM_SWAPPED {
+        CharEncoding::Utf16BigEndian
+    } else if bytes.len() >= 3 && bytes[..3] == UTF8_BOM {
+        CharEncoding::Utf8
+    } else if default_enc == CharEncoding::Utf8 {
+        CharEncoding::Utf8
+    } else {
+        CharEncoding::Ansi
+    })
+}
+
 /// Encode text for writing in the given encoding (without BOM).
 pub fn encode_text(text: &str, enc: CharEncoding) -> Zeroizing<Vec<u8>> {
-    Zeroizing::new(match enc {
-        CharEncoding::Utf8 => text.as_bytes().to_vec(),
-        CharEncoding::Ansi => ansi_encoding().encode(text).0.into_owned(),
-        CharEncoding::Utf16 => text.encode_utf16().flat_map(u16::to_le_bytes).collect(),
-        CharEncoding::Utf16BigEndian => text.encode_utf16().flat_map(u16::to_be_bytes).collect(),
-    })
+    match enc {
+        CharEncoding::Utf8 => Zeroizing::new(text.as_bytes().to_vec()),
+        CharEncoding::Ansi => ansi_encode_lossy(text),
+        CharEncoding::Utf16 => Zeroizing::new(text.encode_utf16().flat_map(u16::to_le_bytes).collect()),
+        CharEncoding::Utf16BigEndian => Zeroizing::new(text.encode_utf16().flat_map(u16::to_be_bytes).collect()),
+    }
 }
 
 /// Accented Latin letters (U+00C0..U+017F) and their base letters (from the
@@ -433,5 +453,32 @@ mod tests {
         assert_eq!(read_string_tokens("aaaa b", &[' '], CharEncoding::Utf16, 4).unwrap(), vec!["aaa", "b"]);
         let v: Vec<&str> = split_tokens("a b\tc\r\n\nd", &['\n', '\t', ' ']).collect();
         assert_eq!(v, ["a", "b", "c\r", "", "d"]);
+    }
+
+    #[test]
+    fn ansi_encode_and_detect_file_encoding() {
+        let encoded = encode_text("ok😀", CharEncoding::Ansi);
+        assert!(!String::from_utf8_lossy(&encoded).contains("&#"));
+        assert_eq!(encoded[..2], *b"ok");
+        assert_eq!(encoded[2], b'?');
+
+        let dir = std::env::temp_dir().join(format!("pwtool-tf-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("sample.txt");
+
+        std::fs::write(&p, [0xEF, 0xBB, 0xBF, b'x']).unwrap();
+        assert_eq!(detect_file_encoding(&p, CharEncoding::Ansi).unwrap(), CharEncoding::Utf8);
+
+        std::fs::write(&p, [0xFF, 0xFE, b'x', 0]).unwrap();
+        assert_eq!(detect_file_encoding(&p, CharEncoding::Ansi).unwrap(), CharEncoding::Utf16);
+
+        std::fs::write(&p, [0xFE, 0xFF, 0, b'x']).unwrap();
+        assert_eq!(detect_file_encoding(&p, CharEncoding::Ansi).unwrap(), CharEncoding::Utf16BigEndian);
+
+        std::fs::write(&p, b"plain").unwrap();
+        assert_eq!(detect_file_encoding(&p, CharEncoding::Utf16).unwrap(), CharEncoding::Ansi);
+        assert_eq!(detect_file_encoding(&p, CharEncoding::Utf8).unwrap(), CharEncoding::Utf8);
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

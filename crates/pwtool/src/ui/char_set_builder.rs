@@ -153,13 +153,6 @@ impl CharSetBuilderWin {
         let b = build_form(load_form("CharSetBuilder"), "CharSetBuilder");
         let win = super::super::dialogs::form_window(&b, Some(&main.win()), false);
         win.set_hide_on_close(true);
-        {
-            let core = main.core.borrow();
-            win.set_default_size(
-                core.ini.read_int(CONFIG_ID, "WindowWidth", b.client.0).max(b.client.0),
-                core.ini.read_int(CONFIG_ID, "WindowHeight", b.client.1).max(b.client.1),
-            );
-        }
         for i in 1..=NUM_PARAM {
             if let Some(u) = b.updowns.get(&format!("NumSpinBtn{i}")) {
                 u.set_min(0);
@@ -209,7 +202,6 @@ impl CharSetBuilderWin {
                 w.char_set_list_exit();
             }
         });
-        d.b.get::<gtk::Button>("ApplyBtn").set_sensitive(false);
         main.attach_entropy_events(&d.win);
         d
     }
@@ -303,8 +295,10 @@ impl MainWindow {
                 d
             }
         };
-        // `FormShow()`
-        d.b.get::<gtk::Entry>("TagBox").set_text("");
+        // `FormShow()`: only clear TagBox when opening from hidden state
+        if !d.win.is_visible() {
+            d.b.get::<gtk::Entry>("TagBox").set_text("");
+        }
         d.win.present();
     }
 

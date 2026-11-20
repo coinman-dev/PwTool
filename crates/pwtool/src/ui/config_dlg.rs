@@ -51,13 +51,6 @@ impl ConfigDlg {
         let b = build_form(load_form("Configuration"), "Configuration");
         let win = super::super::dialogs::form_window(&b, Some(&main.win()), true);
         win.set_hide_on_close(true);
-        {
-            let core = main.core.borrow();
-            win.set_default_size(
-                core.ini.read_int(CONFIG_ID, "WindowWidth", b.client.0).max(b.client.0),
-                core.ini.read_int(CONFIG_ID, "WindowHeight", b.client.1).max(b.client.1),
-            );
-        }
         // fixed lists
         let combo = |n: &str| b.get::<gtk::ComboBoxText>(n);
         set_combo_items(&combo("UiStylesList"), &UI_STYLES.iter().map(|s| trl(s)).collect::<Vec<_>>());
@@ -254,6 +247,13 @@ impl ConfigDlg {
                 d.show_font_sample();
             }
         });
+        let d = Rc::downgrade(self);
+        self.b.get::<gtk::Button>("DefaultFontBtn").connect_clicked(move |_| {
+            if let Some(d) = d.upgrade() {
+                d.font.borrow_mut().clear();
+                d.show_font_sample();
+            }
+        });
 
         // hot keys
         let hk: gtk::Entry = self.b.get("HotKeyBox");
@@ -351,10 +351,15 @@ impl ConfigDlg {
                 l.set_attributes(Some(&attrs));
             }
             None => {
-                let desc = l.pango_context().font_description().unwrap_or_default();
+                let desc = gtk::Settings::default()
+                    .and_then(|s| s.gtk_font_name())
+                    .map(|n| gtk::pango::FontDescription::from_string(&n))
+                    .unwrap_or_else(|| l.pango_context().font_description().unwrap_or_default());
                 let f = FontSpec::from_pango(&desc);
                 l.set_text(&format!("{}, {}pt", f.name, f.size));
-                l.set_attributes(None);
+                let attrs = gtk::pango::AttrList::new();
+                attrs.insert(gtk::pango::AttrFontDesc::new(&desc));
+                l.set_attributes(Some(&attrs));
             }
         }
     }
@@ -476,6 +481,7 @@ impl ConfigDlg {
     }
 
     fn load_languages(&self) {
+        // names only, without the version of the language file
         let items: Vec<String> = self.languages().iter().map(|e| e.name.clone()).collect();
         set_combo_items(&self.combo("LanguageList"), &items);
     }
@@ -506,6 +512,7 @@ impl ConfigDlg {
 
     fn install_language(self: &Rc<Self>) {
         let dlg = gtk::FileDialog::new();
+        dlg.set_title(&trl("Select language file to install"));
         dlg.set_filters(Some(&Self::lang_filters()));
         let d = self.clone();
         dlg.open(Some(&self.win), gio::Cancellable::NONE, move |r| {
@@ -611,6 +618,8 @@ impl ConfigDlg {
         }
         let enc = self.main.upgrade().map(|m| m.core.borrow().config.file_encoding).unwrap_or(CharEncoding::Utf8);
         let dlg = gtk::FileDialog::new();
+        dlg.set_title(&trl("Save converted language file"));
+        dlg.set_filters(Some(&Self::lang_filters()));
         let d = self.clone();
         dlg.save(Some(&self.win), gio::Cancellable::NONE, move |r| {
             let Some(dest) = r.ok().and_then(|f| f.path()) else { return };
@@ -881,13 +890,20 @@ impl MainWindow {
             core.file_encoding = c.file_encoding;
             core.newline = c.newline().to_string();
             core.use_advanced_passw_est = c.use_advanced_passw_est;
+            let mut common_errs = Vec::new();
             if c.test_common_passw != core.test_common_passw {
                 core.test_common_passw = c.test_common_passw;
                 if c.test_common_passw && core.common_passw.is_none() {
+                    let err_start = core.startup_errors.len();
                     core.load_common_passwords();
+                    common_errs = core.startup_errors.drain(err_start..).collect();
                 }
             }
             core.config = c;
+            drop(core);
+            for e in common_errs {
+                msg_box(Some(parent), &e, MsgIcon::Error, MsgButtons::Ok, false).await;
+            }
         }
         self.update_tray_icon();
         if (lang_changed || style_changed)
@@ -949,8 +965,17 @@ impl MainWindow {
                 }
             });
             let visible = parent.is_visible();
+            let key_names: Vec<String> = list.iter().map(|(k, _)| crate::ui::builder::shortcut_to_text(*k)).collect();
             if let Err(e) = crate::ui::hotkeys::activate(if visible { Some(&parent) } else { None }, list, cb).await {
                 eprintln!("pwtool: global hot keys: {e}");
+                if visible {
+                    let m = format!(
+                        "{}\n{}",
+                        trl("Could not register the following hot keys:"),
+                        key_names.join("\n")
+                    );
+                    msg_box(Some(&parent), &m, MsgIcon::Warning, MsgButtons::Ok, false).await;
+                }
             }
         });
     }
@@ -1007,8 +1032,14 @@ impl MainWindow {
                 Some(GenDest::Clipboard)
             }
             hot_key_action::PASSW_MSGBOX => {
+                let rehide = was_hidden && !hke.show_main_win;
                 show_main(true);
-                Some(GenDest::MsgBox)
+                if rehide {
+                    self.generate_passw_and_rehide(GenDest::MsgBox);
+                    None
+                } else {
+                    Some(GenDest::MsgBox)
+                }
             }
             hot_key_action::PASSW_AUTOTYPE => {
                 show_main(false);

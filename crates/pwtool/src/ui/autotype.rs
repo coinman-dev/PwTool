@@ -85,9 +85,33 @@ fn placeholder_keysym(name: &str) -> Option<u32> {
     })
 }
 
-/// `SendKeys::AddString()`: one stroke per character.
+/// Parse leading signed 32-bit decimal integer (matches C++ `std::stoi`).
+fn parse_stoi(s: &str) -> Option<i32> {
+    let s = s.trim_start();
+    let mut end = 0;
+    let bytes = s.as_bytes();
+    if end < bytes.len() && (bytes[end] == b'+' || bytes[end] == b'-') {
+        end += 1;
+    }
+    let digits_start = end;
+    while end < bytes.len() && bytes[end].is_ascii_digit() {
+        end += 1;
+    }
+    if end == digits_start {
+        return None;
+    }
+    s[..end].parse::<i32>().ok()
+}
+
+/// `SendKeys::AddString()`: one stroke per character (CRLF produces one Return).
 pub fn string_sequence(s: &str, delay: u32, dest: &mut Vec<KeyStroke>) {
+    let mut prev_cr = false;
     for c in s.chars() {
+        if c == '\n' && prev_cr {
+            prev_cr = false;
+            continue;
+        }
+        prev_cr = c == '\r';
         dest.push(KeyStroke { keysyms: vec![char_keysym(c)], delay_ms: delay });
     }
 }
@@ -116,7 +140,7 @@ pub fn build_sequence(
                     if name.len() > 5 && name.starts_with("wait:") {
                         found = true;
                         i = end + 1;
-                        if let Ok(t) = name[5..].trim().parse::<i64>() {
+                        if let Some(t) = parse_stoi(&name[5..]) {
                             dest.push(KeyStroke { keysyms: Vec::new(), delay_ms: t.clamp(10, 10000) as u32 });
                         }
                     } else if let Some(idx) = FIELD_NAMES[..NUM_STRING_FIELDS]
@@ -170,6 +194,9 @@ pub fn build_sequence(
         if !found {
             let c = chars[i];
             i += 1;
+            if c == '\r' && i < chars.len() && chars[i] == '\n' {
+                i += 1;
+            }
             let mut keys = std::mem::take(&mut buffered);
             // with modifiers the key itself is sent (lower case)
             let c = if keys.is_empty() { c } else { c.to_ascii_lowercase() };
@@ -302,5 +329,14 @@ mod tests {
         assert_eq!(s.len(), 2 + "{unknown}".len());
         let s = build_sequence("{title}", Some(&|i| Some(Zeroizing::new(format!("f{i}")))), None, None, 1);
         assert_eq!(ks(&s), vec![(vec![0x66], 1), (vec![0x30], 1)]);
+
+        // CRLF produces a single Return keystroke, not two
+        let mut crlf = Vec::new();
+        string_sequence("a\r\nb", 10, &mut crlf);
+        assert_eq!(ks(&crlf), vec![(vec![0x61], 10), (vec![0xff0d], 10), (vec![0x62], 10)]);
+
+        // {wait:500ms} parses leading integer like std::stoi
+        let w = build_sequence("{wait:500ms}", None, None, None, 10);
+        assert_eq!(ks(&w), vec![(vec![], 500)]);
     }
 }

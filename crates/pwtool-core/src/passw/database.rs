@@ -270,6 +270,9 @@ pub struct PasswDbEntry {
     pub creation_time: u64,
     pub modification_time: u64,
     pub passw_change_time: u64,
+    creation_time_set: bool,
+    modification_time_set: bool,
+    passw_change_time_set: bool,
     /// `(year << 16) | (month << 8) | day`, 0 = none.
     pub passw_expiry_date: u32,
     pub user_flags: u32,
@@ -291,6 +294,9 @@ impl PasswDbEntry {
             creation_time: now,
             modification_time: now,
             passw_change_time: 0,
+            creation_time_set: set_time_stamps,
+            modification_time_set: set_time_stamps,
+            passw_change_time_set: false,
             passw_expiry_date: 0,
             user_flags: 0,
             user_tag: 0,
@@ -323,8 +329,10 @@ impl PasswDbEntry {
     /// `UpdateModificationTime()`.
     pub fn update_modification_time(&mut self, passw_changed: bool) {
         self.modification_time = crate::random::hrtimer::local_filetime_now();
+        self.modification_time_set = true;
         if passw_changed {
             self.passw_change_time = self.modification_time;
+            self.passw_change_time_set = true;
         }
     }
     pub fn key_value_list(&self) -> &[(Zeroizing<String>, Zeroizing<String>)] {
@@ -334,16 +342,16 @@ impl PasswDbEntry {
         self.key_value_list = list;
         self.update_key_value_string();
     }
-    /// `GetKeyValue()`: case-insensitive key lookup.
+    /// `GetKeyValue()`: case-insensitive key lookup (`_wcsicmp`).
     pub fn key_value(&self, key: &str) -> Option<&str> {
-        self.key_value_list.iter().find(|(k, _)| k.to_lowercase() == key.to_lowercase()).map(|(_, v)| v.as_str())
+        self.key_value_list.iter().find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v.as_str())
     }
     /// `SetKeyValue()`.
     pub fn set_key_value(&mut self, key: &str, value: &str) {
         if key.is_empty() || value.is_empty() {
             return;
         }
-        if let Some(kv) = self.key_value_list.iter_mut().find(|(k, _)| k.to_lowercase() == key.to_lowercase()) {
+        if let Some(kv) = self.key_value_list.iter_mut().find(|(k, _)| k.eq_ignore_ascii_case(key)) {
             kv.1 = Zeroizing::new(value.to_string());
             return;
         }
@@ -438,13 +446,13 @@ impl PasswDbEntry {
     }
     /// Creation time as text (`CreationTimeString`).
     pub fn creation_time_string(&self) -> String {
-        crate::util::time_stamp_to_string(self.creation_time)
+        if self.creation_time_set { crate::util::time_stamp_to_string(self.creation_time) } else { String::new() }
     }
     pub fn modification_time_string(&self) -> String {
-        crate::util::time_stamp_to_string(self.modification_time)
+        if self.modification_time_set { crate::util::time_stamp_to_string(self.modification_time) } else { String::new() }
     }
     pub fn passw_change_time_string(&self) -> String {
-        if self.passw_change_time == 0 { String::new() } else { crate::util::time_stamp_to_string(self.passw_change_time) }
+        if self.passw_change_time_set { crate::util::time_stamp_to_string(self.passw_change_time) } else { String::new() }
     }
     pub fn passw_expiry_date_string(&self) -> String {
         expiry_date_to_string(self.passw_expiry_date)
@@ -478,7 +486,7 @@ fn is_valid_calendar_date(y: i32, m: u32, d: u32) -> bool {
         2 => 28,
         _ => return false,
     };
-    (1601..=30827).contains(&y) && d >= 1 && d <= dim
+    (1601..=9999).contains(&y) && d >= 1 && d <= dim
 }
 
 /// `ExpiryDateToString()`: short date in the user's locale, empty if the
@@ -611,19 +619,22 @@ impl StreamReader<'_> {
         self.pos += N;
         Ok(a)
     }
-    fn read_ansi_string(&mut self) -> Result<Zeroizing<Vec<u8>>, DbError> {
+    fn read_ansi_string_raw(&mut self) -> Result<(Zeroizing<Vec<u8>>, usize), DbError> {
         let size = self.read_field_size()?;
         if size == 0 {
-            return Ok(Zeroizing::new(Vec::new()));
+            return Ok((Zeroizing::new(Vec::new()), 0));
         }
-        if self.pos + size > self.buf.len() {
+        if self.pos.checked_add(size).is_none_or(|e| e > self.buf.len()) {
             return Err(invalid_format());
         }
         let s = &self.buf[self.pos..self.pos + size];
         self.pos += size;
         // AssignStr() + later C-string use: stop at the first NUL
         let end = s.iter().position(|&b| b == 0).unwrap_or(s.len());
-        Ok(Zeroizing::new(s[..end].to_vec()))
+        Ok((Zeroizing::new(s[..end].to_vec()), size))
+    }
+    fn read_ansi_string(&mut self) -> Result<Zeroizing<Vec<u8>>, DbError> {
+        Ok(self.read_ansi_string_raw()?.0)
     }
     fn read_string(&mut self) -> Result<Zeroizing<String>, DbError> {
         let b = self.read_ansi_string()?;
@@ -920,7 +931,7 @@ impl PasswDatabase {
         if fh.magic != HEADER_MAGIC {
             return Err(DbError::format("Unknown file format"));
         }
-        if (fh.header_size as usize) < FILE_HEADER_SIZE {
+        if (fh.header_size as usize) < FILE_HEADER_SIZE || (fh.header_size as usize) > data.len() {
             return Err(invalid_format());
         }
         self.last_version = fh.version;
@@ -965,6 +976,11 @@ impl PasswDatabase {
 
             if self.recovery_key {
                 buf_pos = (DB_SALT_LENGTH + DB_KEY_LENGTH) * key_num;
+                if file_size < DB_RECOVERY_KEY_BLOCK_LENGTH
+                    || buf_pos + DB_SALT_LENGTH + DB_KEY_LENGTH > file_size
+                {
+                    return Err(invalid_format());
+                }
                 derived = pbkdf2_256bit(key, &buf[buf_pos..buf_pos + DB_SALT_LENGTH], fh.kdf_iterations, None);
                 let mut cipher = create_cipher(fh.cipher_type, &derived[..])?;
                 cipher.set_iv(&buf[buf_pos..]);
@@ -973,10 +989,16 @@ impl PasswDatabase {
                 master_key = mk;
                 buf_pos = DB_RECOVERY_KEY_BLOCK_LENGTH;
             } else {
+                if file_size < DB_SALT_LENGTH {
+                    return Err(invalid_format());
+                }
                 derived = pbkdf2_256bit(key, &buf[..DB_SALT_LENGTH], fh.kdf_iterations, None);
             }
 
             if new_auth || !self.recovery_key {
+                if buf_pos + DB_SALT_LENGTH > file_size {
+                    return Err(invalid_format());
+                }
                 salt.copy_from_slice(&buf[buf_pos..buf_pos + DB_SALT_LENGTH]);
                 buf_pos += DB_SALT_LENGTH;
             }
@@ -1162,8 +1184,8 @@ impl PasswDatabase {
         let mut idx_conv: Vec<i32> = vec![-1; num_fields];
         let mut fields_used = [false; NUM_FIELDS];
         for conv in idx_conv.iter_mut() {
-            let name = r.read_ansi_string()?;
-            if name.is_empty() {
+            let (name, raw_len) = r.read_ansi_string_raw()?;
+            if raw_len == 0 {
                 return Err(invalid_format());
             }
             let name = String::from_utf8_lossy(&name).to_string();
@@ -1204,12 +1226,15 @@ impl PasswDatabase {
                         }
                         x if x == FieldType::CreationTime as usize => {
                             self.entries[ei].creation_time = u64::from_le_bytes(r.read_field::<8>()?);
+                            self.entries[ei].creation_time_set = true;
                         }
                         x if x == FieldType::ModificationTime as usize => {
                             self.entries[ei].modification_time = u64::from_le_bytes(r.read_field::<8>()?);
+                            self.entries[ei].modification_time_set = true;
                         }
                         x if x == FieldType::PasswChangeTime as usize => {
                             self.entries[ei].passw_change_time = u64::from_le_bytes(r.read_field::<8>()?);
+                            self.entries[ei].passw_change_time_set = true;
                         }
                         x if x == FieldType::PasswExpiryDate as usize => {
                             let d = u32::from_le_bytes(r.read_field::<4>()?);
@@ -1546,6 +1571,7 @@ impl PasswDatabase {
         d.passw_history = o.passw_history.clone();
         d.passw_expiry_date = o.passw_expiry_date;
         d.passw_change_time = o.passw_change_time;
+        d.passw_change_time_set = o.passw_change_time_set;
         self.entries.push(d);
         self.set_entry_passw_at(idx, &passw);
         Ok(idx)
@@ -2172,5 +2198,62 @@ mod tests {
         db.delete_entry(1);
         assert_eq!(db.entry(1).index(), 1);
         assert_eq!(db.len(), 3);
+    }
+
+    #[test]
+    fn malformed_header_does_not_panic() {
+        let dir = tmpdir("malformed");
+        let path = dir.join("bad.pwdb");
+        // 106-byte file with valid magic, huge header_size and FH_FLAG_RECOVERY_KEY
+        let mut buf = vec![0u8; 106];
+        let fh = FileHeader {
+            magic: HEADER_MAGIC,
+            header_size: 255,
+            version: VERSION,
+            flags: FH_FLAG_RECOVERY_KEY,
+            cipher_type: CIPHER_AES256,
+            hash_type: HASH_SHA256,
+            kdf_type: KDF_PBKDF2_SHA256,
+            kdf_iterations: 1000,
+        };
+        buf[0..FILE_HEADER_SIZE].copy_from_slice(&fh.to_bytes());
+        fs::write(&path, &buf).unwrap();
+        let mut db = PasswDatabase::new();
+        assert!(db.open(b"pw", &path).is_err());
+
+        // Valid header_size=FILE_HEADER_SIZE, FH_FLAG_RECOVERY_KEY, but truncated body (106 bytes)
+        let mut buf2 = vec![0u8; 106];
+        let fh2 = FileHeader { header_size: FILE_HEADER_SIZE as u8, ..fh };
+        buf2[0..FILE_HEADER_SIZE].copy_from_slice(&fh2.to_bytes());
+        fs::write(&path, &buf2).unwrap();
+        let mut db = PasswDatabase::new();
+        assert!(db.open(b"pw", &path).is_err());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn entry_timestamps_kv_case_and_expiry_year() {
+        let mut e = PasswDbEntry::new(1, 0, false, 0, false);
+        // Omitted timestamps format as empty string
+        assert_eq!(e.creation_time_string(), "");
+        assert_eq!(e.modification_time_string(), "");
+        assert_eq!(e.passw_change_time_string(), "");
+        // Explicit timestamp (including 0) formats non-empty
+        e.creation_time = 0;
+        e.creation_time_set = true;
+        assert!(!e.creation_time_string().is_empty());
+
+        // Case-insensitive key_value / set_key_value
+        e.set_key_value("ApiKey", "v1");
+        assert_eq!(e.key_value("apikey"), Some("v1"));
+        e.set_key_value("APIKEY", "v2");
+        assert_eq!(e.key_value("ApiKey"), Some("v2"));
+        assert_eq!(e.key_value_list().len(), 1);
+
+        // Year bounds (1601..=9999)
+        assert!(is_valid_calendar_date(1601, 1, 1));
+        assert!(is_valid_calendar_date(9999, 12, 31));
+        assert!(!is_valid_calendar_date(1600, 12, 31));
+        assert!(!is_valid_calendar_date(10000, 1, 1));
     }
 }

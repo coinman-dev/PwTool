@@ -28,7 +28,7 @@ use pwtool_core::unicode::w32_to_string;
 use pwtool_core::util::format_float_1;
 use zeroize::Zeroizing;
 
-use super::builder::{Built, attach_context_menu, build_form};
+use super::builder::{Built, attach_context_menu, attach_context_menu_capture, build_form};
 use super::dialogs::{PasswListWindow, PasswOptionsDlg, ProgressWindow, format_quick_help, info_box, quick_help};
 use super::form::load_form;
 use super::quality_bar::QualityBar;
@@ -99,6 +99,7 @@ struct GenOutput {
     result: Result<GenSummary, String>,
     single: Zeroizing<String>,
     list: Zeroizing<String>,
+    mem_limit_reached: bool,
 }
 
 pub struct MainWindow {
@@ -123,6 +124,7 @@ pub struct MainWindow {
     format_passw_help: String,
     default_title: String,
     mouse_move_cnt: Cell<i32>,
+    mouse_wheel_cnt: Cell<i32>,
     tools: tools::ToolsState,
     config_dlg: RefCell<Option<Rc<config_dlg::ConfigDlg>>>,
     hot_keys_active: RefCell<crate::app_config::HotKeyList>,
@@ -134,6 +136,9 @@ pub struct MainWindow {
     tray: tray_main::TrayState,
     passw_mng: RefCell<Option<Rc<crate::ui::passw_manager::PasswManager>>>,
     close_queried: Cell<bool>,
+    autotype_active: Cell<bool>,
+    autotype_abort: RefCell<Option<Rc<Cell<bool>>>>,
+    startup_shown: Cell<bool>,
     /// Edit box receiving the next single password instead of `PasswBox`
     /// (`GeneratePassw(gpdGuiSingle, pEditBox)`).
     pub(super) gen_target: RefCell<Option<gtk::Entry>>,
@@ -154,13 +159,32 @@ impl MainWindow {
         b.root.set_hexpand(true);
         vbox.append(&b.root);
         window.set_child(Some(&vbox));
+        // the window has a fixed size and cannot be maximized, see
+        // `dialogs::form_window()`
         let (_, mh, _, _) = menubar.measure(gtk::Orientation::Vertical, -1);
-        window.set_default_size(b.client.0, b.client.1 + mh);
-        b.root.set_min_size(b.min.0.max(0), b.min.1.max(0));
+        let (cw, ch) = super::dialogs::fixed_client_size(&b);
+        b.root.set_fixed_size(cw, ch);
+        window.set_resizable(false);
+        window.set_default_size(cw, ch + mh);
         window.insert_action_group("m", Some(&b.actions));
+        // Only register MainMenu accelerators application-wide; popup menu
+        // shortcuts (PasswBoxMenu, ListMenu) must not hijack Ctrl+C/X/V/A/Z
+        // in other widgets and dialogs.
         for (action, accel) in &b.accels {
-            app.set_accels_for_action(action, &[accel.as_str()]);
+            if action.starts_with("m.MainMenu_") {
+                app.set_accels_for_action(action, &[accel.as_str()]);
+            }
         }
+        let pb_sc = gtk::ShortcutController::new();
+        pb_sc.set_scope(gtk::ShortcutScope::Local);
+        for (action, accel) in &b.accels {
+            if action.starts_with("m.PasswBoxMenu_") {
+                if let Some(t) = gtk::ShortcutTrigger::parse_string(accel) {
+                    pb_sc.add_shortcut(gtk::Shortcut::new(Some(t), Some(gtk::NamedAction::new(action))));
+                }
+            }
+        }
+        b.get::<gtk::Entry>("PasswBox").add_controller(pb_sc);
 
         let passw_bar = QualityBar::new(b.get("PasswGauge"), 128);
         let char_set_help = build_char_set_help();
@@ -187,6 +211,7 @@ impl MainWindow {
             format_passw_help,
             default_title: PROGRAM_NAME.to_string(),
             mouse_move_cnt: Cell::new(60),
+            mouse_wheel_cnt: Cell::new(5),
             tools: tools::ToolsState::new(),
             config_dlg: RefCell::new(None),
             hot_keys_active: RefCell::new(Default::default()),
@@ -198,6 +223,9 @@ impl MainWindow {
             tray: tray_main::TrayState::new(),
             passw_mng: RefCell::new(None),
             close_queried: Cell::new(false),
+            autotype_active: Cell::new(false),
+            autotype_abort: RefCell::new(None),
+            startup_shown: Cell::new(false),
             gen_target: RefCell::new(None),
         });
         w.setup();
@@ -288,8 +316,21 @@ impl MainWindow {
             b.updowns["WordsNumSpinBtn"].set_max(PASSW_MAX_WORDS as i64);
             let _ = &core;
         }
-        self.label("LogoLbl").set_text("PW GENERATOR");
-        super::builder::add_css(&self.label("LogoLbl"), "font-family: serif; font-weight: bold;");
+        let logo_lbl = self.label("LogoLbl");
+        logo_lbl.set_text("PW GEN");
+        logo_lbl.set_justify(gtk::Justification::Center);
+        logo_lbl.set_xalign(0.5);
+        logo_lbl.set_yalign(0.5);
+        logo_lbl.set_ellipsize(gtk::pango::EllipsizeMode::None);
+        if let Some(p) = self.b.try_get::<gtk::Picture>("LogoImg") {
+            p.set_can_shrink(true);
+            p.set_content_fit(gtk::ContentFit::Contain);
+            let bytes = glib::Bytes::from_static(include_bytes!("../../../../assets/about_logo.png"));
+            if let Ok(t) = gdk::Texture::from_bytes(&bytes) {
+                p.set_paintable(Some(&t));
+            }
+        }
+        super::builder::add_css(&logo_lbl, "font-family: serif; font-weight: bold;");
         self.label("PasswInfoLbl").set_text(&trl("Click on \"Generate\""));
         self.entry("PasswBox").add_css_class("monospace");
         super::builder::add_css(&self.entry("PasswBox"), "font-family: monospace;");
@@ -348,6 +389,8 @@ impl MainWindow {
                             w2.close_queried.set(true);
                             w2.close_confirmed.set(true);
                             win2.close();
+                        } else {
+                            w2.close_confirmed.set(false);
                         }
                     });
                     return glib::Propagation::Stop;
@@ -374,26 +417,33 @@ impl MainWindow {
 
     /// Generator controls from the settings (`LoadConfig`).
     fn load_config_to_controls(self: &Rc<Self>) {
+        super::dialogs::load_quick_help_config(&self.core.borrow().ini);
         let core = self.core.borrow();
         let s = &core.settings;
         self.check("IncludeCharsCheck").set_active(s.include_chars);
         self.b.updowns["CharsLengthSpinBtn"].set_position(s.chars_length as i64);
         set_combo_items(&self.combo("CharSetList"), &s.char_set_list);
-        set_combo_text(&self.combo("CharSetList"), &s.char_set_list[0]);
-        *self.char_set_input.borrow_mut() = s.char_set_list[0].clone();
+        set_combo_text(&self.combo("CharSetList"), &s.char_set_text);
+        *self.char_set_input.borrow_mut() = s.char_set_text.clone();
         self.check("IncludeWordsCheck").set_active(s.include_words);
         self.b.updowns["WordsNumSpinBtn"].set_position(s.words_num as i64);
         set_combo_items(&self.combo("WLFNList"), &s.wlfn_list);
-        set_combo_text(&self.combo("WLFNList"), &s.wlfn_list[0]);
+        set_combo_text(&self.combo("WLFNList"), &s.wlfn_text);
+        if core.word_list_error.is_none() {
+            *self.wl_file_name.borrow_mut() = remove_comment_and_trim(&s.wlfn_text);
+            self.wl_file_name_err.borrow_mut().clear();
+        } else {
+            *self.wl_file_name_err.borrow_mut() = remove_comment_and_trim(&s.wlfn_text);
+        }
         self.check("CombineWordsCharsCheck").set_active(s.combine_words_chars);
         self.check("SpecifyLengthCheck").set_active(s.passphr_spec_len);
         self.entry("SpecifyLengthBox").set_text(&s.passphr_spec_len_string);
         self.check("FormatPasswCheck").set_active(s.format_passw);
         set_combo_items(&self.combo("FormatList"), &s.format_list);
-        set_combo_text(&self.combo("FormatList"), &s.format_list[0]);
+        set_combo_text(&self.combo("FormatList"), &s.format_text);
         self.check("RunScriptCheck").set_active(s.run_script);
         set_combo_items(&self.combo("ScriptList"), &s.script_list);
-        set_combo_text(&self.combo("ScriptList"), s.script_list.first().map(|x| x.as_str()).unwrap_or(""));
+        set_combo_text(&self.combo("ScriptList"), &s.script_text);
         self.entry("NumPasswBox").set_text(&s.num_passw);
         self.set_action_checked("GenerateMenu_IncludeHeader", s.include_header);
         let ini = &core.ini;
@@ -404,17 +454,16 @@ impl MainWindow {
         self.set_action_checked("MainMenu_Options_HideEntProgress", !self.show_ent_progress.get());
         self.set_action_checked("MainMenu_Options_SaveSettingsOnExit", ini.read_bool("Main", "SaveSettingsOnExit", true));
         self.set_action_checked("MainMenu_Options_AlwaysOnTop", ini.read_bool("Main", "AlwaysOnTop", false));
-        self.set_action_checked("PasswBoxMenu_Editable", ini.read_bool("Main", "PasswEditable", true));
+        let editable = ini.read_bool("Main", "PasswEditable", true);
+        self.set_action_checked("PasswBoxMenu_Editable", editable);
         self.set_action_checked("PasswBoxMenu_EnablePasswTest", ini.read_bool("Main", "EnablePasswTest", true));
-        self.entry("PasswBox").set_editable(self.action_checked("PasswBoxMenu_Editable"));
+        self.b.action("PasswBoxMenu_EnablePasswTest").set_enabled(editable);
+        let pb = self.entry("PasswBox");
+        pb.set_editable(editable);
+        pb.set_enable_undo(true);
         let tag = if self.action_checked("PasswBoxMenu_EnablePasswTest") { PASSWBOX_TAG_PASSW_TEST } else { 0 };
         self.passw_box_tag.set(tag);
-        let w = ini.read_int("Main", "WindowWidth", 0);
-        let h = ini.read_int("Main", "WindowHeight", 0);
         drop(core);
-        if w > 0 && h > 0 {
-            self.window.set_default_size(w, h);
-        }
         self.update_char_set_info();
         self.update_word_list_info();
         self.update_profile_controls();
@@ -488,9 +537,13 @@ impl MainWindow {
     fn connect_events(self: &Rc<Self>) {
         for n in ["IncludeCharsCheck", "IncludeWordsCheck", "FormatPasswCheck", "RunScriptCheck", "SpecifyLengthCheck"] {
             let w = Rc::downgrade(self);
-            self.check(n).connect_toggled(move |_| {
+            let is_spec = n == "SpecifyLengthCheck";
+            self.check(n).connect_toggled(move |c| {
                 if let Some(w) = w.upgrade() {
                     w.include_chars_check_click();
+                    if is_spec && c.is_active() {
+                        w.entry("SpecifyLengthBox").grab_focus();
+                    }
                 }
             });
         }
@@ -556,7 +609,13 @@ impl MainWindow {
         });
         if let Some(m) = self.b.menus.get("PasswBoxMenu") {
             let e = self.entry("PasswBox");
-            e.set_extra_menu(Some(m));
+            let pop = attach_context_menu_capture(&e, m);
+            let w = Rc::downgrade(self);
+            pop.connect_show(move |_| {
+                if let Some(w) = w.upgrade() {
+                    w.update_passw_box_menu();
+                }
+            });
         }
         let w = Rc::downgrade(self);
         self.b.get::<gtk::ToggleButton>("TogglePasswBtn").connect_toggled(move |t| {
@@ -578,7 +637,11 @@ impl MainWindow {
             attach_context_menu(&self.button("AdvancedBtn"), m);
         }
         self.act("AdvancedOptionsMenu_DeactivateAll", |w| w.deactivate_options(u32::MAX));
-        self.act("AdvancedOptionsMenu_DeactivateAllStarred", |w| w.deactivate_options(passwoptions_starred_bitfield()));
+        self.act("AdvancedOptionsMenu_DeactivateAllStarred", |w| {
+            w.check("SpecifyLengthCheck").set_active(false);
+            w.deactivate_options(passwoptions_starred_bitfield());
+            w.set_advanced_btn_caption();
+        });
         self.click("CharSetInfoBtn", |w| w.char_set_info_btn_click());
         self.click("WordListInfoBtn", |w| w.word_list_info_btn_click());
         self.click("CharSetHelpBtn", |w| quick_help(&w.win(), &w.char_set_help));
@@ -633,41 +696,62 @@ impl MainWindow {
         });
         self.act("MainMenu_Options_SaveSettingsOnExit", |_| {});
         self.act("PasswBoxMenu_Editable", |w| {
-            w.entry("PasswBox").set_editable(w.action_checked("PasswBoxMenu_Editable"));
+            let editable = w.action_checked("PasswBoxMenu_Editable");
+            w.entry("PasswBox").set_editable(editable);
+            w.b.action("PasswBoxMenu_EnablePasswTest").set_enabled(editable);
         });
         self.act("PasswBoxMenu_EnablePasswTest", |w| {
             let on = w.action_checked("PasswBoxMenu_EnablePasswTest");
             let t = w.passw_box_tag.get();
             w.passw_box_tag.set(if on { t | PASSWBOX_TAG_PASSW_TEST } else { t & !PASSWBOX_TAG_PASSW_TEST });
-            if on {
-                w.passw_box_change();
-            }
         });
         self.act("PasswBoxMenu_Copy", |w| w.passw_box_copy());
         self.act("PasswBoxMenu_SelectAll", |w| w.entry("PasswBox").select_region(0, -1));
         self.act("PasswBoxMenu_Cut", |w| {
-            w.passw_box_copy();
-            w.entry("PasswBox").delete_selection();
+            let e = w.entry("PasswBox");
+            if !e.is_editable() {
+                return;
+            }
+            if e.selection_bounds().is_some() {
+                w.passw_box_copy();
+                e.delete_selection();
+            }
         });
-        self.act("PasswBoxMenu_Delete", |w| w.entry("PasswBox").delete_selection());
+        self.act("PasswBoxMenu_Delete", |w| {
+            let e = w.entry("PasswBox");
+            if e.is_editable() {
+                e.delete_selection();
+            }
+        });
         self.act("PasswBoxMenu_Paste", |w| {
             let e = w.entry("PasswBox");
+            if !e.is_editable() {
+                return;
+            }
             super::clipboard::read_text(move |t| {
                 if let Some(t) = t {
-                    let mut pos = e.position();
+                    if !e.is_editable() {
+                        return;
+                    }
                     e.delete_selection();
+                    let mut pos = e.position();
                     e.insert_text(&t, &mut pos);
                 }
             });
         });
-        self.act("PasswBoxMenu_Undo", |_| {});
+        self.act("PasswBoxMenu_Undo", |w| {
+            let e = w.entry("PasswBox");
+            if e.is_editable() {
+                let _ = e.activate_action("text.undo", None);
+            }
+        });
         self.act("PasswBoxMenu_SaveAsFile", |w| w.passw_box_save_as_file());
         self.act("MainMenu_Tools_ProvideAddEntropy_FromFile", |w| w.add_entropy_from_file());
         self.act("MainMenu_Tools_DetermRandGen_Reset", |w| {
             if let Some(g) = w.key_seeded_prng.borrow_mut().as_mut() {
                 g.reset();
             }
-            info_box(&w.win(), &trl("Deterministic random generator has been reset."));
+            info_box(&w.win(), &trl("Deterministic random generator has been RESET."));
         });
         self.act("MainMenu_Tools_DetermRandGen_Deactivate", |w| w.deactivate_det_rand_gen());
         self.act("TrayMenu_GenPassw", |w| w.generate_passw(GenDest::Clipboard));
@@ -882,9 +966,13 @@ impl MainWindow {
         dlg.open(Some(&self.window), gio::Cancellable::NONE, move |r| {
             if let Ok(f) = r {
                 if let Some(p) = f.path() {
-                    set_combo_text(&w.combo(&combo), &p.to_string_lossy());
+                    let cb = w.combo(&combo);
+                    set_combo_text(&cb, &p.to_string_lossy());
                     if word_list {
                         w.wlfn_list_exit();
+                    }
+                    if let Some(e) = combo_entry(&cb) {
+                        e.grab_focus();
                     }
                 }
             }
@@ -902,39 +990,75 @@ impl MainWindow {
     }
 
     /// `ClearClipBtnClick()`.
-    fn clear_clip_btn_click(&self) {
-        let win = self.win();
+    fn clear_clip_btn_click(self: &Rc<Self>) {
+        let w = self.clone();
         super::clipboard::clear_data(true, move |ok| {
-            if ok {
-                info_box(&win, &trl("Clipboard cleared."));
+            let m = trl(if ok { "Clipboard cleared." } else { "Could not open clipboard." });
+            if w.tray.hidden.get() {
+                show_tray_info(&w, &m, !ok);
+            } else if ok {
+                info_box(&w.win(), &m);
             } else {
-                msg(Some(&win), &trl("Clipboard cleared."), MsgIcon::Error);
+                msg(Some(&w.win()), &m, MsgIcon::Error);
             }
         });
     }
 
+    /// `PasswBoxMenuPopup()`: update enabled state of PasswBoxMenu items.
+    fn update_passw_box_menu(&self) {
+        let e = self.entry("PasswBox");
+        let editable = e.is_editable();
+        let selected = e.selection_bounds().is_some();
+        let has_text = e.text_length() > 0;
+        let db_open = self.passw_mng.borrow().as_ref().is_some_and(|m| m.is_db_open());
+        let has_clip_text = gdk::Display::default()
+            .map(|d| d.clipboard().formats().contains_type(glib::types::Type::STRING))
+            .unwrap_or(true);
+        self.b.action("PasswBoxMenu_Undo").set_enabled(editable);
+        self.b.action("PasswBoxMenu_Cut").set_enabled(editable && selected);
+        self.b.action("PasswBoxMenu_Copy").set_enabled(selected);
+        self.b.action("PasswBoxMenu_EncryptCopy").set_enabled(selected);
+        self.b.action("PasswBoxMenu_Paste").set_enabled(editable && has_clip_text);
+        self.b.action("PasswBoxMenu_PerformAutotype").set_enabled(has_text);
+        self.b.action("PasswBoxMenu_Delete").set_enabled(editable && selected);
+        self.b.action("PasswBoxMenu_AddToDb").set_enabled(selected && db_open);
+        self.b.action("PasswBoxMenu_SelectAll").set_enabled(has_text);
+        self.b.action("PasswBoxMenu_SaveAsFile").set_enabled(has_text);
+        self.b.action("PasswBoxMenu_EnablePasswTest").set_enabled(editable);
+    }
+
     fn passw_box_copy(&self) {
         let e = self.entry("PasswBox");
-        let text = match e.selection_bounds() {
-            Some((s, end)) => e.chars(s, end).to_string(),
-            None => e.text().to_string(),
-        };
-        let text = Zeroizing::new(text);
-        super::clipboard::set_data(&text);
+        if let Some((s, end)) = e.selection_bounds() {
+            let text = Zeroizing::new(e.chars(s, end).to_string());
+            super::clipboard::set_data(&text);
+        }
     }
 
     fn passw_box_save_as_file(self: &Rc<Self>) {
         let dlg = gtk::FileDialog::new();
+        dlg.set_title(&trl("Save password"));
         let w = self.clone();
         dlg.save(Some(&self.window), gio::Cancellable::NONE, move |r| {
             if let Ok(f) = r {
                 if let Some(p) = f.path() {
                     let core = w.core.borrow();
-                    let text = Zeroizing::new(w.entry("PasswBox").text().to_string() + &core.newline);
+                    let text = Zeroizing::new(w.entry("PasswBox").text().to_string());
                     let res = pwtool_core::text_file::TextFileWriter::create(&p, core.file_encoding, true)
                         .and_then(|mut f| f.write_str(&text));
-                    if let Err(e) = res {
-                        msg(Some(&w.win()), &e.to_string(), MsgIcon::Error);
+                    drop(core);
+                    let name = p.file_name().unwrap_or_default().to_string_lossy().to_string();
+                    match res {
+                        Ok(()) => msg(
+                            Some(&w.win()),
+                            &trl_format("File \"%1\" successfully created.", &[&name]),
+                            MsgIcon::Info,
+                        ),
+                        Err(e) => msg(
+                            Some(&w.win()),
+                            &trl_format("Error while creating file\n\"%1\":\n%2.", &[&p.to_string_lossy(), &e.to_string()]),
+                            MsgIcon::Error,
+                        ),
                     }
                 }
             }
@@ -947,7 +1071,6 @@ impl MainWindow {
         if tag & PASSWBOX_TAG_PASSW_GEN != 0 {
             self.passw_box_tag.set(tag & !PASSWBOX_TAG_PASSW_GEN);
             self.auto_clear_passw_cnt.set(0);
-            return;
         }
         if tag & PASSWBOX_TAG_PASSW_TEST == 0 {
             return;
@@ -1009,7 +1132,7 @@ impl MainWindow {
                     if PASSWOPTIONS_STARRED[i] {
                         opt.push('*');
                     }
-                    opt.push_str(&dlg.as_ref().map(|d| d.bit_to_string(i)).unwrap_or_else(|| format!("#{i}")));
+                    opt.push_str(&dlg.as_ref().map(|d| d.bit_to_string(i)).unwrap_or_else(|| PasswOptionsDlg::bit_name(i)));
                     if num > 5 && opt.chars().count() > 40 {
                         opt = opt.chars().take(37).collect::<String>() + "...";
                     }
@@ -1094,36 +1217,47 @@ impl MainWindow {
 
     /// `LoadProfile(index)`.
     pub(super) fn load_profile(&self, i: usize) {
+        self.load_profile_inner(i, false);
+    }
+
+    fn load_profile_inner(&self, i: usize, is_startup: bool) {
         if i >= self.core.borrow().profiles.len() {
             return;
         }
+        let err_start = self.core.borrow().startup_errors.len();
         self.core.borrow_mut().load_profile(i);
-        let errs: Vec<String> = self.core.borrow_mut().startup_errors.drain(..).collect();
-        for e in errs {
-            msg(Some(&self.win()), &e, MsgIcon::Error);
+        if !is_startup {
+            let errs: Vec<String> = self.core.borrow_mut().startup_errors.drain(err_start..).collect();
+            for e in errs {
+                msg(Some(&self.win()), &e, MsgIcon::Error);
+            }
         }
-        // reflect settings in the controls
-        let s = self.core.borrow().settings.clone();
+        // reflect settings in the controls without mutating combo history lists
+        let (s, wl_err) = {
+            let core = self.core.borrow();
+            (core.settings.clone(), core.word_list_error.is_some())
+        };
         self.check("IncludeCharsCheck").set_active(s.include_chars);
         self.b.updowns["CharsLengthSpinBtn"].set_position(s.chars_length as i64);
-        set_combo_items(&self.combo("CharSetList"), &s.char_set_list);
-        set_combo_text(&self.combo("CharSetList"), &s.char_set_list[0]);
-        *self.char_set_input.borrow_mut() = s.char_set_list[0].clone();
+        set_combo_text(&self.combo("CharSetList"), &s.char_set_text);
+        *self.char_set_input.borrow_mut() = s.char_set_text.clone();
         self.check("IncludeWordsCheck").set_active(s.include_words);
         self.b.updowns["WordsNumSpinBtn"].set_position(s.words_num as i64);
-        set_combo_items(&self.combo("WLFNList"), &s.wlfn_list);
-        set_combo_text(&self.combo("WLFNList"), &s.wlfn_list[0]);
-        *self.wl_file_name.borrow_mut() = remove_comment_and_trim(&s.wlfn_list[0]);
+        set_combo_text(&self.combo("WLFNList"), &s.wlfn_text);
+        if !wl_err {
+            *self.wl_file_name.borrow_mut() = remove_comment_and_trim(&s.wlfn_text);
+            self.wl_file_name_err.borrow_mut().clear();
+        } else {
+            *self.wl_file_name_err.borrow_mut() = remove_comment_and_trim(&s.wlfn_text);
+        }
         self.check("CombineWordsCharsCheck").set_active(s.combine_words_chars);
         self.check("SpecifyLengthCheck").set_active(s.passphr_spec_len);
         self.entry("SpecifyLengthBox").set_text(&s.passphr_spec_len_string);
         self.check("FormatPasswCheck").set_active(s.format_passw);
-        set_combo_items(&self.combo("FormatList"), &s.format_list);
-        set_combo_text(&self.combo("FormatList"), &s.format_list[0]);
+        set_combo_text(&self.combo("FormatList"), &s.format_text);
         self.label("FormatPasswInfoLbl").set_text("");
         self.check("RunScriptCheck").set_active(s.run_script);
-        set_combo_items(&self.combo("ScriptList"), &s.script_list);
-        set_combo_text(&self.combo("ScriptList"), s.script_list.first().map(|x| x.as_str()).unwrap_or(""));
+        set_combo_text(&self.combo("ScriptList"), &s.script_text);
         self.entry("NumPasswBox").set_text(&s.num_passw);
         self.set_action_checked("GenerateMenu_IncludeHeader", s.include_header);
         self.update_char_set_info();
@@ -1146,17 +1280,14 @@ impl MainWindow {
         let s = &mut core.settings;
         s.include_chars = self.check("IncludeCharsCheck").is_active();
         s.chars_length = self.b.updowns["CharsLengthSpinBtn"].position() as i32;
+        s.char_set_text = combo_text(&self.combo("CharSetList"));
         s.char_set_list = self.combo_items("CharSetList");
-        let cs = combo_text(&self.combo("CharSetList"));
-        if s.char_set_list.first() != Some(&cs) && !cs.is_empty() {
-            s.char_set_list.retain(|x| x != &cs);
-            s.char_set_list.insert(0, cs);
-        }
         if s.char_set_list.is_empty() {
             s.char_set_list.push(pwtool_core::config::CHARSETLIST_DEFAULTENTRIES[0].into());
         }
         s.include_words = self.check("IncludeWordsCheck").is_active();
         s.words_num = self.b.updowns["WordsNumSpinBtn"].position() as i32;
+        s.wlfn_text = combo_text(&self.combo("WLFNList"));
         s.wlfn_list = self.combo_items("WLFNList");
         if s.wlfn_list.is_empty() {
             s.wlfn_list.push(WLFNLIST_DEFAULT.into());
@@ -1165,19 +1296,11 @@ impl MainWindow {
         s.passphr_spec_len = self.check("SpecifyLengthCheck").is_active();
         s.passphr_spec_len_string = self.entry("SpecifyLengthBox").text().to_string();
         s.format_passw = self.check("FormatPasswCheck").is_active();
-        let fmt = combo_text(&self.combo("FormatList"));
+        s.format_text = combo_text(&self.combo("FormatList"));
         s.format_list = self.combo_items("FormatList");
-        if s.format_list.first() != Some(&fmt) {
-            s.format_list.retain(|x| x != &fmt);
-            s.format_list.insert(0, fmt);
-        }
         s.run_script = self.check("RunScriptCheck").is_active();
-        let sc = combo_text(&self.combo("ScriptList"));
+        s.script_text = combo_text(&self.combo("ScriptList"));
         s.script_list = self.combo_items("ScriptList");
-        if !sc.is_empty() && s.script_list.first() != Some(&sc) {
-            s.script_list.retain(|x| x != &sc);
-            s.script_list.insert(0, sc);
-        }
         s.num_passw = self.entry("NumPasswBox").text().to_string();
         s.include_header = self.action_checked("GenerateMenu_IncludeHeader");
     }
@@ -1191,6 +1314,7 @@ impl MainWindow {
             self.gen_target.borrow_mut().take();
             return;
         }
+        self.generating.set(true);
         self.char_set_list_exit();
         self.wlfn_list_exit();
         self.sync_settings();
@@ -1198,7 +1322,33 @@ impl MainWindow {
         glib::spawn_future_local(async move { w.generate_passw_async(dest).await });
     }
 
+    /// Generate a password from a hot key when the main window was hidden, and
+    /// re-minimize/hide once done (matches `Main.cpp:OnHotKey`).
+    pub(super) fn generate_passw_and_rehide(self: &Rc<Self>, dest: GenDest) {
+        if self.generating.get() {
+            self.gen_target.borrow_mut().take();
+            return;
+        }
+        self.generating.set(true);
+        self.char_set_list_exit();
+        self.wlfn_list_exit();
+        self.sync_settings();
+        let w = self.clone();
+        glib::spawn_future_local(async move {
+            let w2 = w.clone();
+            w.generate_passw_async(dest).await;
+            w2.window.minimize();
+        });
+    }
+
     async fn generate_passw_async(self: Rc<Self>, dest: GenDest) {
+        struct GenGuard(Rc<MainWindow>);
+        impl Drop for GenGuard {
+            fn drop(&mut self) {
+                self.0.generating.set(false);
+            }
+        }
+        let gen_guard = GenGuard(self.clone());
         let gen_target = self.gen_target.borrow_mut().take();
         let win = self.win();
         let mut num: u64 = 1;
@@ -1243,6 +1393,12 @@ impl MainWindow {
             }
         }
 
+        if dest == GenDest::GuiList {
+            if let Some(pl) = self.passw_list.borrow().as_ref() {
+                pl.win.close();
+            }
+        }
+
         // limits, passphrase length, script
         let mut req: GenRequest;
         {
@@ -1269,6 +1425,13 @@ impl MainWindow {
                 self.core.borrow_mut().settings.chars_length = n;
             }
         }
+        if self.core.borrow().settings.include_words && self.core.borrow().settings.passphr_spec_len {
+            let t = self.core.borrow().settings.passphr_spec_len_string.clone();
+            if let Err(e) = parse_passphrase_length(&t) {
+                msg_box(Some(&win), &e, MsgIcon::Error, MsgButtons::Ok, false).await;
+                return;
+            }
+        }
         {
             let core = self.core.borrow();
             let s = &core.settings;
@@ -1293,13 +1456,6 @@ impl MainWindow {
                 self.core.borrow_mut().settings.words_num = n;
             }
         }
-        if self.core.borrow().settings.include_words && self.core.borrow().settings.passphr_spec_len {
-            let t = self.core.borrow().settings.passphr_spec_len_string.clone();
-            if let Err(e) = parse_passphrase_length(&t) {
-                msg_box(Some(&win), &e, MsgIcon::Error, MsgButtons::Ok, false).await;
-                return;
-            }
-        }
         match self.core.borrow().gen_request(dest, num) {
             Ok(r) => req = r,
             Err(e) => {
@@ -1314,7 +1470,10 @@ impl MainWindow {
         if let Some(path) = script_file {
             let loaded = self.script.borrow_mut().take().filter(|s| s.file_name() == path);
             let s = match loaded {
-                Some(s) => s,
+                Some(mut s) => {
+                    s.reset_init();
+                    s
+                }
                 None => {
                     let mut s = LuaScript::new();
                     let core = self.core.borrow();
@@ -1353,14 +1512,16 @@ impl MainWindow {
         let pg = std::mem::take(&mut self.core.borrow_mut().passw_gen);
         let common = self.core.borrow_mut().common_passw.take();
         let file_encoding = self.core.borrow().file_encoding;
+        let script_cancel = script.as_ref().map(|s| s.cancel_flag());
+        if let Some(sc) = &script_cancel {
+            sc.store(false, Ordering::Relaxed);
+        }
         let cancel = Arc::new(AtomicBool::new(false));
         let progress = Arc::new(AtomicU64::new(0));
         let (tx, rx) = async_channel::bounded::<(GenOutput, Option<pwtool_core::generate::CommonPasswords>)>(1);
         let c2 = cancel.clone();
         let p2 = progress.clone();
         let format_text = req.format.clone();
-        self.generating.set(true);
-        self.window.set_sensitive(false);
         let file_t = file.clone();
         std::thread::spawn(move || {
             let file = file_t;
@@ -1368,28 +1529,13 @@ impl MainWindow {
             let mut script = script;
             let mut single = Zeroizing::new(String::new());
             let mut list = Zeroizing::new(String::new());
+            let mut list_utf16_units: u64 = 0;
+            let mut first_list_item = true;
+            let mut mem_limit_reached = false;
             let mut header_len = 0usize;
             let check_each = req.num_passw > 1 && req.option_flags & pwtool_core::generate::PASSWOPTION_CHECKEACHPASSW != 0;
-            let mut file_writer = None;
-            let mut file_err = None;
-            if let Some((path, append)) = &file {
-                let r = if *append {
-                    std::fs::OpenOptions::new().append(true).open(path).map(|f| (f, file_encoding))
-                } else {
-                    std::fs::File::create(path).and_then(|mut f| {
-                        use std::io::Write;
-                        f.write_all(pwtool_core::text_file::bom(file_encoding))?;
-                        Ok((f, file_encoding))
-                    })
-                };
-                match r {
-                    Ok(x) => file_writer = Some(x),
-                    Err(e) => file_err = Some(e.to_string()),
-                }
-            }
-            let result = if let Some(e) = file_err {
-                Err(e)
-            } else {
+            let mut file_writer: Option<(std::fs::File, pwtool_core::text_file::CharEncoding)> = None;
+            let result = {
                 let mut gen_flags = 0;
                 if req.chars_len != 0 {
                     gen_flags |= 1;
@@ -1416,19 +1562,56 @@ impl MainWindow {
                 let r = generate(&pg, &mut rng, &req, common.as_ref(), hook_arg, &c2, &p2, &mut |p, s| {
                     match dest {
                         GenDest::GuiList | GenDest::ClipboardList => {
-                            if list.is_empty() && req.include_header {
-                                let total = if check_each { MAX_ENTROPY as f64 } else { s.total_security };
-                                let h = passw_list_header(req.num_passw, s.first_security, total);
-                                header_len = h.len();
-                                list.push_str(&h);
+                            let item_u16 = (p.passw.encode_utf16().count() + p.appendix.encode_utf16().count()) as u64;
+                            if first_list_item {
+                                first_list_item = false;
+                                let mut hdr_u16 = 0u64;
+                                if req.include_header {
+                                    let total = if check_each { MAX_ENTROPY as f64 } else { s.total_security };
+                                    let h = passw_list_header(req.num_passw, s.first_security, total);
+                                    header_len = h.len();
+                                    hdr_u16 = h.encode_utf16().count() as u64;
+                                    list.push_str(&h);
+                                    list_utf16_units = hdr_u16;
+                                }
+                                let est_bytes = hdr_u16
+                                    .saturating_add(item_u16.saturating_mul(req.num_passw))
+                                    .saturating_add(1)
+                                    .saturating_mul(2);
+                                if est_bytes > pwtool_core::generate::PASSWLIST_MAX_BYTES {
+                                    return Err(trl("The estimated list size will probably exceed\nthe internal memory limit.\nPlease reduce the number of passwords"));
+                                }
                             }
-                            if (list.len() + p.passw.len() + p.appendix.len()) as u64 * 2 > pwtool_core::generate::PASSWLIST_MAX_BYTES {
-                                return Err(trl("The estimated list size will probably exceed\nthe internal memory limit.\nPlease reduce the number of passwords"));
+                            if list_utf16_units.saturating_add(item_u16).saturating_add(1).saturating_mul(2)
+                                > pwtool_core::generate::PASSWLIST_MAX_BYTES
+                            {
+                                mem_limit_reached = true;
+                                return Ok(SinkAction::Stop);
                             }
                             list.push_str(p.passw);
                             list.push_str(p.appendix);
+                            list_utf16_units += item_u16;
                         }
                         GenDest::FileList => {
+                            if file_writer.is_none() {
+                                if let Some((path, append)) = &file {
+                                    let opened = if *append {
+                                        let enc = pwtool_core::text_file::detect_file_encoding(path, file_encoding)
+                                            .unwrap_or(file_encoding);
+                                        std::fs::OpenOptions::new().append(true).open(path).map(|f| (f, enc))
+                                    } else {
+                                        std::fs::File::create(path).and_then(|mut f| {
+                                            use std::io::Write;
+                                            f.write_all(pwtool_core::text_file::bom(file_encoding))?;
+                                            Ok((f, file_encoding))
+                                        })
+                                    };
+                                    match opened {
+                                        Ok(x) => file_writer = Some(x),
+                                        Err(e) => return Err(e.to_string()),
+                                    }
+                                }
+                            }
                             if let Some((f, enc)) = file_writer.as_mut() {
                                 use std::io::Write;
                                 let mut t = Zeroizing::new(p.passw.to_string());
@@ -1466,19 +1649,44 @@ impl MainWindow {
                 }
                 r
             };
-            let _ = tx.send_blocking((GenOutput { pg, rng, script, result, single, list }, common));
+            let _ = tx.send_blocking((
+                GenOutput { pg, rng, script, result, single, list, mem_limit_reached },
+                common,
+            ));
         });
 
-        // wait, showing the progress window after a while
+        // Wait for the worker directly (`rx.recv()`): fast generations (< 1 ms)
+        // finish immediately without sleeping or toggling `window.set_sensitive`,
+        // which on GTK4/Wayland resets pointer-crossing state on hovered buttons
+        // and can swallow the next click.
         let mut progress_win: Option<Rc<ProgressWindow>> = None;
+        let mut win_disabled = false;
         let start = std::time::Instant::now();
+        let mut last_prog = 0u64;
+        let mut last_prog_change = std::time::Instant::now();
+        let mut recv_fut = std::pin::pin!(rx.recv());
         let out = loop {
-            if let Ok(r) = rx.try_recv() {
-                break r;
+            let tick = std::pin::pin!(glib::timeout_future(std::time::Duration::from_millis(25)));
+            match futures_util::future::select(recv_fut, tick).await {
+                futures_util::future::Either::Left((res, _)) => {
+                    break res.expect("generator thread exited unexpectedly");
+                }
+                futures_util::future::Either::Right((_, pending)) => {
+                    recv_fut = pending;
+                }
             }
-            glib::timeout_future(std::time::Duration::from_millis(10)).await;
+            let elapsed = start.elapsed().as_millis();
+            if !win_disabled && ((dest == GenDest::GuiList && num >= 100_000) || elapsed >= 200) {
+                self.window.set_sensitive(false);
+                win_disabled = true;
+            }
+            let cur_prog = progress.load(Ordering::Relaxed);
+            if cur_prog != last_prog {
+                last_prog = cur_prog;
+                last_prog_change = std::time::Instant::now();
+            }
             if progress_win.is_none()
-                && ((dest == GenDest::GuiList && num >= 100_000) || start.elapsed().as_millis() >= 1000)
+                && ((dest == GenDest::GuiList && num >= 100_000) || elapsed >= 1000)
             {
                 let title = trl(if num == 1 { "Generating password" } else { "Generating password list" });
                 let pw = ProgressWindow::new(&win, &title, "");
@@ -1488,22 +1696,32 @@ impl MainWindow {
             if let Some(pw) = &progress_win {
                 if pw.cancel.get() {
                     cancel.store(true, Ordering::Relaxed);
+                    if let Some(sc) = &script_cancel {
+                        sc.store(true, Ordering::Relaxed);
+                    }
                 }
-                pw.set(progress.load(Ordering::Relaxed), num, "%1 of %2 passwords generated.");
+                if script_cancel.is_some() && last_prog_change.elapsed().as_millis() >= 1000 {
+                    pw.set_message(&trl("Waiting for script ..."));
+                } else {
+                    pw.set(cur_prog, num, "%1 of %2 passwords generated.");
+                }
             }
         };
         if let Some(pw) = progress_win {
             pw.win.destroy();
         }
-        self.window.set_sensitive(true);
-        self.generating.set(false);
+        if win_disabled {
+            self.window.set_sensitive(true);
+        }
         let (out, common) = out;
         {
             let mut core = self.core.borrow_mut();
             core.passw_gen = out.pg;
             core.common_passw = common;
         }
-        *self.script.borrow_mut() = out.script;
+        drop(gen_guard);
+        let cancelled = cancel.load(Ordering::Relaxed);
+        *self.script.borrow_mut() = if cancelled && out.result.is_err() { None } else { out.script };
         if let GenRng::Det(g) = out.rng {
             // keep the state of the deterministic generator
             *self.key_seeded_prng.borrow_mut() = Some(g);
@@ -1511,6 +1729,21 @@ impl MainWindow {
         let summary = match out.result {
             Ok(s) => s,
             Err(e) => {
+                if is_pool {
+                    RandomPool::global().flush();
+                    self.update_entropy_progress(false);
+                }
+                if cancelled && script_cancel.is_some() {
+                    msg_box(
+                        Some(&win),
+                        &trl("Process was cancelled by the user"),
+                        MsgIcon::Warning,
+                        MsgButtons::Ok,
+                        false,
+                    )
+                    .await;
+                    return;
+                }
                 let mut m = trl_format("An error has occurred during password generation:\n%1.", &[&e]);
                 if let (GenDest::FileList, Some((p, _))) = (dest, &file) {
                     m.push_str("\n\n");
@@ -1523,12 +1756,34 @@ impl MainWindow {
                 return;
             }
         };
-        if cancel.load(Ordering::Relaxed) && num > 1 {
-            msg(
+        if out.mem_limit_reached {
+            let count_str = summary.count.to_string();
+            self.entry("NumPasswBox").set_text(&count_str);
+            msg_box(
                 Some(&win),
-                &format!("{}.\n\n{}", trl("Process cancelled by user"), trl_format("%1 passwords generated.", &[&summary.count.to_string()])),
+                &trl_format(
+                    "The memory limit of the password list has been reached. The number of passwords has been reduced to %1.",
+                    &[&count_str],
+                ),
                 MsgIcon::Warning,
-            );
+                MsgButtons::Ok,
+                false,
+            )
+            .await;
+        }
+        if cancelled && num > 1 {
+            msg_box(
+                Some(&win),
+                &format!(
+                    "{}.\n\n{}",
+                    trl("Process was cancelled by the user"),
+                    trl_format("%1 passwords generated.", &[&summary.count.to_string()])
+                ),
+                MsgIcon::Warning,
+                MsgButtons::Ok,
+                false,
+            )
+            .await;
         }
         if dest == GenDest::GuiSingle || summary.count > 0 {
             self.label("FormatPasswInfoLbl").set_text(&summary.format_info);
@@ -1555,7 +1810,25 @@ impl MainWindow {
                 }
                 GenDest::GuiList => {
                     if self.passw_list.borrow().is_none() {
-                        let pl = PasswListWindow::new(&win);
+                        let w_enc = Rc::downgrade(&self);
+                        let w_db = Rc::downgrade(&self);
+                        let pl = PasswListWindow::new(
+                            &win,
+                            Box::new(move || {
+                                w_enc
+                                    .upgrade()
+                                    .map(|w| {
+                                        let c = w.core.borrow();
+                                        (c.file_encoding, c.newline.clone())
+                                    })
+                                    .unwrap_or((pwtool_core::text_file::CharEncoding::Utf8, "\n".to_string()))
+                            }),
+                            Box::new(move || {
+                                w_db.upgrade()
+                                    .and_then(|w| w.passw_mng.borrow().as_ref().map(|m| m.is_db_open()))
+                                    .unwrap_or(false)
+                            }),
+                        );
                         pl.load_config(&self.core.borrow().ini);
                         self.attach_entropy_events(&pl.win);
                         let w = Rc::downgrade(&self);
@@ -1592,6 +1865,7 @@ impl MainWindow {
                 }
                 GenDest::Clipboard => {
                     super::clipboard::set_data(&out.single);
+                    show_tray_info(&self, &trl("Password copied to clipboard."), false);
                 }
                 GenDest::Autotype => {
                     let delay = self.core.borrow().config.autotype_delay.clamp(0, 10000) as u32;
@@ -1611,13 +1885,17 @@ impl MainWindow {
                         )
                         .await;
                         super::clipboard::set_data(&out.single);
+                        show_tray_info(&self, &trl("Password copied to clipboard."), false);
                     } else {
                         let text = pwtool_core::unicode::format_w(
                             &trl("The generated password is:\n\n%1\n\nThe estimated security is %2 bits.\n\nYes -> copy password to clipboard,\nNo -> generate new password,\nCancel -> cancel process."),
                             &[&out.single, &format_float_1(summary.last_security)],
                         );
                         match msg_box(Some(&win), &text, MsgIcon::Info, MsgButtons::YesNoCancel, false).await {
-                            MsgResult::Yes => super::clipboard::set_data(&out.single),
+                            MsgResult::Yes => {
+                                super::clipboard::set_data(&out.single);
+                                show_tray_info(&self, &trl("Password copied to clipboard."), false);
+                            }
                             MsgResult::No => {
                                 self.generate_passw(GenDest::MsgBox);
                             }
@@ -1641,7 +1919,9 @@ impl MainWindow {
     /// `UpdateEntropyProgress()`.
     fn update_entropy_progress(&self, force: bool) {
         let _ = force;
+        let status: gtk::Label = self.b.get("StatusBar.label");
         if !self.show_ent_progress.get() {
+            status.set_text(&format!("{PROGRAM_NAME} {}", version_string()));
             return;
         }
         let em = EntropyManager::global();
@@ -1655,7 +1935,6 @@ impl MainWindow {
             if bits > MAX_ENTROPY { "+" } else { "" },
             pct
         );
-        let status: gtk::Label = self.b.get("StatusBar.label");
         status.set_text(&format!("{PROGRAM_NAME} {}        E  {text}", version_string()));
     }
 
@@ -1683,19 +1962,31 @@ impl MainWindow {
             glib::Propagation::Proceed
         });
         window.add_controller(key);
-        let click = gtk::GestureClick::new();
-        click.set_button(0);
+        let click = gtk::EventControllerLegacy::new();
         click.set_propagation_phase(gtk::PropagationPhase::Capture);
         let w = Rc::downgrade(self);
-        click.connect_pressed(move |g, _, x, y| {
-            if let Some(w) = w.upgrade() {
-                w.notify_user_action();
-                let pos = ((x as u64) << 32) | (y as u64 & 0xffff_ffff);
-                let bits = EntropyManager::global().add_event(&mut RandomPool::global(), EntropyEventType::MouseClick, g.current_button() as u64, pos, &[], ENTROPY_MOUSECLICK);
-                if bits != 0 {
-                    w.update_entropy_progress(false);
+        click.connect_event(move |_, ev| {
+            if let Some(btn) = ev.downcast_ref::<gdk::ButtonEvent>() {
+                if btn.event_type() == gdk::EventType::ButtonPress {
+                    if let Some(w) = w.upgrade() {
+                        w.notify_user_action();
+                        let (x, y) = ev.position().unwrap_or((0.0, 0.0));
+                        let pos = ((x as u64) << 32) | (y as u64 & 0xffff_ffff);
+                        let bits = EntropyManager::global().add_event(
+                            &mut RandomPool::global(),
+                            EntropyEventType::MouseClick,
+                            btn.button() as u64,
+                            pos,
+                            &[],
+                            ENTROPY_MOUSECLICK,
+                        );
+                        if bits != 0 {
+                            w.update_entropy_progress(false);
+                        }
+                    }
                 }
             }
+            glib::Propagation::Proceed
         });
         window.add_controller(click);
         let motion = gtk::EventControllerMotion::new();
@@ -1716,6 +2007,33 @@ impl MainWindow {
             }
         });
         window.add_controller(motion);
+        let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::BOTH_AXES);
+        scroll.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let w = Rc::downgrade(self);
+        scroll.connect_scroll(move |_, dx, dy| {
+            if let Some(w) = w.upgrade() {
+                w.notify_user_action();
+                let c = w.mouse_wheel_cnt.get();
+                if c <= 0 {
+                    let bits = EntropyManager::global().add_event(
+                        &mut RandomPool::global(),
+                        EntropyEventType::MouseWheel,
+                        dx.to_bits(),
+                        dy.to_bits(),
+                        &[],
+                        ENTROPY_MOUSECLICK,
+                    );
+                    w.mouse_wheel_cnt.set(pwtool_core::random::fprng_rand_range(10) as i32);
+                    if bits != 0 {
+                        w.update_entropy_progress(false);
+                    }
+                } else {
+                    w.mouse_wheel_cnt.set(c - 1);
+                }
+            }
+            glib::Propagation::Proceed
+        });
+        window.add_controller(scroll);
     }
 
     /// `TimerTick()` (every second).
@@ -1775,24 +2093,48 @@ impl MainWindow {
     fn timer_info(&self) {
         let kind = pwtool_core::random::hrtimer::timer_kind();
         let name = match kind {
-            pwtool_core::random::hrtimer::TimerKind::Rdtsc => "RDTSC",
+            pwtool_core::random::hrtimer::TimerKind::Rdtsc => "Time stamp counter (RDTSC instruction)",
             pwtool_core::random::hrtimer::TimerKind::Qpc => "CLOCK_MONOTONIC_RAW",
-            pwtool_core::random::hrtimer::TimerKind::None => "None",
+            pwtool_core::random::hrtimer::TimerKind::None => "N/A",
         };
-        msg(Some(&self.win()), &format!("{}: {name}", trl("High-resolution timer")), MsgIcon::Info);
+        let val = pwtool_core::random::hrtimer::high_res_timer().to_string();
+        msg(
+            Some(&self.win()),
+            &trl_format("High-resolution timer used:\n%1.\n\nCurrent value: %2.", &[name, &val]),
+            MsgIcon::Info,
+        );
     }
 
     fn add_entropy_from_file(self: &Rc<Self>) {
         let dlg = gtk::FileDialog::new();
+        dlg.set_title(&trl("Select high-entropy file"));
         let w = self.clone();
         dlg.open(Some(&self.window), gio::Cancellable::NONE, move |r| {
             let Ok(f) = r else { return };
             let Some(p) = f.path() else { return };
-            match std::fs::read(&p) {
-                Ok(data) => {
-                    let data = Zeroizing::new(data);
-                    let bits = EntropyManager::global().add_data(&mut RandomPool::global(), &data, 7.954, 7.981);
-                    RandomPool::global().flush();
+            use std::io::Read;
+            match std::fs::File::open(&p) {
+                Ok(mut f) => {
+                    const MAX_BYTES: u64 = 1_000_000_000;
+                    let mut buf = Zeroizing::new(vec![0u8; 65_536]);
+                    let mut total: u64 = 0;
+                    let mut bits: u32 = 0;
+                    let mut em = EntropyManager::global();
+                    let mut pool = RandomPool::global();
+                    while total < MAX_BYTES {
+                        let to_read = (MAX_BYTES - total).min(buf.len() as u64) as usize;
+                        match f.read(&mut buf[..to_read]) {
+                            Ok(0) => break,
+                            Ok(n) => {
+                                bits = bits.saturating_add(em.add_data(&mut pool, &buf[..n], 4.0, 4.0));
+                                total += n as u64;
+                            }
+                            Err(_) => break,
+                        }
+                    }
+                    pool.flush();
+                    drop(pool);
+                    drop(em);
                     w.update_entropy_progress(true);
                     msg(
                         Some(&w.win()),
@@ -1800,7 +2142,7 @@ impl MainWindow {
                         MsgIcon::Info,
                     );
                 }
-                Err(e) => msg(Some(&w.win()), &e.to_string(), MsgIcon::Error),
+                Err(_) => msg(Some(&w.win()), &trl("Could not open file."), MsgIcon::Error),
             }
         });
     }
@@ -1818,6 +2160,23 @@ impl MainWindow {
     /// (`MainMenu_Tools_DetermRandGen_SetupClick` + `UseKeySeededPRNG`).
     pub fn use_key_seeded_prng(&self, passw: &str) {
         self.use_key_seeded_prng_with(pwtool_core::mp_passw_gen::deterministic_generator(passw));
+    }
+
+    /// Generate a formatted password using the deterministic PRNG if active,
+    /// otherwise the global random pool (used by PassCube's FormatPW menu).
+    pub fn format_passw_with_active_rng(&self, format: &str) -> Option<Zeroizing<String>> {
+        let pg = PasswordGenerator::new();
+        let f = pwtool_core::unicode::str_to_w32(format);
+        let r = if let Some(det) = self.key_seeded_prng.borrow_mut().as_mut() {
+            pg.get_format_passw(det, &f, 0, None, 16000, None)
+        } else {
+            pg.get_format_passw(&mut *RandomPool::global(), &f, 0, None, 16000, None)
+        };
+        if r.passw.is_empty() {
+            None
+        } else {
+            Some(pwtool_core::unicode::w32_to_string_secure(&r.passw))
+        }
     }
 
     /// `UseKeySeededPRNG()` with an already seeded generator.
@@ -1870,12 +2229,27 @@ impl MainWindow {
     }
 
     fn on_close(&self) {
+        self.abort_autotype();
         if (self.action_checked("MainMenu_Options_SaveSettingsOnExit") && !self.core.borrow().cmd.config_readonly)
             || crate::app::restart_requested()
         {
             self.save_config();
         }
-        self.core.borrow().write_rand_seed_file();
+        let seed_ok = self.core.borrow().write_rand_seed_file();
+        if !seed_ok {
+            let path = self
+                .core
+                .borrow()
+                .paths
+                .data_dir
+                .join(crate::program::PROGRAM_RANDSEEDFILE)
+                .to_string_lossy()
+                .into_owned();
+            eprintln!(
+                "{}",
+                trl_format("Could not write to random seed file\n\"%1\".", &[&path])
+            );
+        }
         super::autotype::close_session();
         if let Some(app) = self.window.application() {
             super::active_window::stop_watching(&app);
@@ -1902,7 +2276,7 @@ impl MainWindow {
         };
         let idx = pwtool_core::config::find_profile(&self.core.borrow().profiles, &name);
         match idx {
-            Some(i) => self.load_profile(i),
+            Some(i) => self.load_profile_inner(i, true),
             None => {
                 let mut core = self.core.borrow_mut();
                 core.startup_errors.push(trl_format("Profile \"%1\" not found.", &[&name]));
@@ -1916,18 +2290,24 @@ impl MainWindow {
         }
     }
 
-    /// Show start-up errors and start the automatic update check
-    /// (`FormActivate`).
-    pub fn show_startup_errors(self: &Rc<Self>) {
-        self.auto_check_updates();
+    /// Open PassCube on startup if configured or requested on command line.
+    pub fn startup_open_manager(self: &Rc<Self>) {
         let open_mng = {
             let core = self.core.borrow();
             core.config.database.open_window_on_startup || core.cmd.passw_db_file_name.is_some()
         };
         if open_mng {
-            let w = self.clone();
-            glib::idle_add_local_once(move || w.show_passw_manager());
+            self.show_passw_manager();
         }
+    }
+
+    /// Show start-up errors and start the automatic update check
+    /// (`FormActivate`, runs once when the main window is first shown).
+    pub fn show_startup_errors(self: &Rc<Self>) {
+        if self.startup_shown.replace(true) {
+            return;
+        }
+        self.auto_check_updates();
         let errs: Vec<String> = self.core.borrow_mut().startup_errors.drain(..).collect();
         if !errs.is_empty() {
             let mut m = trl_format("%1 encountered %2 error(s) during startup:", &[PROGRAM_NAME, &errs.len().to_string()]);

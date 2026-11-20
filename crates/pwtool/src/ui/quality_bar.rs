@@ -1,14 +1,16 @@
 //! Password quality bar (`TCGauge` with `SetPasswQualityBar()` of
-//! `upstream/src/util/Util.cpp`): length ~ entropy (full = 128 bits). The
-//! filled part shows a gradient over the whole scale, from dark red over
-//! orange, yellow and green to bright green in equal steps, so a strong
-//! password shows the whole spectrum.
+//! `upstream/src/util/Util.cpp`): length ~ entropy (full = 128 bits), split
+//! into 16 discrete vertical blocks, each in its own shade from dark red over
+//! orange and yellow to bright green so strength gradations are clearly visible.
 
 use std::cell::Cell;
 use std::rc::Rc;
 
 use gtk4 as gtk;
 use gtk::prelude::*;
+
+/// Number of vertical blocks in the password strength bar.
+pub const BLOCKS: usize = 16;
 
 #[derive(Clone)]
 pub struct QualityBar {
@@ -44,26 +46,32 @@ pub fn quality_color(bits: f64) -> (i32, u32) {
     (progress, rgb)
 }
 
-/// Colours of the bar from weak to strong. Every colour gets an equal band
-/// of the scale with a short plateau of the pure colour, so that all colours
-/// (also yellow) are equally visible.
+/// Anchor colours from weak to strong across the 16 blocks.
 const COLORS: [u32; 7] = [0x7a0000, 0xe00000, 0xff7000, 0xffe600, 0xa8e000, 0x30d020, 0x00ff40];
-/// Share of a colour band that shows the pure colour.
-const PLATEAU: f64 = 0.35;
 
-/// Gradient stops (position 0..1, colour).
-fn gradient_stops() -> Vec<(f64, u32)> {
-    let n = COLORS.len() as f64;
-    let mut v = Vec::new();
-    for (i, &c) in COLORS.iter().enumerate() {
-        let center = (i as f64 + 0.5) / n;
-        let half = PLATEAU / n / 2.0;
-        let a = if i == 0 { 0.0 } else { center - half };
-        let b = if i + 1 == COLORS.len() { 1.0 } else { center + half };
-        v.push((a, c));
-        v.push((b, c));
+/// Distinct RGB colour `(r, g, b)` in `0.0..=1.0` for block `idx` (`0..BLOCKS`).
+fn block_color(idx: usize) -> (f64, f64, f64) {
+    let t = (idx.min(BLOCKS - 1) as f64) / ((BLOCKS - 1) as f64);
+    let scaled = t * ((COLORS.len() - 1) as f64);
+    let seg = (scaled.floor() as usize).min(COLORS.len() - 2);
+    let f = scaled - seg as f64;
+    let c0 = COLORS[seg];
+    let c1 = COLORS[seg + 1];
+    let lerp = |shift: u32| -> f64 {
+        let a = ((c0 >> shift) & 0xff) as f64;
+        let b = ((c1 >> shift) & 0xff) as f64;
+        (a + (b - a) * f) / 255.0
+    };
+    (lerp(16), lerp(8), lerp(0))
+}
+
+/// Number of lit blocks (`0..=BLOCKS`) for a given `progress` and `max`.
+fn filled_blocks(progress: i32, max: i32) -> usize {
+    if progress <= 0 || max <= 0 {
+        return 0;
     }
-    v
+    let frac = (progress as f64 / max as f64).clamp(0.0, 1.0);
+    ((frac * BLOCKS as f64).ceil() as usize).clamp(1, BLOCKS)
 }
 
 impl QualityBar {
@@ -71,29 +79,42 @@ impl QualityBar {
         let state = Rc::new(Cell::new((0, 0u32)));
         let s = state.clone();
         area.set_draw_func(move |_, cr, w, h| {
-            let (progress, rgb) = s.get();
-            cr.set_source_rgba(0.5, 0.5, 0.5, 0.25);
-            cr.rectangle(0.0, 0.0, w as f64, h as f64);
+            let (progress, _rgb) = s.get();
+            let wf = w as f64;
+            let hf = h as f64;
+
+            // Subtle bar background
+            cr.set_source_rgba(0.5, 0.5, 0.5, 0.14);
+            cr.rectangle(0.0, 0.0, wf, hf);
             let _ = cr.fill();
-            if progress > 0 {
-                let frac = (progress as f64 / max as f64).min(1.0);
-                let grad = gtk::cairo::LinearGradient::new(0.0, 0.0, w as f64, 0.0);
-                for (pos, rgb) in gradient_stops() {
-                    grad.add_color_stop_rgb(
-                        pos,
-                        ((rgb >> 16) & 0xff) as f64 / 255.0,
-                        ((rgb >> 8) & 0xff) as f64 / 255.0,
-                        (rgb & 0xff) as f64 / 255.0,
-                    );
+
+            // 16 discrete vertical blocks with crisp 2px separators
+            let pad = 2.0;
+            let gap = 2.0;
+            let inner_w = (wf - pad * 2.0).max(0.0);
+            let inner_h = (hf - pad * 2.0).max(0.0);
+            let lit = filled_blocks(progress, max);
+            if inner_w > 0.0 && inner_h > 0.0 {
+                let stride = (inner_w + gap) / BLOCKS as f64;
+                for i in 0..BLOCKS {
+                    let x0 = (pad + stride * i as f64).round();
+                    let x1 = (pad + stride * (i + 1) as f64 - gap).round();
+                    let bw = (x1 - x0).max(1.0);
+                    if i < lit {
+                        let (r, g, b) = block_color(i);
+                        cr.set_source_rgb(r, g, b);
+                    } else {
+                        cr.set_source_rgba(0.5, 0.5, 0.5, 0.18);
+                    }
+                    cr.rectangle(x0, pad, bw, inner_h);
+                    let _ = cr.fill();
                 }
-                let _ = cr.set_source(&grad);
-                cr.rectangle(0.0, 0.0, w as f64 * frac, h as f64);
-                let _ = cr.fill();
-                let _ = rgb;
             }
+
+            // Outer border
             cr.set_source_rgba(0.4, 0.4, 0.4, 0.8);
             cr.set_line_width(1.0);
-            cr.rectangle(0.5, 0.5, w as f64 - 1.0, h as f64 - 1.0);
+            cr.rectangle(0.5, 0.5, wf - 1.0, hf - 1.0);
             let _ = cr.stroke();
         });
         QualityBar { area, state, max }
@@ -113,5 +134,32 @@ impl QualityBar {
 
     pub fn max(&self) -> i32 {
         self.max
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sixteen_distinct_blocks_and_scaling() {
+        assert_eq!(BLOCKS, 16);
+        assert_eq!(filled_blocks(0, 128), 0);
+        assert_eq!(filled_blocks(4, 128), 1);
+        assert_eq!(filled_blocks(64, 128), 8);
+        assert_eq!(filled_blocks(128, 128), 16);
+        assert_eq!(filled_blocks(200, 128), 16);
+        // All 16 blocks have distinct colours
+        let colors: Vec<(u8, u8, u8)> = (0..BLOCKS)
+            .map(|i| {
+                let (r, g, b) = block_color(i);
+                ((r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8)
+            })
+            .collect();
+        for w in colors.windows(2) {
+            assert_ne!(w[0], w[1]);
+        }
+        assert_eq!(colors[0], (0x7a, 0x00, 0x00));
+        assert_eq!(colors[BLOCKS - 1], (0x00, 0xff, 0x40));
     }
 }

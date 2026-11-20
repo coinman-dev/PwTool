@@ -10,7 +10,8 @@ use pwtool_core::config::{
     load_profiles, remove_comment_and_trim, save_profiles,
 };
 use pwtool_core::generate::{
-    CommonPasswords, GenDest, GenRequest, PASSWOPTION_EACHCHARONLYONCE, PASSWOPTION_EXCLUDEAMBIG,
+    CommonPasswords, GenDest, GenRequest, PASSWOPTION_EACHCHARONLYONCE, PASSWOPTION_EACHWORDONLYONCE,
+    PASSWOPTION_EXCLUDEAMBIG,
     PASSWOPTION_INCLUDE_CHAR_FROM_EACH_SUBSET, PASSWOPTION_INCLUDESUBSET, PASSWOPTION_LOWERCASEWORDS, PassphraseLength,
     parse_passphrase_length,
 };
@@ -52,10 +53,18 @@ pub fn parse_cmdline(args: &[String]) -> CmdLineOptions {
             i += 1;
             continue;
         }
-        let name = a.trim_start_matches('-');
+        let name = if let Some(s) = a.strip_prefix("--") {
+            if s.is_empty() {
+                i += 1;
+                continue;
+            }
+            s
+        } else {
+            &a[1..]
+        };
         let next = args.get(i + 1);
         match name.to_ascii_lowercase().as_str() {
-            "help" | "h" => o.show_help = true,
+            "help" => o.show_help = true,
             "ini" => {
                 if let Some(n) = next {
                     o.ini_file_name = Some(PathBuf::from(n));
@@ -70,8 +79,8 @@ pub fn parse_cmdline(args: &[String]) -> CmdLineOptions {
                 }
             }
             "gen" => {
-                let mut n = 1i64;
-                if let Some(v) = next.and_then(|v| v.parse::<i64>().ok()).filter(|&v| v >= 0) {
+                let mut n = 1i32;
+                if let Some(v) = next.and_then(|v| v.parse::<i32>().ok()).filter(|&v| v >= 0) {
                     n = v;
                     i += 1;
                 }
@@ -137,6 +146,11 @@ impl AppPaths {
             if !use_app_data {
                 return AppPaths { exe_dir: exe_dir.clone(), resources, data_dir: exe_dir, ini_file: portable_ini };
             }
+            let target = app_data.join(PROGRAM_INIFILE);
+            if !target.exists() {
+                let _ = std::fs::create_dir_all(&app_data);
+                let _ = std::fs::copy(&portable_ini, &target);
+            }
         }
         AppPaths { exe_dir, resources, ini_file: app_data.join(PROGRAM_INIFILE), data_dir: app_data }
     }
@@ -152,7 +166,7 @@ impl AppPaths {
         ];
         for c in &candidates {
             if c.join("common_passwords.txt").is_file() {
-                return c.clone();
+                return std::fs::canonicalize(c).unwrap_or_else(|_| c.clone());
             }
         }
         exe_dir.to_path_buf()
@@ -220,6 +234,9 @@ impl AppCore {
     /// Start-up: configuration, language, seed file, generator settings,
     /// profiles, common passwords.
     pub fn new(cmd: CmdLineOptions) -> Self {
+        if let Err(e) = pwtool_core::crypto::self_test() {
+            panic!("{e}");
+        }
         pwtool_core::util::init_time_locale();
         pwtool_core::util::init_decimal_separator_from_locale();
         let paths = AppPaths::detect(cmd.ini_file_name.as_deref());
@@ -274,7 +291,12 @@ impl AppCore {
 
         app.load_lang_config();
 
-        // random pool: cipher, seed file, system entropy
+        // random pool & entropy manager (`Main.cpp:287-325`)
+        {
+            let mut em = EntropyManager::global();
+            em.set_max_timer_entropy_bits(8);
+            em.set_system_entropy_bits(24);
+        }
         {
             let mut pool = RandomPool::global();
             if let Some(c) = PoolCipherType::from_index(app.config.random_pool_cipher) {
@@ -286,8 +308,13 @@ impl AppCore {
             }
             pool.randomize_system();
         }
-        EntropyManager::global().add_system_entropy(&mut RandomPool::global());
-        app.write_rand_seed_file();
+        if !app.write_rand_seed_file() {
+            let seed = app.paths.data_dir.join(PROGRAM_RANDSEEDFILE);
+            app.startup_errors.push(trl_format(
+                "Could not write to random seed file\n\"%1\".",
+                &[&seed.to_string_lossy()],
+            ));
+        }
 
         if !app.cmd.unknown_switches.is_empty() {
             app.startup_errors.push(trl_format(
@@ -300,13 +327,13 @@ impl AppCore {
         app
     }
 
-    /// `WriteRandSeedFile()`.
-    pub fn write_rand_seed_file(&self) {
+    /// `WriteRandSeedFile()`: returns `false` on write failure (or `true` if skipped due to `--readonly`).
+    pub fn write_rand_seed_file(&self) -> bool {
         if self.cmd.config_readonly {
-            return;
+            return true;
         }
         let seed = self.paths.data_dir.join(PROGRAM_RANDSEEDFILE);
-        RandomPool::global().write_seed_file(&seed);
+        RandomPool::global().write_seed_file(&seed)
     }
 
     /// `LoadLangConfig()`: list translations and load the configured one.
@@ -323,6 +350,9 @@ impl AppCore {
             let mut files: Vec<PathBuf> = rd.filter_map(|e| e.ok().map(|e| e.path())).collect();
             files.sort();
             for f in files {
+                if self.languages.len() >= 32 {
+                    break;
+                }
                 let ext = f.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
                 if ext != "po" && ext != "lng" {
                     continue;
@@ -360,11 +390,11 @@ impl AppCore {
             }
         };
         self.language = 0;
+        self.help_file_name = self.paths.resources.join(PROGRAM_HELPFILE);
         if idx != 0 && self.change_language(idx) {
             self.language = idx;
         }
         self.config.language_code = self.languages[self.language].code.clone();
-        self.help_file_name = self.paths.resources.join(PROGRAM_HELPFILE);
     }
 
     /// `ChangeLanguage()`.
@@ -391,7 +421,10 @@ impl AppCore {
                 true
             }
             Err(e) => {
-                self.startup_errors.push(format!("{}: {e}", file.display()));
+                self.startup_errors.push(trl_format(
+                    "Error while loading language file\n\"%1\":\n%2.",
+                    &[&file.to_string_lossy(), &e.to_string()],
+                ));
                 false
             }
         }
@@ -411,12 +444,14 @@ impl AppCore {
         if self.load_char_set(&cs) == 0 {
             self.startup_errors.push(trl_format("Character set \"%1\" is invalid.", &[&cs]));
             self.settings.char_set_list[0] = CHARSETLIST_DEFAULTENTRIES[0].to_string();
+            self.settings.char_set_text = CHARSETLIST_DEFAULTENTRIES[0].to_string();
             self.load_char_set(CHARSETLIST_DEFAULTENTRIES[0]);
         }
         let wl = self.settings.wlfn_list[0].clone();
         if wl != WLFNLIST_DEFAULT && self.load_word_list_file(&wl) <= 0 {
             self.startup_errors.push(trl_format("Error while loading word list file\n\"%1\".", &[&wl]));
             self.settings.wlfn_list[0] = WLFNLIST_DEFAULT.to_string();
+            self.settings.wlfn_text = WLFNLIST_DEFAULT.to_string();
             self.load_word_list_file(WLFNLIST_DEFAULT);
         } else if wl == WLFNLIST_DEFAULT {
             self.load_word_list_file(WLFNLIST_DEFAULT);
@@ -445,9 +480,11 @@ impl AppCore {
     }
 
     /// `SaveConfig(sFileName)`: save to the configuration file, or to
-    /// `path` (backup; also when the configuration is read-only).
+    /// `path` (backup). Callers check `config_readonly` for automatic saves
+    /// on exit; explicit "Save Settings Now" and restarts save even under
+    /// `--readonly`, matching `Main.cpp:508, 1208, 3175`.
     pub fn save_config_to(&mut self, path: Option<&Path>) -> std::io::Result<()> {
-        if path.is_none() && (self.cmd.config_readonly || self.fake_ini) {
+        if path.is_none() && self.fake_ini {
             return Ok(());
         }
         self.config.save(&mut self.ini);
@@ -573,9 +610,9 @@ impl AppCore {
                 self.settings.passw_options.trigram_file_name.clear();
             }
         }
-        let cs = self.settings.char_set_list[0].clone();
+        let cs = self.settings.char_set_text.clone();
         self.load_char_set(&cs);
-        let wl = self.settings.wlfn_list[0].clone();
+        let wl = self.settings.wlfn_text.clone();
         self.load_word_list_file(&wl);
     }
 
@@ -585,21 +622,28 @@ impl AppCore {
         let s = &self.settings;
         let passphrase_length: Option<PassphraseLength> =
             if s.include_words && s.passphr_spec_len { parse_passphrase_length(&s.passphr_spec_len_string)? } else { None };
-        let mut chars_len = if s.include_chars { s.chars_length } else { 0 };
+        let mut chars_len = if s.include_chars { s.chars_length.clamp(1, 10_000) } else { 0 };
         if chars_len != 0
             && s.passw_options.flags & PASSWOPTION_EACHCHARONLYONCE != 0
             && chars_len > self.passw_gen.custom_char_set_unique_size()
         {
             chars_len = self.passw_gen.custom_char_set_unique_size();
         }
+        let mut num_words = if s.include_words { s.words_num.clamp(1, 100) } else { 0 };
+        if num_words != 0
+            && s.passw_options.flags & PASSWOPTION_EACHWORDONLYONCE != 0
+            && num_words > self.passw_gen.word_list_size()
+        {
+            num_words = self.passw_gen.word_list_size();
+        }
         Ok(GenRequest {
             dest,
             num_passw: num,
             chars_len,
-            num_words: if s.include_words { s.words_num } else { 0 },
+            num_words,
             combine_words_chars: s.combine_words_chars,
             passphrase_length,
-            format: if s.format_passw { s.format_list.first().cloned().unwrap_or_default() } else { String::new() },
+            format: if s.format_passw { s.format_text.clone() } else { String::new() },
             option_flags: s.passw_options.flags,
             include_header: s.include_header,
             file_newline: self.newline.clone(),
@@ -607,12 +651,12 @@ impl AppCore {
         })
     }
 
-    /// Script file to run, if "Run script" is active.
+    /// Script file to run, if "Run script" is active and the script box is non-empty.
     pub fn script_file(&self) -> Option<PathBuf> {
-        if !self.settings.run_script {
+        if !self.settings.run_script || self.settings.script_text.is_empty() {
             return None;
         }
-        let name = remove_comment_and_trim(self.settings.script_list.first()?);
+        let name = remove_comment_and_trim(&self.settings.script_text);
         if name.is_empty() { None } else { Some(self.paths.resolve(&name)) }
     }
 
@@ -621,6 +665,7 @@ impl AppCore {
         let mut s = trl("Usage:");
         s.push_str("\npwtool [--help] [--ini {file}] [--readonly] [--profile {profilename}] [--gen [number]] [--silent] [--opendb {filename}]\n");
         s.push_str(&format!("\n--help - {}", trl("Display this help message.")));
+        s.push_str(&format!("\n--ini - {}", trl("Use the specified configuration file.")));
         s.push_str(&format!("\n--readonly - {}", trl("Do not write to disk unless explicitly requested.")));
         s.push_str(&format!("\n--profile - {}", trl("Load profile named 'profilename' on start-up.")));
         s.push_str(&format!(
@@ -646,9 +691,24 @@ pub fn system_language_code() -> String {
     lang.split(['_', '.', '@']).next().unwrap_or("").to_string()
 }
 
-/// `CompareVersionNumbers()`.
+/// `CompareVersionNumbers()` / `ParseVersionNumber()`: stops at the first
+/// non-numeric or negative segment and caps at 5 segments.
 pub fn compare_versions(a: &str, b: &str) -> i32 {
-    let p = |s: &str| -> Vec<i64> { s.split('.').map(|x| x.trim().parse().unwrap_or(0)).collect() };
+    let p = |s: &str| -> Vec<i32> {
+        let mut v = Vec::new();
+        for seg in s.split('.') {
+            match seg.trim().parse::<i32>() {
+                Ok(n) if n >= 0 => {
+                    v.push(n);
+                    if v.len() == 5 {
+                        break;
+                    }
+                }
+                _ => break,
+            }
+        }
+        v
+    };
     let (va, vb) = (p(a), p(b));
     for i in 0..va.len().max(vb.len()) {
         let x = va.get(i).copied().unwrap_or(0);
@@ -670,4 +730,38 @@ pub fn request_restart() {
 
 pub fn restart_requested() -> bool {
     RESTART.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn svec(a: &[&str]) -> Vec<String> {
+        a.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn parse_cmdline_edge_cases() {
+        // Bare "--" is skipped; "---help" is unknown; "-h" is unknown (not help)
+        let o = parse_cmdline(&svec(&["--", "---help", "-h", "--gen", "5"]));
+        assert!(!o.show_help);
+        assert_eq!(o.gen_num_passw, 5);
+        assert_eq!(o.unknown_switches, vec!["\"-help\"", "\"h\""]);
+
+        // --gen 0 clamps to 1; out-of-i32-range value is not accepted as count
+        let o2 = parse_cmdline(&svec(&["--gen", "0", "--help"]));
+        assert!(o2.show_help);
+        assert_eq!(o2.gen_num_passw, 1);
+        let o3 = parse_cmdline(&svec(&["--gen", "5000000000"]));
+        assert_eq!(o3.gen_num_passw, 1);
+    }
+
+    #[test]
+    fn compare_versions_stops_on_non_numeric_and_caps_at_five() {
+        assert_eq!(compare_versions("3.6.1", "3.6.1.0"), 0);
+        assert_eq!(compare_versions("3.6.beta.9", "3.6.0"), 0);
+        assert_eq!(compare_versions("3.-1.9", "3.0"), 0);
+        assert_eq!(compare_versions("1.2.3.4.5.99", "1.2.3.4.5.1"), 0);
+        assert_eq!(compare_versions("1.2.3.4.6", "1.2.3.4.5"), 1);
+    }
 }

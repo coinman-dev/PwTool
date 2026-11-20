@@ -1104,11 +1104,26 @@ fn collect_all(form: &FormObj) -> Vec<&FormObj> {
 
 /// Show a popup menu at the pointer position over `widget` on right click.
 pub fn attach_context_menu(widget: &impl IsA<gtk::Widget>, menu: &gio::Menu) -> gtk::PopoverMenu {
+    attach_context_menu_phase(widget, menu, gtk::PropagationPhase::Bubble)
+}
+
+/// Like [`attach_context_menu`], but intercepts right click in the capture phase
+/// (replaces the widget's built-in context menu, e.g. on `gtk::Entry`).
+pub fn attach_context_menu_capture(widget: &impl IsA<gtk::Widget>, menu: &gio::Menu) -> gtk::PopoverMenu {
+    attach_context_menu_phase(widget, menu, gtk::PropagationPhase::Capture)
+}
+
+fn attach_context_menu_phase(
+    widget: &impl IsA<gtk::Widget>,
+    menu: &gio::Menu,
+    phase: gtk::PropagationPhase,
+) -> gtk::PopoverMenu {
     let pop = gtk::PopoverMenu::from_model(Some(menu));
     pop.set_parent(widget);
     pop.set_has_arrow(false);
     let gesture = gtk::GestureClick::new();
     gesture.set_button(gdk::BUTTON_SECONDARY);
+    gesture.set_propagation_phase(phase);
     let p = pop.clone();
     gesture.connect_pressed(move |g, _, x, y| {
         p.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
