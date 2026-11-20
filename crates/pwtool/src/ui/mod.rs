@@ -129,6 +129,15 @@ fn automate(w: Rc<main_window::MainWindow>, script: String) {
                     }
                 }
                 "minimize" => w.window.minimize(),
+                "theme" => {
+                    if let Some(st) = gtk::Settings::default() {
+                        let scheme = st
+                            .find_property("gtk-interface-color-scheme")
+                            .map(|_| format!("{:?}", st.property_value("gtk-interface-color-scheme")))
+                            .unwrap_or_default();
+                        println!("prefer_dark={} theme={:?} scheme={scheme}", st.is_gtk_application_prefer_dark_theme(), st.gtk_theme_name());
+                    }
+                }
                 "state" => {
                     if let Some(t) = w.window.surface().and_then(|s| s.downcast::<gtk::gdk::Toplevel>().ok()) {
                         println!("state={:?} visible={}", t.state(), w.window.is_visible());

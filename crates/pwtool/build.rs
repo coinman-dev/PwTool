@@ -6,6 +6,11 @@ use std::path::Path;
 fn main() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/icons");
     println!("cargo:rerun-if-changed={}", root.display());
+    for d in ["Main", "PasswManager"] {
+        for c in ["ImageCollection16", "ImageCollection32"] {
+            println!("cargo:rerun-if-changed={}", root.join(d).join(c).display());
+        }
+    }
     let mut entries = Vec::new();
     if let Ok(forms) = std::fs::read_dir(&root) {
         for f in forms.flatten() {
@@ -19,6 +24,7 @@ fn main() {
                             coll.file_name().to_string_lossy(),
                             p.file_stem().unwrap().to_string_lossy()
                         );
+                        println!("cargo:rerun-if-changed={}", p.display());
                         entries.push((key, p.canonicalize().unwrap()));
                     }
                 }

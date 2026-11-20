@@ -1,6 +1,8 @@
 //! Password quality bar (`TCGauge` with `SetPasswQualityBar()` of
-//! `upstream/src/util/Util.cpp`): length ~ entropy (full = 128 bits), colour
-//! from red over yellow to green.
+//! `upstream/src/util/Util.cpp`): length ~ entropy (full = 128 bits). The
+//! filled part shows a gradient over the whole scale, from dark red over
+//! yellow (thresholds of the original: 56, 70, 75, 80, 112 bits) to bright
+//! green, so a strong password shows the whole spectrum.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -42,6 +44,18 @@ pub fn quality_color(bits: f64) -> (i32, u32) {
     (progress, rgb)
 }
 
+/// Colour stops (entropy bits, 0xRRGGBB) of the bar.
+const GRADIENT: [(f64, u32); 8] = [
+    (0.0, 0x6e0000),
+    (32.0, 0xd00000),
+    (56.0, 0xff6000),
+    (70.0, 0xffe000),
+    (75.0, 0xc8f000),
+    (80.0, 0x70e000),
+    (112.0, 0x00d020),
+    (128.0, 0x00ff40),
+];
+
 impl QualityBar {
     pub fn new(area: gtk::DrawingArea, max: i32) -> Self {
         let state = Rc::new(Cell::new((0, 0u32)));
@@ -53,13 +67,19 @@ impl QualityBar {
             let _ = cr.fill();
             if progress > 0 {
                 let frac = (progress as f64 / max as f64).min(1.0);
-                cr.set_source_rgb(
-                    ((rgb >> 16) & 0xff) as f64 / 255.0,
-                    ((rgb >> 8) & 0xff) as f64 / 255.0,
-                    (rgb & 0xff) as f64 / 255.0,
-                );
+                let grad = gtk::cairo::LinearGradient::new(0.0, 0.0, w as f64, 0.0);
+                for (bits, rgb) in GRADIENT {
+                    grad.add_color_stop_rgb(
+                        bits / max as f64,
+                        ((rgb >> 16) & 0xff) as f64 / 255.0,
+                        ((rgb >> 8) & 0xff) as f64 / 255.0,
+                        (rgb & 0xff) as f64 / 255.0,
+                    );
+                }
+                let _ = cr.set_source(&grad);
                 cr.rectangle(0.0, 0.0, w as f64 * frac, h as f64);
                 let _ = cr.fill();
+                let _ = rgb;
             }
             cr.set_source_rgba(0.4, 0.4, 0.4, 0.8);
             cr.set_line_width(1.0);

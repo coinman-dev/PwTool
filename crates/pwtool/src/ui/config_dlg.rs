@@ -476,7 +476,7 @@ impl ConfigDlg {
     }
 
     fn load_languages(&self) {
-        let items: Vec<String> = self.languages().iter().map(|e| format!("{} (v{})", e.name, e.version)).collect();
+        let items: Vec<String> = self.languages().iter().map(|e| e.name.clone()).collect();
         set_combo_items(&self.combo("LanguageList"), &items);
     }
 

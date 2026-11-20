@@ -1195,7 +1195,7 @@ impl MainWindow {
                 l.set_wrap(true);
             }
             if let Some(l) = b.try_get::<gtk::Label>("DonorLbl") {
-                l.set_text("Community");
+                l.set_text(&trl("Community"));
             }
             if let Some(p) = b.try_get::<gtk::Picture>("Logo") {
                 let bytes = glib::Bytes::from_static(include_bytes!("../../../../assets/about_logo.png"));

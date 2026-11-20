@@ -308,15 +308,51 @@ pub fn set_gui_font(font_string: &str) {
     });
 }
 
-/// User interface style: "Light"/"Dark" force the colour scheme, anything
-/// else follows the desktop.
+/// User interface style: "Light"/"Dark" force the colour scheme, "Default"
+/// follows the desktop: the values GTK got from the desktop (KDE's GTK
+/// settings, the colour scheme of the settings portal) are left alone, or
+/// restored when switching back from a forced style.
 pub fn set_ui_style(name: &str) {
-    if let Some(s) = gtk::Settings::default() {
-        match name {
-            "Dark" => s.set_gtk_application_prefer_dark_theme(true),
-            _ => s.set_gtk_application_prefer_dark_theme(false),
-        }
+    thread_local! {
+        static SYSTEM: std::cell::RefCell<Option<(bool, Option<glib::Value>)>> = const { std::cell::RefCell::new(None) };
     }
+    let Some(s) = gtk::Settings::default() else { return };
+    let scheme_prop = s.find_property("gtk-interface-color-scheme");
+    SYSTEM.with(|c| {
+        let mut c = c.borrow_mut();
+        if c.is_none() {
+            let scheme = scheme_prop.as_ref().map(|_| s.property_value("gtk-interface-color-scheme"));
+            *c = Some((s.is_gtk_application_prefer_dark_theme(), scheme));
+        }
+        let (sys_dark, sys_scheme) = c.clone().unwrap();
+        let forced = match name {
+            "Dark" => Some((true, "dark")),
+            "Light" => Some((false, "light")),
+            _ => None,
+        };
+        match forced {
+            Some((dark, nick)) => {
+                s.set_gtk_application_prefer_dark_theme(dark);
+                if let Some(pspec) = &scheme_prop {
+                    if let Some(v) = glib::EnumClass::with_type(pspec.value_type()).and_then(|cl| cl.to_value_by_nick(nick)) {
+                        s.set_property_from_value("gtk-interface-color-scheme", &v);
+                    }
+                }
+            }
+            None => {
+                if s.is_gtk_application_prefer_dark_theme() != sys_dark {
+                    s.set_gtk_application_prefer_dark_theme(sys_dark);
+                }
+                if let Some(v) = sys_scheme {
+                    if s.property_value("gtk-interface-color-scheme").transform::<i32>().ok().and_then(|x| x.get::<i32>().ok())
+                        != v.transform::<i32>().ok().and_then(|x| x.get::<i32>().ok())
+                    {
+                        s.set_property_from_value("gtk-interface-color-scheme", &v);
+                    }
+                }
+            }
+        }
+    });
 }
 
 thread_local! {

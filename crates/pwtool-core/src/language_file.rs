@@ -420,6 +420,16 @@ impl LanguageFile {
 
     /// The translation table for [`crate::language::set_translations`]
     /// (keys upper-cased).
+    /// Add the translations of `other` that this file does not contain
+    /// (supplementary translations of strings added by Password Tool).
+    pub fn merge_missing(&mut self, other: LanguageFile) {
+        for (k, v) in other.map {
+            if !v.is_empty() {
+                self.map.entry(k).or_insert(v);
+            }
+        }
+    }
+
     pub fn into_map(self) -> HashMap<String, String> {
         self.map
     }

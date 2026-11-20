@@ -376,7 +376,13 @@ impl AppCore {
             return true;
         };
         match LanguageFile::load(&file, false) {
-            Ok(lf) => {
+            Ok(mut lf) => {
+                // supplementary translations of Password Tool
+                // (languages/port/<code>.po)
+                let extra = self.paths.resources.join("languages").join("port").join(format!("{}.po", lf.code));
+                if let Ok(x) = LanguageFile::load(&extra, false) {
+                    lf.merge_missing(x);
+                }
                 if !lf.help_file.is_empty() {
                     self.help_file_name = self.paths.resolve(&lf.help_file);
                 }

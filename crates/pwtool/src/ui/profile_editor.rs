@@ -213,7 +213,7 @@ impl ProfileEditDlg {
                 let name = main.core.borrow().profiles.get(sel[0]).map(|p| p.profile_name.clone()).unwrap_or_default();
                 trl_format("Delete profile \"%1\"?", &[&name])
             } else {
-                trl_format("Delete %d profiles?", &[&sel.len().to_string()])
+                trl_format("Delete %1 profiles?", &[&sel.len().to_string()])
             };
             if msg_box(Some(&self.win), &m, MsgIcon::Warning, MsgButtons::YesNo, true).await != MsgResult::Yes {
                 return;

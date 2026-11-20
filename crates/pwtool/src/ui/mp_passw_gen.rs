@@ -74,7 +74,7 @@ impl MpPasswGenWin {
         set_combo_items(&d.combo("CharSetList"), &charsets);
         set_combo_items(
             &d.combo("PasswHashList"),
-            &d.b.obj("PasswHashList").map(|o| o.strings("Items.Strings")).unwrap_or_default(),
+            &d.b.obj("PasswHashList").map(|o| o.strings("Items.Strings")).unwrap_or_default().iter().map(|x| trl(x)).collect::<Vec<_>>(),
         );
         d.b.updowns["PasswLengthSpinBtn"].set_max(PASSW_MAX_CHARS as i64);
         d.b.updowns["PasswLengthSpinBtn"].set_min(1);

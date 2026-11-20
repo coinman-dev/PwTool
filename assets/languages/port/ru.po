@@ -1,0 +1,113 @@
+# Russian translations of strings of Password Tool that are not part of the
+# translation of Password Tech (strings added by the port, or missing in the
+# original translation). Loaded in addition to Russian.po; entries of
+# Russian.po take precedence.
+msgid ""
+msgstr ""
+"Project-Id-Version: Password Tool 0.1.0\n"
+"Language: ru\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "About"
+msgstr "О программе"
+
+msgid "Are you sure you want to exit\n%1?"
+msgstr "Вы действительно хотите выйти из\n%1?"
+
+msgid "Autotype failed."
+msgstr "Ошибка автонабора."
+
+msgid "Autotype is not available (RemoteDesktop portal)."
+msgstr "Автонабор недоступен (портал RemoteDesktop)."
+
+msgid "Enter password"
+msgstr "Введите пароль"
+
+msgid "Gigabytes"
+msgstr "Гигабайты"
+
+msgid "Terabytes"
+msgstr "Терабайты"
+
+msgid "High-resolution timer"
+msgstr "Таймер высокого разрешения"
+
+msgid "None"
+msgstr "Нет"
+
+msgid "Password is too long to show it in a\nmessage box like this.\n\nIt will be copied to the clipboard."
+msgstr "Пароль слишком длинный, чтобы показать\nего в окне сообщения.\n\nОн будет скопирован в буфер обмена."
+
+msgid "Process cancelled by user"
+msgstr "Процесс прерван пользователем"
+
+msgid "Test:"
+msgstr "Проверка:"
+
+msgid "The selected key file does not exist:\n%1"
+msgstr "Выбранный ключевой файл не существует:\n%1"
+
+msgid "The update check is not configured in this build."
+msgstr "Проверка обновлений в этой сборке не настроена."
+
+msgid "This function is not available on this system."
+msgstr "Эта функция недоступна в этой системе."
+
+msgid "Total Entropy Bits:"
+msgstr "Бит общей энтропии:"
+
+msgid "Use advanced password strength estimation (zxcvbn)"
+msgstr "Использовать улучшенную оценку надёжности паролей (zxcvbn)"
+
+msgid "Dec 0-99"
+msgstr "Дес. 0-99"
+
+msgid "Dec 0-9999"
+msgstr "Дес. 0-9999"
+
+msgid "Hex 16-bit"
+msgstr "Шестн. 16 бит"
+
+msgid "Hex 32-bit"
+msgstr "Шестн. 32 бита"
+
+msgid "Default"
+msgstr "Как в системе"
+
+msgid "Light"
+msgstr "Светлый"
+
+msgid "Dark"
+msgstr "Тёмный"
+
+msgid "Default (dark)"
+msgstr "Стандартный (тёмный)"
+
+msgid "Blue"
+msgstr "Синий"
+
+msgid "Red"
+msgstr "Красный"
+
+msgid "Orange"
+msgstr "Оранжевый"
+
+msgid "Green"
+msgstr "Зелёный"
+
+msgid "Colors"
+msgstr "Разноцветный"
+
+msgid "Search via hot key."
+msgstr "Поиск по горячей клавише."
+
+msgid "No matching keyword found for window text\n\"%1\"."
+msgstr "Не найдено ключевое слово для заголовка окна\n\"%1\"."
+
+msgid "For translators: Convert to PO format..."
+msgstr "Для переводчиков: в формат PO..."
+
+msgid "Community"
+msgstr "Сообщество"

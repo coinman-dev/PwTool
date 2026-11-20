@@ -26,6 +26,8 @@ SHARE="$DEST/share/pwtool"
 install -d "$SHARE/languages" "$SHARE/script_examples"
 install -m644 "$ROOT/assets/common_passwords.txt" "$ROOT/assets/license.txt" "$SHARE/"
 install -m644 "$ROOT"/assets/languages/*.po "$ROOT"/assets/languages/*.lng "$ROOT"/assets/languages/*.pot "$SHARE/languages/"
+install -d "$SHARE/languages/port"
+install -m644 "$ROOT"/assets/languages/port/*.po "$SHARE/languages/port/"
 install -m644 "$ROOT"/assets/script_examples/* "$SHARE/script_examples/"
 
 # manuals (PDF from the original ODT files, if LibreOffice is available)

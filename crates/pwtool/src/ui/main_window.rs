@@ -584,7 +584,7 @@ impl MainWindow {
         self.click("CharSetHelpBtn", |w| quick_help(&w.win(), &w.char_set_help));
         self.click("FormatPasswHelpBtn", |w| quick_help(&w.win(), &w.format_passw_help));
         self.click("BrowseBtn", |w| w.browse_file("WLFNList", &trl("Select word list file"), true));
-        self.click("BrowseBtn2", |w| w.browse_file("ScriptList", &trl("Select script file"), false));
+        self.click("BrowseBtn2", |w| w.browse_file("ScriptList", &trl("Select Lua script file"), false));
         self.click("ReloadScriptBtn", |w| {
             *w.script.borrow_mut() = None;
         });
