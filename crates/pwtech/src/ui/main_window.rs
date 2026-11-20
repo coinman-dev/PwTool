@@ -1877,6 +1877,9 @@ impl MainWindow {
         }
         self.core.borrow().write_rand_seed_file();
         super::autotype::close_session();
+        if let Some(app) = self.window.application() {
+            super::active_window::stop_watching(&app);
+        }
         crate::ui::hotkeys::deactivate();
         let tag = self.passw_box_tag.get();
         self.passw_box_tag.set(0);

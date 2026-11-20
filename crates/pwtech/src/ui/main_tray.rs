@@ -112,7 +112,32 @@ impl MainWindow {
                 }
             }
         });
-        // minimizing (`AppMinimize()`)
+        // minimizing (`AppMinimize()`): KWin reports it (Wayland does not
+        // tell applications); GDK's state is used where available (X11)
+        if let Some(app) = self.window.application() {
+            let w = Rc::downgrade(self);
+            glib::spawn_future_local(async move {
+                let w2 = w.clone();
+                crate::ui::active_window::watch_minimized(&app, move |caption, minimized| {
+                    if let Some(w) = w2.upgrade() {
+                        let title = w.window.title().map(|t| t.to_string()).unwrap_or_default();
+                        if minimized && caption == title {
+                            w.app_minimize();
+                        } else if minimized {
+                            // the password manager window (`LockMinimize`)
+                            let mng = w.passw_mng.borrow().clone();
+                            if let Some(m) = mng {
+                                let t = m.win.title().map(|t| t.to_string()).unwrap_or_default();
+                                if t == caption && w.core.borrow().config.database.lock_minimize {
+                                    m.lock_if_open();
+                                }
+                            }
+                        }
+                    }
+                })
+                .await;
+            });
+        }
         let w = Rc::downgrade(self);
         self.window.connect_realize(move |win| {
             let Some(surface) = win.surface() else { return };

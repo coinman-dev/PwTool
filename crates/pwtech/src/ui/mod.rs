@@ -128,6 +128,12 @@ fn automate(w: Rc<main_window::MainWindow>, script: String) {
                         nb.set_current_page(n.parse().ok());
                     }
                 }
+                "minimize" => w.window.minimize(),
+                "state" => {
+                    if let Some(t) = w.window.surface().and_then(|s| s.downcast::<gtk::gdk::Toplevel>().ok()) {
+                        println!("state={:?} visible={}", t.state(), w.window.is_visible());
+                    }
+                }
                 "activetitle" => {
                     if let Some(app) = w.window.application() {
                         println!("activetitle={:?}", active_window::active_window_title(&app).await);

@@ -14,10 +14,15 @@ const OBJ_PATH: &str = "/io/github/pwtech/PasswordTech/ActiveWindow";
 const IFACE: &str = "io.github.pwtech.ActiveWindow";
 const PLUGIN: &str = "pwtech-active-window";
 const XML: &str = r#"<node><interface name="io.github.pwtech.ActiveWindow">
-<method name="Report"><arg type="s" direction="in"/></method></interface></node>"#;
+<method name="Report"><arg type="s" direction="in"/></method>
+<method name="Minimized"><arg type="s" direction="in"/><arg type="b" direction="in"/></method>
+</interface></node>"#;
+
+type MinimizedFn = Box<dyn Fn(&str, bool)>;
 
 thread_local! {
     static REG: RefCell<Option<(gio::RegistrationId, async_channel::Receiver<String>)>> = const { RefCell::new(None) };
+    static ON_MINIMIZED: RefCell<Option<MinimizedFn>> = const { RefCell::new(None) };
 }
 
 fn receiver(conn: &gio::DBusConnection) -> Option<async_channel::Receiver<String>> {
@@ -29,9 +34,23 @@ fn receiver(conn: &gio::DBusConnection) -> Option<async_channel::Receiver<String
     let (tx, rx) = async_channel::unbounded::<String>();
     let id = conn
         .register_object(OBJ_PATH, &iface)
-        .method_call(move |_, _, _, _, _, params, inv| {
-            if let Some((caption,)) = params.get::<(String,)>() {
-                let _ = tx.try_send(caption);
+        .method_call(move |_, _, _, _, method, params, inv| {
+            match method {
+                "Report" => {
+                    if let Some((caption,)) = params.get::<(String,)>() {
+                        let _ = tx.try_send(caption);
+                    }
+                }
+                "Minimized" => {
+                    if let Some((caption, min)) = params.get::<(String, bool)>() {
+                        ON_MINIMIZED.with(|f| {
+                            if let Some(f) = f.borrow().as_ref() {
+                                f(&caption, min);
+                            }
+                        });
+                    }
+                }
+                _ => {}
             }
             inv.return_value(None);
         })
@@ -51,6 +70,16 @@ async fn call(conn: &gio::DBusConnection, path: &str, iface: &str, method: &str,
 /// accepted it. `wait_report` waits up to 2 s for a `Report` call of the
 /// script and returns its argument.
 async fn run_kwin_script(app: &gtk::Application, body: &str, wait_report: bool) -> Option<String> {
+    run_kwin_script_named(app, body, wait_report, PLUGIN, true).await
+}
+
+async fn run_kwin_script_named(
+    app: &gtk::Application,
+    body: &str,
+    wait_report: bool,
+    plugin: &str,
+    unload: bool,
+) -> Option<String> {
     let conn = app.dbus_connection()?;
     let rx = if wait_report {
         let rx = receiver(&conn)?;
@@ -60,16 +89,16 @@ async fn run_kwin_script(app: &gtk::Application, body: &str, wait_report: bool) 
         None
     };
     let dir = glib::user_runtime_dir();
-    let file = dir.join(format!("pwtech-kwin-{}.js", std::process::id()));
+    let file = dir.join(format!("{plugin}-{}.js", std::process::id()));
     std::fs::write(&file, body).ok()?;
     // unload a script left over from an earlier call
-    let _ = call(&conn, "/Scripting", "org.kde.kwin.Scripting", "unloadScript", Some(&(PLUGIN,).to_variant())).await;
+    let _ = call(&conn, "/Scripting", "org.kde.kwin.Scripting", "unloadScript", Some(&(plugin,).to_variant())).await;
     let id = call(
         &conn,
         "/Scripting",
         "org.kde.kwin.Scripting",
         "loadScript",
-        Some(&(file.to_string_lossy().to_string(), PLUGIN).to_variant()),
+        Some(&(file.to_string_lossy().to_string(), plugin).to_variant()),
     )
     .await
     .and_then(|v| v.get::<(i32,)>())
@@ -95,7 +124,9 @@ async fn run_kwin_script(app: &gtk::Application, body: &str, wait_report: bool) 
         }
         _ => None,
     };
-    let _ = call(&conn, "/Scripting", "org.kde.kwin.Scripting", "unloadScript", Some(&(PLUGIN,).to_variant())).await;
+    if unload {
+        let _ = call(&conn, "/Scripting", "org.kde.kwin.Scripting", "unloadScript", Some(&(plugin,).to_variant())).await;
+    }
     let _ = std::fs::remove_file(&file);
     result
 }
@@ -120,4 +151,54 @@ pub async fn set_keep_above(app: &gtk::Application, above: bool) -> bool {
          for (var i = 0; i < list.length; i++) {{ if (list[i].pid == {pid}) list[i].keepAbove = {above}; }}\n"
     );
     run_kwin_script(app, &script, false).await.is_some()
+}
+
+fn watch_plugin() -> String {
+    format!("pwtech-watch-{}", std::process::id())
+}
+
+/// Report minimizing/restoring of the windows of this process (KWin script
+/// staying loaded while the program runs): `f(caption, minimized)`.
+/// Returns `false` without KWin.
+pub async fn watch_minimized(app: &gtk::Application, f: impl Fn(&str, bool) + 'static) -> bool {
+    let Some(conn) = app.dbus_connection() else { return false };
+    let Some(name) = app.application_id() else { return false };
+    if receiver(&conn).is_none() {
+        return false;
+    }
+    ON_MINIMIZED.with(|x| *x.borrow_mut() = Some(Box::new(f)));
+    let pid = std::process::id();
+    let script = format!(
+        "function pwHook(w) {{\n\
+           if (!w || w.pid != {pid}) return;\n\
+           var report = function() {{ callDBus(\"{name}\", \"{OBJ_PATH}\", \"{IFACE}\", \"Minimized\", String(w.caption), w.minimized); }};\n\
+           if (w.minimizedChanged) w.minimizedChanged.connect(report);\n\
+         }}\n\
+         var list = workspace.windowList ? workspace.windowList() : workspace.clientList();\n\
+         for (var i = 0; i < list.length; i++) pwHook(list[i]);\n\
+         if (workspace.windowAdded) workspace.windowAdded.connect(pwHook); else workspace.clientAdded.connect(pwHook);\n\
+         if (!workspace.windowList && workspace.clientMinimized) {{\n\
+           workspace.clientMinimized.connect(function(w) {{ if (w.pid == {pid}) callDBus(\"{name}\", \"{OBJ_PATH}\", \"{IFACE}\", \"Minimized\", String(w.caption), true); }});\n\
+           workspace.clientUnminimized.connect(function(w) {{ if (w.pid == {pid}) callDBus(\"{name}\", \"{OBJ_PATH}\", \"{IFACE}\", \"Minimized\", String(w.caption), false); }});\n\
+         }}\n"
+    );
+    run_kwin_script_named(app, &script, false, &watch_plugin(), false).await.is_some()
+}
+
+/// Unload the watcher script (program exit).
+pub fn stop_watching(app: &gtk::Application) {
+    if let Some(conn) = app.dbus_connection() {
+        let plugin = watch_plugin();
+        let _ = conn.call_sync(
+            Some("org.kde.KWin"),
+            "/Scripting",
+            "org.kde.kwin.Scripting",
+            "unloadScript",
+            Some(&(plugin,).to_variant()),
+            None,
+            gio::DBusCallFlags::NONE,
+            1000,
+            gio::Cancellable::NONE,
+        );
+    }
 }
