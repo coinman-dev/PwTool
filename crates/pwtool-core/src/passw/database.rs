@@ -6,16 +6,15 @@
 //! Differences to the original:
 //! - files are written to a temporary file in the same directory and then
 //!   renamed (the original overwrites the file in place);
-//! - instead of Windows share modes, an advisory `flock` is held on the open
-//!   file; saving fails if another process holds the file open;
+//! - instead of Windows share modes, a shared lock (`flock` on Linux,
+//!   `LockFileEx` on Windows) is held on the open file; saving fails if
+//!   another process holds the file open;
 //! - passwords are kept in memory encrypted with ChaCha20 under a per-session
 //!   key, as in the original, but their plaintext is UTF-8 instead of UTF-16.
 
 use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
-use std::os::fd::AsRawFd;
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
@@ -792,11 +791,20 @@ fn create_cipher(cipher_type: u8, key: &[u8]) -> Result<SymmetricCipher, DbError
     }
 }
 
-/// Lock a file with `flock` (shared or exclusive), non-blocking.
+/// Lock a file (shared or exclusive), non-blocking: `flock` on Linux,
+/// `LockFileEx` on Windows.
 fn flock(f: &File, exclusive: bool) -> bool {
-    let op = if exclusive { libc::LOCK_EX } else { libc::LOCK_SH } | libc::LOCK_NB;
-    // SAFETY: valid file descriptor.
-    unsafe { libc::flock(f.as_raw_fd(), op) == 0 }
+    if exclusive { f.try_lock().is_ok() } else { f.try_lock_shared().is_ok() }
+}
+
+/// Options for creating a file readable only by the owner (mode 0600 on
+/// Unix; on Windows the ACLs of the user profile apply).
+fn private_file_options() -> OpenOptions {
+    #[allow(unused_mut)]
+    let mut o = OpenOptions::new();
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
+    o
 }
 
 impl PasswDatabase {
@@ -1480,7 +1488,7 @@ impl PasswDatabase {
         }
         let tmp = temp_path(path);
         {
-            let mut f = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
+            let mut f = private_file_options().write(true).create_new(true).open(&tmp)?;
             if let Err(e) = f.write_all(&out).and_then(|_| f.sync_all()) {
                 let _ = fs::remove_file(&tmp);
                 return Err(e.into());
@@ -1961,7 +1969,7 @@ pub fn create_key_file(path: &Path) -> Result<(), DbError> {
         hex.push(HEX[(b >> 4) as usize]);
         hex.push(HEX[(b & 15) as usize]);
     }
-    let mut f = OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(path)?;
+    let mut f = private_file_options().write(true).create(true).truncate(true).open(path)?;
     f.write_all(&hex)?;
     Ok(())
 }

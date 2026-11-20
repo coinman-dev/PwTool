@@ -1246,6 +1246,7 @@ dependencies = [
  "libc",
  "pwtool-core",
  "serde_json",
+ "windows-sys",
  "zeroize",
 ]
 
@@ -1266,6 +1267,7 @@ dependencies = [
  "sha1",
  "sha2",
  "thiserror",
+ "windows-sys",
  "zeroize",
 ]
 

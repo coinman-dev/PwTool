@@ -35,13 +35,14 @@ fi
 deb_v="${version//-/.}"
 
 cat <<EOF
-$kind for Linux (Ubuntu 24.04+, Debian 13+, amd64).
+$kind for Linux (Ubuntu 24.04+, Debian 13+, amd64) and Windows (10/11, x64).
 
 - **pwtool_${deb_v}_amd64.deb** — Debian/Ubuntu package: \`sudo apt install ./pwtool_${deb_v}_amd64.deb\` installs **Password Tool**, its desktop entry, icons, translations, script examples, and user manuals (\`manual.pdf\`, \`scripting.pdf\`).
+- **pwtool_${deb_v}_windows_x64.zip** — portable Windows build with GTK 4: unpack anywhere and run \`PwTool\bin\pwtool.exe\`.
 
 $changes
 
-Settings are stored in \`~/.config/pwtool/PwTool.ini\` (compatible with Password Tech's \`PwTech.ini\`). Place \`PwTool.ini\` next to the executable for portable mode.
+Settings are stored in \`~/.config/pwtool/PwTool.ini\` on Linux and \`%APPDATA%\PwTool\PwTool.ini\` on Windows (compatible with Password Tech's \`PwTech.ini\`). Place \`PwTool.ini\` next to the executable for portable mode.
 
 License: GNU GPL v2 or later (Password Tech © 2002–2026 Christian Thöing). File checksums are in \`SHA256SUMS.txt\`.
 EOF

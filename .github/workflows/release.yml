@@ -94,12 +94,123 @@ jobs:
           path: target/notes/release-notes.md
           if-no-files-found: error
           retention-days: 3
+      # PDF manuals for the Windows build (saves a second LibreOffice install)
+      - uses: actions/upload-artifact@v7
+        with:
+          name: manuals
+          path: target/manuals/*.pdf
+          if-no-files-found: error
+          retention-days: 1
+
+  windows:
+    name: Cross-build Windows zip (llvm-mingw)
+    needs: [linux]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      LLVM_MINGW_VERSION: '20260616'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.dry_run && github.sha || inputs.tag || github.sha }}
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends zstd libglib2.0-bin
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnullvm
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: windows-gnullvm
+          cache-on-failure: true
+      - name: Cache llvm-mingw
+        id: llvm-mingw
+        uses: actions/cache@v6
+        with:
+          path: ~/.local/opt/llvm-mingw-${{ env.LLVM_MINGW_VERSION }}-ucrt-ubuntu-22.04-x86_64
+          key: llvm-mingw-${{ env.LLVM_MINGW_VERSION }}
+      - name: Install llvm-mingw
+        if: steps.llvm-mingw.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.local/opt
+          name="llvm-mingw-${LLVM_MINGW_VERSION}-ucrt-ubuntu-22.04-x86_64"
+          curl -fsSL --retry 3 "https://github.com/mstorsjo/llvm-mingw/releases/download/${LLVM_MINGW_VERSION}/${name}.tar.xz" \
+            | tar -xJ -C ~/.local/opt
+      - name: Cache GTK packages (MSYS2 CLANG64)
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/pwtool-win/sysroot/.cache
+          key: msys2-clang64-${{ hashFiles('packaging/windows/fetch-gtk.py') }}-${{ github.run_id }}
+          restore-keys: msys2-clang64-${{ hashFiles('packaging/windows/fetch-gtk.py') }}-
+      - uses: actions/download-artifact@v8
+        with:
+          name: manuals
+          path: target/manuals
+      - name: Build Windows zip and test executables
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -I packaging/windows/fetch-gtk.py ~/.cache/pwtool-win/sysroot
+          v="${RELEASE_TAG#v}"
+          mkdir -p target/release-files
+          OUTPUT="$PWD/target/release-files/pwtool_${v//-/.}_windows_x64.zip" packaging/windows/build.sh --tests
+          zip="target/release-files/pwtool_${v//-/.}_windows_x64.zip"
+          contents="$(python3 -I -m zipfile -l "$zip")"
+          for f in PwTool/bin/pwtool.exe PwTool/bin/libgtk-4-1.dll PwTool/share/pwtool/manual.pdf \
+                   PwTool/share/pwtool/scripting.pdf PwTool/share/glib-2.0/schemas/gschemas.compiled \
+                   PwTool/lib/gio/modules/libgiognutls.dll; do
+            grep -q "$f" <<< "$contents" || { echo "missing in zip: $f"; exit 1; }
+          done
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-release
+          path: target/release-files/*.zip
+          if-no-files-found: error
+          retention-days: 3
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-tests
+          path: target/windows/tests/*.exe
+          if-no-files-found: error
+          retention-days: 1
+
+  windows-test:
+    name: Test on Windows
+    needs: [windows]
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows-release
+          path: dist
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows-tests
+          path: tests
+      - name: Run tests and console mode
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Expand-Archive -Path (Get-ChildItem dist\*.zip).FullName -DestinationPath app
+          Copy-Item tests\*.exe app\PwTool\bin\
+          Get-ChildItem app\PwTool\bin\*.exe -Exclude pwtool.exe | ForEach-Object {
+            & $_.FullName
+            if ($LASTEXITCODE -ne 0) { throw "$($_.Name) failed" }
+          }
+          $out = & app\PwTool\bin\pwtool.exe --gen 3 | Out-String
+          Write-Output $out
+          if (($out -split "`n" | Where-Object { $_ -match '^\S{16}\s*$' }).Count -ne 3) { throw 'console mode did not print 3 passwords' }
 
   publish:
     name: Publish GitHub Release
     timeout-minutes: 15
     if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
-    needs: [linux]
+    needs: [linux, windows, windows-test]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -114,13 +225,17 @@ jobs:
           path: dist
       - uses: actions/download-artifact@v8
         with:
+          name: windows-release
+          path: dist
+      - uses: actions/download-artifact@v8
+        with:
           name: release-notes
           path: notes
       - name: Publish release
         shell: bash
         run: |
           set -euo pipefail
-          (cd dist && sha256sum -- *.deb > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          (cd dist && sha256sum -- *.deb *.zip > SHA256SUMS.txt && cat SHA256SUMS.txt)
           prerelease=false
           [[ "$RELEASE_TAG" == *-* ]] && prerelease=true
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then

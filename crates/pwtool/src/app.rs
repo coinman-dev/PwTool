@@ -123,12 +123,7 @@ impl AppPaths {
             .and_then(|p| p.parent().map(Path::to_path_buf))
             .unwrap_or_else(|| PathBuf::from("."));
         let resources = Self::find_resources(&exe_dir);
-        let config_home = std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .filter(|p| p.is_absolute())
-            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
-            .unwrap_or_else(|| PathBuf::from("."));
-        let app_data = config_home.join("pwtool");
+        let app_data = app_data_dir();
 
         if let Some(ini) = ini_override {
             let ini = if ini.parent().map(|p| p.as_os_str().is_empty()).unwrap_or(true) {
@@ -185,9 +180,35 @@ impl AppPaths {
     }
 }
 
+/// Per-user configuration directory: `$XDG_CONFIG_HOME` or `~/.config` on
+/// Linux, `%APPDATA%` (roaming profile) on Windows.
+pub fn config_home() -> Option<PathBuf> {
+    #[cfg(windows)]
+    let dir = std::env::var_os("APPDATA").map(PathBuf::from).filter(|p| p.is_absolute());
+    #[cfg(not(windows))]
+    let dir = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")));
+    dir
+}
+
+/// Directory of the program's own settings (`g_sAppDataPath`):
+/// `~/.config/pwtool` on Linux, `%APPDATA%\PwTool` on Windows.
+pub fn app_data_dir() -> PathBuf {
+    let name = if cfg!(windows) { "PwTool" } else { "pwtool" };
+    config_home().unwrap_or_else(|| PathBuf::from(".")).join(name)
+}
+
+/// Home directory (`$HOME`, on Windows `%USERPROFILE%`).
+pub fn home_dir() -> Option<PathBuf> {
+    let var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    std::env::var_os(var).map(PathBuf::from)
+}
+
 fn expand_home(name: &str) -> PathBuf {
-    if let Some(rest) = name.strip_prefix("~/") {
-        if let Some(h) = std::env::var_os("HOME") {
+    if let Some(rest) = name.strip_prefix("~/").or_else(|| name.strip_prefix("~\\").filter(|_| cfg!(windows))) {
+        if let Some(h) = home_dir() {
             return PathBuf::from(h).join(rest);
         }
     }

@@ -21,26 +21,6 @@ pub fn decimal_separator() -> char {
     char::from_u32(DECIMAL_SEPARATOR.load(Ordering::Relaxed)).unwrap_or('.')
 }
 
-/// Take the decimal separator from the C locale of the environment
-/// (`LC_NUMERIC`), as Windows does from the regional settings.
-pub fn init_decimal_separator_from_locale() {
-    // SAFETY: setlocale/nl_langinfo with valid arguments; the result is copied.
-    unsafe {
-        let old = libc::setlocale(libc::LC_NUMERIC, std::ptr::null());
-        let saved = if old.is_null() { None } else { Some(std::ffi::CStr::from_ptr(old).to_owned()) };
-        libc::setlocale(libc::LC_NUMERIC, c"".as_ptr());
-        let radix = libc::nl_langinfo(libc::RADIXCHAR);
-        if !radix.is_null() {
-            if let Some(c) = std::ffi::CStr::from_ptr(radix).to_str().ok().and_then(|s| s.chars().next()) {
-                set_decimal_separator(c);
-            }
-        }
-        if let Some(s) = saved {
-            libc::setlocale(libc::LC_NUMERIC, s.as_ptr());
-        }
-    }
-}
-
 /// `FormatFloat(fmt, x)` for the formats `"0"`, `"0.0"`, `"0.00"`…: fixed
 /// number of decimals, rounding half away from zero, locale decimal separator.
 pub fn format_float(x: f64, decimals: usize) -> String {
@@ -56,66 +36,188 @@ pub fn format_float_1(x: f64) -> String {
     format_float(x, 1)
 }
 
-/// Use the user's locale for dates and times (`LC_TIME`), as Windows uses
-/// the regional settings. Call once at program start.
-pub fn init_time_locale() {
-    // SAFETY: setlocale with a valid category and empty string.
-    unsafe {
-        libc::setlocale(libc::LC_TIME, c"".as_ptr());
+pub use imp::{
+    current_local_year, format_short_date, init_decimal_separator_from_locale, init_time_locale,
+    time_stamp_to_long_string, time_stamp_to_string,
+};
+
+#[cfg(unix)]
+mod imp {
+    use super::set_decimal_separator;
+
+    /// Take the decimal separator from the C locale of the environment
+    /// (`LC_NUMERIC`), as Windows does from the regional settings.
+    pub fn init_decimal_separator_from_locale() {
+        // SAFETY: setlocale/nl_langinfo with valid arguments; the result is copied.
+        unsafe {
+            let old = libc::setlocale(libc::LC_NUMERIC, std::ptr::null());
+            let saved = if old.is_null() { None } else { Some(std::ffi::CStr::from_ptr(old).to_owned()) };
+            libc::setlocale(libc::LC_NUMERIC, c"".as_ptr());
+            let radix = libc::nl_langinfo(libc::RADIXCHAR);
+            if !radix.is_null() {
+                if let Some(c) = std::ffi::CStr::from_ptr(radix).to_str().ok().and_then(|s| s.chars().next()) {
+                    set_decimal_separator(c);
+                }
+            }
+            if let Some(s) = saved {
+                libc::setlocale(libc::LC_NUMERIC, s.as_ptr());
+            }
+        }
+    }
+
+    /// Use the user's locale for dates and times (`LC_TIME`), as Windows uses
+    /// the regional settings. Call once at program start.
+    pub fn init_time_locale() {
+        // SAFETY: setlocale with a valid category and empty string.
+        unsafe {
+            libc::setlocale(libc::LC_TIME, c"".as_ptr());
+        }
+    }
+
+    fn strftime(fmt: &std::ffi::CStr, tm: &libc::tm) -> String {
+        let mut buf = [0u8; 256];
+        // SAFETY: buffer and format are valid; tm is initialised.
+        let n = unsafe { libc::strftime(buf.as_mut_ptr().cast(), buf.len(), fmt.as_ptr(), tm) };
+        String::from_utf8_lossy(&buf[..n]).into_owned()
+    }
+
+    /// Broken-down time of a `FILETIME` value without time zone conversion
+    /// (`FileTimeToSystemTime`).
+    fn filetime_to_tm(ft: u64) -> Option<libc::tm> {
+        let secs = (ft / 10_000_000) as i64 - 11_644_473_600;
+        let t = secs as libc::time_t;
+        // SAFETY: gmtime_r with valid pointers.
+        unsafe {
+            let mut tm: libc::tm = std::mem::zeroed();
+            if libc::gmtime_r(&t, &mut tm).is_null() { None } else { Some(tm) }
+        }
+    }
+
+    /// `TimeStampToString()`: short date and time in the user's locale.
+    pub fn time_stamp_to_string(ft: u64) -> String {
+        match filetime_to_tm(ft) {
+            Some(tm) => format!("{} {}", strftime(c"%x", &tm), strftime(c"%X", &tm)),
+            None => String::new(),
+        }
+    }
+
+    /// `FileTimeToString(..., true)`: long date and time in the user's locale.
+    pub fn time_stamp_to_long_string(ft: u64) -> String {
+        match filetime_to_tm(ft) {
+            Some(tm) => format!("{} {}", strftime(c"%A, %e %B %Y", &tm).replace("  ", " "), strftime(c"%X", &tm)),
+            None => String::new(),
+        }
+    }
+
+    pub fn current_local_year() -> i64 {
+        unsafe {
+            let t = libc::time(std::ptr::null_mut());
+            let mut tm: libc::tm = std::mem::zeroed();
+            if libc::localtime_r(&t, &mut tm).is_null() { 2026 } else { tm.tm_year as i64 + 1900 }
+        }
+    }
+
+    /// Short date of the user's locale (`GetDateFormatEx(DATE_SHORTDATE)`).
+    pub fn format_short_date(year: i32, month: u32, day: u32) -> String {
+        // SAFETY: zeroed tm is a valid value; fields set below.
+        let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+        tm.tm_year = year - 1900;
+        tm.tm_mon = month as i32 - 1;
+        tm.tm_mday = day as i32;
+        strftime(c"%x", &tm)
     }
 }
 
-fn strftime(fmt: &std::ffi::CStr, tm: &libc::tm) -> String {
-    let mut buf = [0u8; 256];
-    // SAFETY: buffer and format are valid; tm is initialised.
-    let n = unsafe { libc::strftime(buf.as_mut_ptr().cast(), buf.len(), fmt.as_ptr(), tm) };
-    String::from_utf8_lossy(&buf[..n]).into_owned()
-}
+#[cfg(windows)]
+mod imp {
+    use super::set_decimal_separator;
+    use windows_sys::Win32::Foundation::{FILETIME, SYSTEMTIME};
+    use windows_sys::Win32::Globalization::{
+        DATE_LONGDATE, DATE_SHORTDATE, GetDateFormatEx, GetLocaleInfoEx, GetTimeFormatEx, LOCALE_SDECIMAL,
+    };
+    use windows_sys::Win32::System::SystemInformation::GetLocalTime;
+    use windows_sys::Win32::System::Time::FileTimeToSystemTime;
 
-/// Broken-down time of a `FILETIME` value without time zone conversion
-/// (`FileTimeToSystemTime`).
-fn filetime_to_tm(ft: u64) -> Option<libc::tm> {
-    let secs = (ft / 10_000_000) as i64 - 11_644_473_600;
-    let t = secs as libc::time_t;
-    // SAFETY: gmtime_r with valid pointers.
-    unsafe {
-        let mut tm: libc::tm = std::mem::zeroed();
-        if libc::gmtime_r(&t, &mut tm).is_null() { None } else { Some(tm) }
+    fn wide_to_string(buf: &[u16], n: i32) -> String {
+        let n = (n.max(1) as usize - 1).min(buf.len());
+        String::from_utf16_lossy(&buf[..n])
     }
-}
 
-/// `TimeStampToString()`: short date and time in the user's locale.
-pub fn time_stamp_to_string(ft: u64) -> String {
-    match filetime_to_tm(ft) {
-        Some(tm) => format!("{} {}", strftime(c"%x", &tm), strftime(c"%X", &tm)),
-        None => String::new(),
+    /// Decimal separator of the regional settings (`LOCALE_SDECIMAL`).
+    pub fn init_decimal_separator_from_locale() {
+        let mut buf = [0u16; 8];
+        // SAFETY: valid buffer; NULL is LOCALE_NAME_USER_DEFAULT.
+        let n = unsafe { GetLocaleInfoEx(std::ptr::null(), LOCALE_SDECIMAL, buf.as_mut_ptr(), buf.len() as i32) };
+        if n > 1 {
+            if let Some(c) = wide_to_string(&buf, n).chars().next() {
+                set_decimal_separator(c);
+            }
+        }
     }
-}
 
-/// `FileTimeToString(..., true)`: long date and time in the user's locale.
-pub fn time_stamp_to_long_string(ft: u64) -> String {
-    match filetime_to_tm(ft) {
-        Some(tm) => format!("{} {}", strftime(c"%A, %e %B %Y", &tm).replace("  ", " "), strftime(c"%X", &tm)),
-        None => String::new(),
+    /// Windows formats dates with the regional settings; nothing to do.
+    pub fn init_time_locale() {}
+
+    fn format_date(st: &SYSTEMTIME, flags: u32) -> String {
+        let mut buf = [0u16; 128];
+        // SAFETY: valid buffer and SYSTEMTIME; NULL locale = user default.
+        let n = unsafe {
+            GetDateFormatEx(std::ptr::null(), flags, st, std::ptr::null(), buf.as_mut_ptr(), buf.len() as i32, std::ptr::null())
+        };
+        if n > 0 { wide_to_string(&buf, n) } else { String::new() }
     }
-}
 
-fn current_local_year() -> i64 {
-    unsafe {
-        let t = libc::time(std::ptr::null_mut());
-        let mut tm: libc::tm = std::mem::zeroed();
-        if libc::localtime_r(&t, &mut tm).is_null() { 2026 } else { tm.tm_year as i64 + 1900 }
+    fn format_time(st: &SYSTEMTIME) -> String {
+        let mut buf = [0u16; 64];
+        // SAFETY: as above.
+        let n = unsafe { GetTimeFormatEx(std::ptr::null(), 0, st, std::ptr::null(), buf.as_mut_ptr(), buf.len() as i32) };
+        if n > 0 { wide_to_string(&buf, n) } else { String::new() }
     }
-}
 
-/// Short date of the user's locale (`GetDateFormatEx(DATE_SHORTDATE)`).
-pub fn format_short_date(year: i32, month: u32, day: u32) -> String {
-    // SAFETY: zeroed tm is a valid value; fields set below.
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    tm.tm_year = year - 1900;
-    tm.tm_mon = month as i32 - 1;
-    tm.tm_mday = day as i32;
-    strftime(c"%x", &tm)
+    /// `FileTimeToSystemTime()` without time zone conversion.
+    fn filetime_to_systemtime(ft: u64) -> Option<SYSTEMTIME> {
+        let f = FILETIME { dwLowDateTime: ft as u32, dwHighDateTime: (ft >> 32) as u32 };
+        // SAFETY: valid pointers.
+        unsafe {
+            let mut st: SYSTEMTIME = std::mem::zeroed();
+            (FileTimeToSystemTime(&f, &mut st) != 0).then_some(st)
+        }
+    }
+
+    /// `TimeStampToString()`: short date and time in the user's locale.
+    pub fn time_stamp_to_string(ft: u64) -> String {
+        match filetime_to_systemtime(ft) {
+            Some(st) => format!("{} {}", format_date(&st, DATE_SHORTDATE), format_time(&st)),
+            None => String::new(),
+        }
+    }
+
+    /// `FileTimeToString(..., true)`: long date and time in the user's locale.
+    pub fn time_stamp_to_long_string(ft: u64) -> String {
+        match filetime_to_systemtime(ft) {
+            Some(st) => format!("{} {}", format_date(&st, DATE_LONGDATE), format_time(&st)),
+            None => String::new(),
+        }
+    }
+
+    pub fn current_local_year() -> i64 {
+        // SAFETY: valid pointer.
+        unsafe {
+            let mut st: SYSTEMTIME = std::mem::zeroed();
+            GetLocalTime(&mut st);
+            st.wYear as i64
+        }
+    }
+
+    /// Short date of the user's locale (`GetDateFormatEx(DATE_SHORTDATE)`).
+    pub fn format_short_date(year: i32, month: u32, day: u32) -> String {
+        // SAFETY: zeroed SYSTEMTIME is valid; fields set below.
+        let mut st: SYSTEMTIME = unsafe { std::mem::zeroed() };
+        st.wYear = year.clamp(1601, 30827) as u16;
+        st.wMonth = month as u16;
+        st.wDay = day as u16;
+        format_date(&st, DATE_SHORTDATE)
+    }
 }
 
 /// Parse a short date of the user's locale (`StrToDate()`, inverse of

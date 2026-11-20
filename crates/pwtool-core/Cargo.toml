@@ -1,6 +1,6 @@
 [package]
 name = "pwtool-core"
-description = "Core of Password Tool (Linux port of Password Tech): password generation, databases, crypto, RNG"
+description = "Core of Password Tool (port of Password Tech): password generation, databases, crypto, RNG"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -16,10 +16,25 @@ zeroize = { version = "1.9", features = ["derive"] }
 getrandom = "0.4"
 flate2 = "1.1"
 encoding_rs = "0.8"
-
-libc = "0.2"
 thiserror = "2"
 mlua = { version = "0.12", features = ["lua55", "vendored", "send"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Memory",
+    "Win32_System_Performance",
+    "Win32_System_ProcessStatus",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_System_Time",
+] }
 
 [dev-dependencies]
 hex = "0.4"

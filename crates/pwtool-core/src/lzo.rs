@@ -1,12 +1,14 @@
 //! Safe wrapper around miniLZO (LZO1X-1), the same C code and version (2.10)
 //! as in `upstream/src/minilzo`.
 
-use std::os::raw::{c_int, c_long, c_short, c_uint, c_ulong, c_void};
+use std::os::raw::{c_int, c_long, c_short, c_uint, c_void};
 use std::sync::Once;
 
 use zeroize::Zeroizing;
 
-type LzoUint = c_ulong;
+/// `lzo_uint`: pointer-sized (`unsigned long` on Linux, 64-bit integer on
+/// Win64, where `unsigned long` has only 32 bits).
+type LzoUint = usize;
 
 /// Size of the work memory needed by `lzo1x_1_compress`
 /// (`LZO1X_1_MEM_COMPRESS` = 16384 * sizeof(lzo_bytep)).

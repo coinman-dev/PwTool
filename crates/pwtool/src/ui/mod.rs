@@ -1,19 +1,28 @@
 //! GTK 4 user interface.
 
+// Platform-specific modules: KWin/portals/StatusNotifierItem on Linux,
+// Win32 API on Windows (`*_win.rs`, same interface).
+#[cfg_attr(windows, path = "active_window_win.rs")]
 pub mod active_window;
 pub mod autotype;
 pub mod builder;
 pub mod clipboard;
 pub mod dialogs;
 pub mod form;
+#[cfg_attr(windows, path = "hotkeys_win.rs")]
 pub mod hotkeys;
 pub mod icons;
 pub mod layout;
 pub mod main_window;
 pub mod passw_enter;
 pub mod passw_manager;
+#[cfg(unix)]
 pub mod portal;
 pub mod quality_bar;
+#[cfg(windows)]
+#[path = "single_instance_win.rs"]
+mod single_instance;
+#[cfg_attr(windows, path = "tray_win.rs")]
 pub mod tray;
 pub mod update_check;
 pub mod util;
@@ -32,13 +41,22 @@ pub const APP_ID: &str = "io.github.coinman_dev.PwTool";
 
 /// Run the GUI. Returns the exit code.
 pub fn run(cmd: CmdLineOptions) -> i32 {
+    // Windows: no session bus for GApplication's uniqueness
+    #[cfg(windows)]
+    let Some(instance) = single_instance::Instance::acquire() else { return 0 };
+    #[cfg(windows)]
+    let flags = gtk::gio::ApplicationFlags::NON_UNIQUE;
+    #[cfg(not(windows))]
+    let flags = gtk::gio::ApplicationFlags::empty();
     let app = gtk::Application::builder()
         .application_id(APP_ID)
         // one instance (the original refuses a second start); a second
         // start shows the window of the running instance
-        .flags(gtk::gio::ApplicationFlags::empty())
+        .flags(flags)
         .register_session(true)
         .build();
+    #[cfg(windows)]
+    instance.watch(&app);
     let main: Rc<RefCell<Option<Rc<main_window::MainWindow>>>> = Rc::new(RefCell::new(None));
     let m = main.clone();
     app.connect_activate(move |app| {

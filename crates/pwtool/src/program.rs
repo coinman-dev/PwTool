@@ -1,5 +1,5 @@
 //! Program constants (`upstream/src/main/ProgramDef.h`), adapted for
-//! Password Tool, the Linux port of Password Tech.
+//! Password Tool, the port of Password Tech for Linux and Windows.
 
 /// Name of the program.
 pub const PROGRAM_NAME: &str = "Password Tool";

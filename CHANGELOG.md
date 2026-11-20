@@ -2,6 +2,20 @@
 
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Windows version** (Windows 10/11, x64) as a portable zip with GTK 4 included,
+  cross-compiled on Linux with llvm-mingw. Platform functions use the Win32 API like the
+  original Password Tech: tray icon with menu and balloon notifications, global hot keys
+  (`RegisterHotKey`), autotype (`SendInput`), clipboard excluded from clipboard history and
+  cloud sync, autostart via the `Run` registry key, Always on Top, single instance, file
+  locking of open databases, locked memory pages (`VirtualLock`), and dates in the regional
+  format. Settings are stored in `%APPDATA%\PwTool`; portable mode works as on Linux.
+- Release workflow builds `pwtool_<version>_windows_x64.zip` and runs the tests and the
+  console mode on a Windows runner before publishing.
+
 ## 0.1.0-beta — 2026-11-20
 
 First public beta prerelease of **Password Tool** (Linux port of Password Tech 3.6.1 in Rust and GTK4).

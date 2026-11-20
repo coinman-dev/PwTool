@@ -24,7 +24,9 @@ use zeroize::{Zeroize, Zeroizing};
 
 use super::RandomGenerator;
 use super::fast::Jsf32;
-use super::hrtimer::{clock_ns, filetime_now, high_res_timer};
+#[cfg(unix)]
+use super::hrtimer::clock_ns;
+use super::hrtimer::{filetime_now, high_res_timer};
 use crate::crypto::chacha::ChaCha;
 use crate::crypto::{Aes, increment_counter};
 use crate::secure_mem::{LockedPage, PAGE_SIZE};
@@ -438,12 +440,30 @@ impl RandomPool {
     }
 
     /// Add system values to the pool (`Randomize()`). The original reads ~60
-    /// Windows API values plus `BCryptGenRandom`; here the Linux equivalents
-    /// plus 32 bytes from `getrandom()`.
+    /// Windows API values plus `BCryptGenRandom`; here a similar set of system
+    /// values (Linux or Windows) plus bytes from `getrandom()`.
     pub fn randomize_system(&mut self) {
         self.add_data(&high_res_timer().to_le_bytes());
         self.add_data(&filetime_now().to_le_bytes());
 
+        self.add_system_values();
+        if !self.randomize_fixed_items_added {
+            self.add_fixed_system_values();
+            let secs = ((filetime_now() - super::hrtimer::FILETIME_UNIX_EPOCH) / 10_000_000) as i64;
+            self.add_data(&super::hrtimer::utc_offset_seconds(secs).to_le_bytes());
+            self.randomize_fixed_items_added = true;
+        }
+
+        let mut os_rand = Zeroizing::new([0u8; POOL_SIZE]);
+        if getrandom::fill(&mut os_rand[..]).is_ok() {
+            self.add_data(&os_rand[..]);
+        }
+        self.add_data(&high_res_timer().to_le_bytes());
+    }
+
+    /// Changing system values (Linux).
+    #[cfg(unix)]
+    fn add_system_values(&mut self) {
         // SAFETY: plain libc calls filling local structs.
         unsafe {
             let mut vfs: libc::statvfs = std::mem::zeroed();
@@ -474,29 +494,79 @@ impl RandomPool {
         ] {
             self.add_data(&clock_ns(clk).to_le_bytes());
         }
+    }
 
-        if !self.randomize_fixed_items_added {
-            // SAFETY: as above.
-            unsafe {
-                let mut uts: libc::utsname = std::mem::zeroed();
-                if libc::uname(&mut uts) == 0 {
-                    add_pod(self, &uts);
-                }
-                add_pod(self, &libc::getuid());
-                add_pod(self, &libc::getgid());
-                add_pod(self, &libc::sysconf(libc::_SC_NPROCESSORS_ONLN));
-                add_pod(self, &libc::sysconf(libc::_SC_PHYS_PAGES));
+    /// System values that do not change while the program runs (Linux).
+    #[cfg(unix)]
+    fn add_fixed_system_values(&mut self) {
+        // SAFETY: as above.
+        unsafe {
+            let mut uts: libc::utsname = std::mem::zeroed();
+            if libc::uname(&mut uts) == 0 {
+                add_pod(self, &uts);
             }
-            let secs = ((filetime_now() - super::hrtimer::FILETIME_UNIX_EPOCH) / 10_000_000) as libc::time_t;
-            self.add_data(&super::hrtimer::utc_offset_seconds(secs).to_le_bytes());
-            self.randomize_fixed_items_added = true;
+            add_pod(self, &libc::getuid());
+            add_pod(self, &libc::getgid());
+            add_pod(self, &libc::sysconf(libc::_SC_NPROCESSORS_ONLN));
+            add_pod(self, &libc::sysconf(libc::_SC_PHYS_PAGES));
         }
+    }
 
-        let mut os_rand = Zeroizing::new([0u8; POOL_SIZE]);
-        if getrandom::fill(&mut os_rand[..]).is_ok() {
-            self.add_data(&os_rand[..]);
+    /// Changing system values (Windows API, as in the original).
+    #[cfg(windows)]
+    fn add_system_values(&mut self) {
+        use windows_sys::Win32::Foundation::FILETIME;
+        use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+        use windows_sys::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+        use windows_sys::Win32::System::SystemInformation::{GetTickCount64, GlobalMemoryStatusEx, MEMORYSTATUSEX};
+        use windows_sys::Win32::System::Threading::{
+            GetCurrentProcess, GetCurrentProcessId, GetCurrentThread, GetCurrentThreadId, GetProcessTimes,
+            GetThreadTimes,
+        };
+        // SAFETY: Win32 calls filling local structs.
+        unsafe {
+            add_pod(self, &GetCurrentProcessId());
+            add_pod(self, &GetCurrentThreadId());
+            add_pod(self, &GetTickCount64());
+            let mut ms: MEMORYSTATUSEX = std::mem::zeroed();
+            ms.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+            if GlobalMemoryStatusEx(&mut ms) != 0 {
+                add_pod(self, &ms);
+            }
+            let mut pmc: PROCESS_MEMORY_COUNTERS = std::mem::zeroed();
+            pmc.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+            if GetProcessMemoryInfo(GetCurrentProcess(), &mut pmc, pmc.cb) != 0 {
+                add_pod(self, &pmc);
+            }
+            let mut t: [FILETIME; 4] = std::mem::zeroed();
+            if GetProcessTimes(GetCurrentProcess(), &mut t[0], &mut t[1], &mut t[2], &mut t[3]) != 0 {
+                add_pod(self, &t);
+            }
+            if GetThreadTimes(GetCurrentThread(), &mut t[0], &mut t[1], &mut t[2], &mut t[3]) != 0 {
+                add_pod(self, &t);
+            }
+            let (mut a, mut b, mut c) = (0u64, 0u64, 0u64);
+            let dot: [u16; 2] = ['.' as u16, 0];
+            if GetDiskFreeSpaceExW(dot.as_ptr(), &mut a, &mut b, &mut c) != 0 {
+                add_pod(self, &[a, b, c]);
+            }
         }
-        self.add_data(&high_res_timer().to_le_bytes());
+    }
+
+    /// System values that do not change while the program runs (Windows).
+    #[cfg(windows)]
+    fn add_fixed_system_values(&mut self) {
+        use windows_sys::Win32::System::SystemInformation::{GetNativeSystemInfo, SYSTEM_INFO};
+        // SAFETY: as above.
+        unsafe {
+            let mut si: SYSTEM_INFO = std::mem::zeroed();
+            GetNativeSystemInfo(&mut si);
+            add_pod(self, &si);
+        }
+        for (k, v) in std::env::vars_os() {
+            self.add_data(k.as_encoded_bytes());
+            self.add_data(v.as_encoded_bytes());
+        }
     }
 
     /// Write 64 random bytes to the seed file (`WriteSeedFile()`).

@@ -49,12 +49,23 @@ pub fn high_res_timer() -> u64 {
     read_timer(*KIND.get_or_init(timer_kind))
 }
 
-/// Nanoseconds of `CLOCK_MONOTONIC_RAW`.
+/// Nanoseconds of `CLOCK_MONOTONIC_RAW`; on Windows the raw value of
+/// `QueryPerformanceCounter()`, as in the original.
+#[cfg(unix)]
 pub fn monotonic_ns() -> u64 {
     clock_ns(libc::CLOCK_MONOTONIC_RAW)
 }
 
+#[cfg(windows)]
+pub fn monotonic_ns() -> u64 {
+    let mut v: i64 = 0;
+    // SAFETY: valid pointer.
+    unsafe { windows_sys::Win32::System::Performance::QueryPerformanceCounter(&mut v) };
+    v as u64
+}
+
 /// Nanoseconds of the given POSIX clock.
+#[cfg(unix)]
 pub fn clock_ns(clock: libc::clockid_t) -> u64 {
     let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
     // SAFETY: valid pointer to a timespec.
@@ -76,7 +87,7 @@ pub fn filetime_now() -> u64 {
 /// clock time is stored as if it were UTC.
 pub fn local_filetime_now() -> u64 {
     let utc = filetime_now();
-    let secs = ((utc - FILETIME_UNIX_EPOCH) / 10_000_000) as libc::time_t;
+    let secs = ((utc - FILETIME_UNIX_EPOCH) / 10_000_000) as i64;
     let offset = utc_offset_seconds(secs);
     // GetLocalTime() has millisecond resolution.
     let local = (utc as i64 + offset * 10_000_000) as u64;
@@ -84,14 +95,40 @@ pub fn local_filetime_now() -> u64 {
 }
 
 /// Offset of local time from UTC in seconds at the given Unix time.
-pub fn utc_offset_seconds(unix_secs: libc::time_t) -> i64 {
+#[cfg(unix)]
+pub fn utc_offset_seconds(unix_secs: i64) -> i64 {
+    let t = unix_secs as libc::time_t;
     // SAFETY: localtime_r with valid pointers.
     unsafe {
         let mut tm: libc::tm = std::mem::zeroed();
-        if libc::localtime_r(&unix_secs, &mut tm).is_null() {
+        if libc::localtime_r(&t, &mut tm).is_null() {
             return 0;
         }
         tm.tm_gmtoff
+    }
+}
+
+/// Offset of local time from UTC in seconds at the given Unix time
+/// (`SystemTimeToTzSpecificLocalTime()` with the current time zone).
+#[cfg(windows)]
+pub fn utc_offset_seconds(unix_secs: i64) -> i64 {
+    use windows_sys::Win32::Foundation::{FILETIME, SYSTEMTIME};
+    use windows_sys::Win32::System::Time::{FileTimeToSystemTime, SystemTimeToFileTime, SystemTimeToTzSpecificLocalTime};
+    let ft = (unix_secs.max(0) as u64) * 10_000_000 + FILETIME_UNIX_EPOCH;
+    let utc = FILETIME { dwLowDateTime: ft as u32, dwHighDateTime: (ft >> 32) as u32 };
+    // SAFETY: plain conversions between valid local structs.
+    unsafe {
+        let mut st: SYSTEMTIME = std::mem::zeroed();
+        let mut local: SYSTEMTIME = std::mem::zeroed();
+        let mut lft: FILETIME = std::mem::zeroed();
+        if FileTimeToSystemTime(&utc, &mut st) == 0
+            || SystemTimeToTzSpecificLocalTime(std::ptr::null(), &st, &mut local) == 0
+            || SystemTimeToFileTime(&local, &mut lft) == 0
+        {
+            return 0;
+        }
+        let l = ((lft.dwHighDateTime as u64) << 32 | lft.dwLowDateTime as u64) as i64;
+        (l - ft as i64) / 10_000_000
     }
 }
 

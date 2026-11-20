@@ -4,7 +4,7 @@
 //! The original keeps secrets in buffers that are wiped on release and, for the
 //! most sensitive data (random pool, database keys), in a memory page locked
 //! with `VirtualLock`. Here the same is done with `zeroize`, `mlock` and
-//! `MADV_DONTDUMP`.
+//! `MADV_DONTDUMP` on Linux, and `VirtualAlloc` + `VirtualLock` on Windows.
 
 use std::ptr::NonNull;
 
@@ -58,6 +58,21 @@ unsafe impl Sync for LockedPage {}
 
 impl LockedPage {
     /// Allocate a new zero-filled page, locking it into RAM if `lock` is true.
+    #[cfg(windows)]
+    pub fn alloc(lock: bool) -> Self {
+        use windows_sys::Win32::System::Memory::{MEM_COMMIT, MEM_RESERVE, PAGE_READWRITE, VirtualAlloc, VirtualLock};
+        // SAFETY: fresh committed allocation, checked for failure below.
+        let ptr = unsafe { VirtualAlloc(std::ptr::null(), PAGE_SIZE, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE) };
+        if ptr.is_null() {
+            panic!("LockedPage: VirtualAlloc failed: {}", std::io::Error::last_os_error());
+        }
+        // SAFETY: ptr is a valid allocation of PAGE_SIZE bytes.
+        let locked = lock && unsafe { VirtualLock(ptr, PAGE_SIZE) } != 0;
+        LockedPage { ptr: NonNull::new(ptr.cast()).unwrap(), locked }
+    }
+
+    /// Allocate a new zero-filled page, locking it into RAM if `lock` is true.
+    #[cfg(unix)]
     pub fn alloc(lock: bool) -> Self {
         // SAFETY: anonymous private mapping, checked for failure below.
         let ptr = unsafe {
@@ -110,7 +125,17 @@ impl Default for LockedPage {
 impl Drop for LockedPage {
     fn drop(&mut self) {
         self.as_mut_slice().zeroize();
-        // SAFETY: unmapping the mapping created in new().
+        #[cfg(windows)]
+        // SAFETY: releasing the allocation created in alloc().
+        unsafe {
+            use windows_sys::Win32::System::Memory::{MEM_RELEASE, VirtualFree, VirtualUnlock};
+            if self.locked {
+                VirtualUnlock(self.ptr.as_ptr().cast(), PAGE_SIZE);
+            }
+            VirtualFree(self.ptr.as_ptr().cast(), 0, MEM_RELEASE);
+        }
+        #[cfg(unix)]
+        // SAFETY: unmapping the mapping created in alloc().
         unsafe {
             if self.locked {
                 libc::munlock(self.ptr.as_ptr().cast(), PAGE_SIZE);
@@ -124,12 +149,26 @@ impl Drop for LockedPage {
 /// attaching debuggers of the same user (`ptrace`). The original has no exact
 /// equivalent; on Windows other processes of the same user cannot read the
 /// locked pages either.
+#[cfg(unix)]
 pub fn harden_process() {
     // SAFETY: plain syscalls with constant arguments.
     unsafe {
         let rl = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
         libc::setrlimit(libc::RLIMIT_CORE, &rl);
         libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0);
+    }
+}
+
+/// Process-wide hardening on Windows: no Windows Error Reporting dialog and
+/// crash dump with process memory (the original does nothing here).
+#[cfg(windows)]
+pub fn harden_process() {
+    use windows_sys::Win32::System::Diagnostics::Debug::{
+        SEM_FAILCRITICALERRORS, SEM_NOGPFAULTERRORBOX, SetErrorMode,
+    };
+    // SAFETY: constant flags.
+    unsafe {
+        SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
     }
 }
 

@@ -1,4 +1,4 @@
-//! Core of the Linux port of **Password Tech 3.6.1** by Christian Thöing.
+//! Core of Password Tool, the Linux and Windows port of **Password Tech 3.6.1** by Christian Thöing.
 //!
 //! Everything that does not depend on the user interface: cryptographic
 //! primitives, random number generation, password generation, password

@@ -294,6 +294,11 @@ impl MainWindow {
 
 /// `ShowTrayInfo()`: desktop notification while the window is hidden.
 pub fn show_notification(window: &gtk::ApplicationWindow, text: &str, error: bool) {
+    // Windows: balloon of the tray icon, as in the original
+    #[cfg(windows)]
+    if crate::ui::tray::notify(text, error) {
+        return;
+    }
     let Some(app) = window.application() else { return };
     let n = gio::Notification::new(PROGRAM_NAME);
     n.set_body(Some(text));
