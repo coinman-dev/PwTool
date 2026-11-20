@@ -565,7 +565,7 @@ mod tests {
 
     #[test]
     fn bundled_translations_load() {
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../upstream/languages");
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/languages");
         let Ok(rd) = std::fs::read_dir(&dir) else { return };
         let mut n = 0;
         for e in rd {
@@ -593,7 +593,7 @@ mod tests {
 
     #[test]
     fn lng_to_po_conversion() {
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../upstream/languages");
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/languages");
         let Ok(gr) = LanguageFile::load(&dir.join("Greek.lng"), false) else { return };
         let out = std::env::temp_dir().join(format!("pwtool-greek-{}.po", std::process::id()));
         gr.save_to_po(&out, CharEncoding::Utf8, "Password Tech", "3.6.1").unwrap();

@@ -115,10 +115,9 @@ pwtool --silent
 
 Нужны Rust 1.90+, компилятор C/C++ (`build-essential`), `pkg-config` и `libgtk-4-dev`
 (GTK 4.10 или новее). LibreOffice (`libreoffice-writer-nogui`) необязателен — используется
-для сборки `manual.pdf` и `scripting.pdf` из `upstream/manual/*.odt`.
+для сборки `manual.pdf` и `scripting.pdf` из `doc/manual/*.odt`.
 
 ```bash
-git submodule update --init
 cargo test --workspace --locked
 cargo build --release --locked -p pwtool
 
@@ -126,11 +125,10 @@ packaging/install.sh /usr/local    # установка в PREFIX
 packaging/build-deb.sh             # сборка target/pwtool_<версия>_<архитектура>.deb
 ```
 
-Автоматизированная проверка интерфейса и сверка с оригинальным ядром Password Tech:
+Автоматизированная проверка интерфейса в виртуальной сессии:
 
 ```bash
 tools/headless.sh env PWTOOL_AUTOMATE="click GenerateBtn;wait 400;print PasswBox;quit" ./target/debug/pwtool
-python3 -I tools/refcompare/compare.py
 ```
 
 ## Автоматические релизы

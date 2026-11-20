@@ -111,10 +111,9 @@ pwtool --silent
 
 Requires Rust 1.90+, a C/C++ compiler (`build-essential`), `pkg-config`, and `libgtk-4-dev`
 (GTK 4.10 or newer). LibreOffice (`libreoffice-writer-nogui`) is optional and used to build
-`manual.pdf` and `scripting.pdf` from `upstream/manual/*.odt`.
+`manual.pdf` and `scripting.pdf` from `doc/manual/*.odt`.
 
 ```bash
-git submodule update --init
 cargo test --workspace --locked
 cargo build --release --locked -p pwtool
 
@@ -122,11 +121,10 @@ packaging/install.sh /usr/local    # install to PREFIX
 packaging/build-deb.sh             # build target/pwtool_<version>_<arch>.deb
 ```
 
-Headless GUI automation and core parity comparison against upstream Password Tech:
+Headless GUI automation:
 
 ```bash
 tools/headless.sh env PWTOOL_AUTOMATE="click GenerateBtn;wait 400;print PasswBox;quit" ./target/debug/pwtool
-python3 -I tools/refcompare/compare.py
 ```
 
 ## Automated releases

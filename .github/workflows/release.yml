@@ -39,7 +39,6 @@ jobs:
         with:
           ref: ${{ inputs.dry_run && github.sha || inputs.tag || github.sha }}
           fetch-depth: 0
-          submodules: recursive
       - name: Validate version tag
         shell: bash
         run: |

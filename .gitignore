@@ -1,6 +1,9 @@
 /target
+/.ai
 /.ref
+/tmp
+.claude/
+__pycache__/
+*.pyc
 *.swp
 *~
-.claude/
-/tmp

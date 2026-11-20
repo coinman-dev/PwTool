@@ -28,15 +28,15 @@ install -m644 "$ROOT/assets/common_passwords.txt" "$ROOT/assets/license.txt" "$S
 install -m644 "$ROOT"/assets/languages/*.po "$ROOT"/assets/languages/*.lng "$ROOT"/assets/languages/*.pot "$SHARE/languages/"
 install -d "$SHARE/languages/port"
 install -m644 "$ROOT"/assets/languages/port/*.po "$SHARE/languages/port/"
-install -m644 "$ROOT"/assets/script_examples/* "$SHARE/script_examples/"
+install -m644 "$ROOT/assets/script_examples/"* "$SHARE/script_examples/"
 
-# manuals (PDF from the original ODT files, if LibreOffice is available)
+# manuals (PDF from the ODT sources in doc/manual, if LibreOffice is available)
 MANUALS="$ROOT/target/manuals"
 if [ ! -f "$MANUALS/manual.pdf" ] && command -v soffice >/dev/null; then
   mkdir -p "$MANUALS"
   PROFILE=$(mktemp -d)
   timeout 300 soffice -env:UserInstallation=file://"$PROFILE" --headless --convert-to pdf \
-    --outdir "$MANUALS" "$ROOT/upstream/manual/manual.odt" "$ROOT/upstream/manual/scripting.odt" >/dev/null 2>&1 || true
+    --outdir "$MANUALS" "$ROOT/doc/manual/manual.odt" "$ROOT/doc/manual/scripting.odt" >/dev/null 2>&1 || true
   rm -rf "$PROFILE"
 fi
 for f in manual.pdf scripting.pdf; do

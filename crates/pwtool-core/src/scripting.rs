@@ -470,7 +470,7 @@ mod tests {
     fn upstream_examples_run() {
         let pg = PasswordGenerator::new();
         let mut rng = AesCtrPrng::from_seed(b"lua");
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../upstream/script_examples");
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/script_examples");
         let Ok(rd) = std::fs::read_dir(&dir) else { return };
         for e in rd {
             let path = e.unwrap().path();
