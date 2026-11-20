@@ -1235,7 +1235,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "pwtech"
+name = "pwtool"
 version = "0.1.0"
 dependencies = [
  "ashpd",
@@ -1244,13 +1244,13 @@ dependencies = [
  "gtk4",
  "ksni",
  "libc",
- "pwtech-core",
+ "pwtool-core",
  "serde_json",
  "zeroize",
 ]
 
 [[package]]
-name = "pwtech-core"
+name = "pwtool-core"
 version = "0.1.0"
 dependencies = [
  "aes",

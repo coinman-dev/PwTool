@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Compare the Rust port (pwtech-core) with the original Password Tech core.
+"""Compare the Rust port (pwtool-core) with the original Password Tech core.
 
 Runs the same command lines through the reference harness (original C++
 sources under wine, tools/refharness) and the port harness
-(crates/pwtech-core/examples/portharness.rs), compares the JSON outputs
+(crates/pwtool-core/examples/portharness.rs), compares the JSON outputs
 field by field and writes tools/refcompare/REPORT.md.
 
 Usage (from anywhere):
@@ -125,7 +125,7 @@ class Case:
         r = 'LC_ALL=%s %s' % (LOCALES[self.acp], ' '.join(shlex.quote(x) for x in
                                                            [os.path.relpath(REF, ROOT)] + self.glob + self.subst(self.args, 'ref')))
         args = self.port_args if self.port_args is not None else self.args
-        p = ' '.join(shlex.quote(x) for x in ['cargo', 'run', '-q', '--release', '-p', 'pwtech-core', '--example',
+        p = ' '.join(shlex.quote(x) for x in ['cargo', 'run', '-q', '--release', '-p', 'pwtool-core', '--example',
                                                'portharness', '--', '--acp', str(self.acp)] + self.glob + self.subst(args, 'port'))
         return r, p
 
@@ -1194,7 +1194,7 @@ def write_report(path, areas, cases, cross_results, extra_notes, runtime):
     lines.append('# Сверка Rust-порта с оригинальным ядром Password Tech 3.6.1')
     lines.append('')
     lines.append('Сгенерировано `tools/refcompare/compare.py` (%s, %.0f с). Эталон — `tools/refharness` '
-                 '(неизменённые исходники оригинала под wine), порт — `crates/pwtech-core/examples/portharness.rs`. '
+                 '(неизменённые исходники оригинала под wine), порт — `crates/pwtool-core/examples/portharness.rs`. '
                  'Входные данные детерминированы (seed %d).' % (time.strftime('%Y-%m-%d %H:%M'), runtime, SEED))
     lines.append('')
     lines.append('Повторить: `python3 -I tools/refcompare/compare.py` (опции: `-j N`, `--area a,b`, `--no-build`).')
@@ -1289,7 +1289,7 @@ def main():
     t0 = time.time()
     if not args.no_build:
         print('building portharness ...', file=sys.stderr)
-        subprocess.run(['cargo', 'build', '-q', '--release', '-p', 'pwtech-core', '--example', 'portharness'],
+        subprocess.run(['cargo', 'build', '-q', '--release', '-p', 'pwtool-core', '--example', 'portharness'],
                        cwd=ROOT, check=True)
     if not args.keep and os.path.isdir(WORK):
         shutil.rmtree(WORK)

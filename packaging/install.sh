@@ -1,10 +1,10 @@
 #!/bin/bash
-# Install Password Tech (Linux port).
+# Install Password Tool (Linux port of Password Tech).
 #
 #   packaging/install.sh [--no-build] [PREFIX]      (default PREFIX=/usr/local)
 #   DESTDIR=/tmp/stage packaging/install.sh /usr    (staging, e.g. for packages)
 #
-# Layout: $PREFIX/bin/pwtech, $PREFIX/share/pwtech/ (translations, common
+# Layout: $PREFIX/bin/pwtool, $PREFIX/share/pwtool/ (translations, common
 # passwords, script examples, license, manuals), desktop file, icons, metainfo.
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -13,16 +13,16 @@ BUILD=1
 if [ "${1:-}" = "--no-build" ]; then BUILD=0; shift; fi
 PREFIX=${1:-/usr/local}
 DEST="${DESTDIR:-}$PREFIX"
-APP_ID=io.github.pwtech.PasswordTech
+APP_ID=io.github.coinman_dev.PwTool
 
 if [ $BUILD = 1 ]; then
-  (cd "$ROOT" && cargo build --release -p pwtech)
+  (cd "$ROOT" && cargo build --release -p pwtool)
 fi
-BIN="$ROOT/target/release/pwtech"
+BIN="$ROOT/target/release/pwtool"
 [ -x "$BIN" ] || { echo "missing $BIN (build first)" >&2; exit 1; }
 
-install -Dm755 "$BIN" "$DEST/bin/pwtech"
-SHARE="$DEST/share/pwtech"
+install -Dm755 "$BIN" "$DEST/bin/pwtool"
+SHARE="$DEST/share/pwtool"
 install -d "$SHARE/languages" "$SHARE/script_examples"
 install -m644 "$ROOT/assets/common_passwords.txt" "$ROOT/assets/license.txt" "$SHARE/"
 install -m644 "$ROOT"/assets/languages/*.po "$ROOT"/assets/languages/*.lng "$ROOT"/assets/languages/*.pot "$SHARE/languages/"
@@ -44,6 +44,6 @@ done
 install -Dm644 "$HERE/$APP_ID.desktop" "$DEST/share/applications/$APP_ID.desktop"
 install -Dm644 "$HERE/$APP_ID.metainfo.xml" "$DEST/share/metainfo/$APP_ID.metainfo.xml"
 for s in 16 32 48 256; do
-  install -Dm644 "$ROOT/assets/appicons/pwtech_default_$s.png" "$DEST/share/icons/hicolor/${s}x${s}/apps/$APP_ID.png"
+  install -Dm644 "$ROOT/assets/appicons/pwtool_default_$s.png" "$DEST/share/icons/hicolor/${s}x${s}/apps/$APP_ID.png"
 done
 echo "installed to $DEST"

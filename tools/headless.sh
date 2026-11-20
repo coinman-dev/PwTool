@@ -9,7 +9,7 @@
 #
 # Usage: tools/headless.sh <command> [args...]
 set -u
-RT=$(mktemp -d /tmp/pwtech-rt.XXXXXX)
+RT=$(mktemp -d /tmp/pwtool-rt.XXXXXX)
 chmod 700 "$RT"
 export XDG_RUNTIME_DIR="$RT"
 LOG="$RT/output.log"
