@@ -3,9 +3,6 @@
 //! marks the running instance and a named event asks it to show its window
 //! (the original refuses a second start in the same way).
 
-use gtk4 as gtk;
-use gtk::glib;
-use gtk::prelude::*;
 use windows_sys::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE};
 use windows_sys::Win32::System::Threading::{
     CreateEventW, CreateMutexW, EVENT_MODIFY_STATE, INFINITE, OpenEventW, SetEvent, WaitForSingleObject,
@@ -48,8 +45,9 @@ impl Instance {
         }
     }
 
-    /// Activate `app` (show the main window) when another start is attempted.
-    pub fn watch(&self, app: &gtk::Application) {
+    /// Call `on_activate` (show the main window) on the GUI thread when
+    /// another start is attempted.
+    pub fn watch(&self, on_activate: impl Fn() + 'static) {
         if self.event.is_null() {
             return;
         }
@@ -63,13 +61,9 @@ impl Instance {
                 }
             }
         });
-        let app = app.downgrade();
-        glib::spawn_future_local(async move {
+        crate::rt::spawn_local(async move {
             while rx.recv().await.is_ok() {
-                match app.upgrade() {
-                    Some(a) => a.activate(),
-                    None => break,
-                }
+                on_activate();
             }
         });
     }

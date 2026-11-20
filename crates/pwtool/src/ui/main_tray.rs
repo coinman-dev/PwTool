@@ -4,27 +4,7 @@
 use super::*;
 use crate::ui::tray::{TrayCmd, TrayEntry, TrayIcon, icon_from_pngs};
 
-/// PNG images (16, 32, 48 pixels) of the icon for
-/// `Configuration::AppIconName`.
-fn app_icon_pngs(name: &str) -> [&'static [u8]; 3] {
-    macro_rules! icon {
-        ($n:literal) => {
-            [
-                include_bytes!(concat!("../../../../assets/appicons/", $n, "_16.png")),
-                include_bytes!(concat!("../../../../assets/appicons/", $n, "_32.png")),
-                include_bytes!(concat!("../../../../assets/appicons/", $n, "_48.png")),
-            ]
-        };
-    }
-    match name {
-        "Blue" => icon!("pwtool_icon_blue"),
-        "Red" => icon!("pwtool_icon_red"),
-        "Orange" => icon!("pwtool_icon_orange"),
-        "Green" => icon!("pwtool_icon_green"),
-        "Colors" => icon!("pwtool_icon_colored"),
-        _ => icon!("pwtool_default"),
-    }
-}
+use pwtool_app::icons::app_icon_pngs;
 
 pub(super) struct TrayState {
     icon: RefCell<Option<TrayIcon>>,

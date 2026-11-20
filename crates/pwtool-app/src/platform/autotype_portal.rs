@@ -8,11 +8,10 @@ use std::rc::Rc;
 
 use ashpd::desktop::remote_desktop::{DeviceType, KeyState, RemoteDesktop, SelectDevicesOptions};
 use ashpd::desktop::{PersistMode, Session};
-use ashpd::WindowIdentifier;
-use gtk4 as gtk;
-use gtk::glib;
 
 use super::{INIT_DELAY, KeyStroke};
+use crate::platform::Parent;
+use crate::rt;
 
 struct RdSession {
     proxy: RemoteDesktop,
@@ -25,11 +24,11 @@ thread_local! {
 
 /// Get (or start) the RemoteDesktop session. Returns the session and a new
 /// restore token to be stored, if any.
-async fn session(parent: Option<&gtk::Window>, token: &str) -> Result<(Rc<RdSession>, Option<String>), String> {
+async fn session(parent: Option<&Parent>, token: &str) -> Result<(Rc<RdSession>, Option<String>), String> {
     if let Some(s) = SESSION.with(|s| s.borrow().clone()) {
         return Ok((s, None));
     }
-    crate::ui::portal::ensure_registered().await;
+    crate::platform::portal::ensure_registered().await;
     let proxy = RemoteDesktop::new().await.map_err(|e| e.to_string())?;
     let session = proxy.create_session(Default::default()).await.map_err(|e| e.to_string())?;
     proxy
@@ -42,12 +41,9 @@ async fn session(parent: Option<&gtk::Window>, token: &str) -> Result<(Rc<RdSess
         )
         .await
         .map_err(|e| e.to_string())?;
-    let ident = match parent {
-        Some(w) => WindowIdentifier::from_native(w).await,
-        None => None,
-    };
+    let ident = parent.and_then(|p| p.portal.as_ref());
     let resp = proxy
-        .start(&session, ident.as_ref(), Default::default())
+        .start(&session, ident, Default::default())
         .await
         .map_err(|e| e.to_string())?
         .response()
@@ -61,26 +57,26 @@ async fn session(parent: Option<&gtk::Window>, token: &str) -> Result<(Rc<RdSess
 /// Close the session (e.g. at program exit).
 pub fn close_session() {
     if let Some(s) = SESSION.with(|s| s.borrow_mut().take()) {
-        glib::spawn_future_local(async move {
+        rt::spawn_local(async move {
             let _ = s.session.close().await;
         });
     }
 }
 
 /// Make sure the session exists (asks for permission the first time).
-pub async fn prepare(parent: Option<&gtk::Window>, token: &str) -> Result<Option<String>, String> {
+pub async fn prepare(parent: Option<&Parent>, token: &str) -> Result<Option<String>, String> {
     session(parent, token).await.map(|(_, t)| t)
 }
 
 /// Type a sequence. Returns a new restore token if one was issued.
 pub async fn send(
-    parent: Option<&gtk::Window>,
+    parent: Option<&Parent>,
     token: &str,
     strokes: Vec<KeyStroke>,
     abort: Rc<std::cell::Cell<bool>>,
 ) -> Result<Option<String>, String> {
     let (s, new_token) = session(parent, token).await?;
-    glib::timeout_future(std::time::Duration::from_millis(INIT_DELAY as u64)).await;
+    rt::sleep(std::time::Duration::from_millis(INIT_DELAY as u64)).await;
     for st in &strokes {
         if abort.get() {
             break;
@@ -101,7 +97,7 @@ pub async fn send(
             return Err(e);
         }
         if st.delay_ms > 0 {
-            glib::timeout_future(std::time::Duration::from_millis(st.delay_ms as u64)).await;
+            rt::sleep(std::time::Duration::from_millis(st.delay_ms as u64)).await;
         }
     }
     Ok(new_token)

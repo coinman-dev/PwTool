@@ -3,9 +3,6 @@
 //! support). The tray runs in its own thread; commands are sent to the GTK
 //! main loop through a channel.
 
-use gtk4 as gtk;
-use gtk::glib;
-use gtk::gdk::prelude::TextureExt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use ksni::blocking::TrayMethods;
@@ -202,21 +199,14 @@ impl Drop for TrayIcon {
 /// Icon for the tray from PNG images (ARGB32, network byte order), one
 /// entry per size.
 pub fn icon_from_pngs(images: &[&'static [u8]]) -> Vec<Icon> {
-    let mut v = Vec::new();
-    for bytes in images {
-        let Ok(tex) = gtk::gdk::Texture::from_bytes(&glib::Bytes::from_static(bytes)) else { continue };
-        let (w, h) = (tex.width(), tex.height());
-        let mut dl = gtk::gdk::TextureDownloader::new(&tex);
-        dl.set_format(gtk::gdk::MemoryFormat::R8g8b8a8);
-        let (bytes, stride) = dl.download_bytes();
-        let mut data = Vec::with_capacity((w * h * 4) as usize);
-        for y in 0..h as usize {
-            for x in 0..w as usize {
-                let o = y * stride + x * 4;
-                data.extend_from_slice(&[bytes[o + 3], bytes[o], bytes[o + 1], bytes[o + 2]]);
-            }
-        }
-        v.push(Icon { width: w, height: h, data });
-    }
-    v
+    images
+        .iter()
+        .filter_map(|b| crate::icons::decode_png(b))
+        .map(|img| Icon {
+            width: img.width as i32,
+            height: img.height as i32,
+            // ARGB32 in network byte order
+            data: img.pixels.chunks_exact(4).flat_map(|p| [p[3], p[0], p[1], p[2]]).collect(),
+        })
+        .collect()
 }

@@ -1240,34 +1240,4 @@ impl MainWindow {
     }
 }
 
-/// Free space on the file system of `path` (or its directory).
-#[cfg(windows)]
-fn free_disk_space(path: &Path) -> Option<u64> {
-    use std::os::windows::ffi::OsStrExt;
-    let dir = if path.is_dir() { path } else { path.parent().filter(|p| !p.as_os_str().is_empty())? };
-    let wide: Vec<u16> = dir.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
-    let mut avail = 0u64;
-    // SAFETY: valid NUL-terminated path and output pointer
-    let ok = unsafe {
-        windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW(
-            wide.as_ptr(),
-            &mut avail,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-        )
-    };
-    (ok != 0).then_some(avail)
-}
-
-/// Free space on the file system of `path` (or its directory).
-#[cfg(unix)]
-fn free_disk_space(path: &Path) -> Option<u64> {
-    let dir = if path.is_dir() { path } else { path.parent().filter(|p| !p.as_os_str().is_empty())? };
-    let c = std::ffi::CString::new(dir.as_os_str().as_encoded_bytes()).ok()?;
-    let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
-    // SAFETY: valid C string and output struct
-    if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 {
-        return None;
-    }
-    Some(st.f_bavail as u64 * st.f_frsize as u64)
-}
+use pwtool_app::platform::sys::free_disk_space;

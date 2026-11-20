@@ -249,7 +249,7 @@ pub fn open_uri(parent: Option<&gtk::Window>, uri: &str) {
     launcher.launch(parent, gio::Cancellable::NONE, move |r| {
         if let Err(e) = r {
             eprintln!("pwtool: UriLauncher failed: {e}");
-            let spawned = system_open(std::ffi::OsStr::new(&u));
+            let spawned = pwtool_app::platform::sys::system_open(std::ffi::OsStr::new(&u));
             if !spawned {
                 msg(
                     p.as_ref(),
@@ -259,32 +259,6 @@ pub fn open_uri(parent: Option<&gtk::Window>, uri: &str) {
             }
         }
     });
-}
-
-/// Last resort for opening a file or URI: `xdg-open` on Linux,
-/// `ShellExecuteW("open")` on Windows.
-#[cfg(not(windows))]
-pub(crate) fn system_open(target: &std::ffi::OsStr) -> bool {
-    std::process::Command::new("xdg-open").arg(target).spawn().is_ok()
-}
-
-#[cfg(windows)]
-pub(crate) fn system_open(target: &std::ffi::OsStr) -> bool {
-    use std::os::windows::ffi::OsStrExt;
-    let file: Vec<u16> = target.encode_wide().chain(std::iter::once(0)).collect();
-    let verb: Vec<u16> = "open\0".encode_utf16().collect();
-    // SAFETY: valid NUL-terminated strings.
-    let rc = unsafe {
-        windows_sys::Win32::UI::Shell::ShellExecuteW(
-            std::ptr::null_mut(),
-            verb.as_ptr(),
-            file.as_ptr(),
-            std::ptr::null(),
-            std::ptr::null(),
-            windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL,
-        )
-    };
-    rc as isize > 32
 }
 
 /// Open a local file with the default application. Tries, in this order:
@@ -320,7 +294,7 @@ fn open_local_file(parent: Option<&gtk::Window>, file: gio::File) {
             eprintln!("pwtool: FileLauncher failed: {e}");
             let spawned = file
                 .path()
-                .is_some_and(|path| system_open(path.as_os_str()));
+                .is_some_and(|path| pwtool_app::platform::sys::system_open(path.as_os_str()));
             if !spawned {
                 fail(p.as_ref());
             }
@@ -430,31 +404,6 @@ pub fn set_gui_font(font_string: &str) {
     });
 }
 
-/// "Choose your app mode" of the Windows settings (`AppsUseLightTheme`):
-/// `Some(true)` for dark.
-#[cfg(windows)]
-fn windows_apps_use_dark_theme() -> Option<bool> {
-    use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
-    let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
-    let key = wide(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
-    let value = wide("AppsUseLightTheme");
-    let mut data: u32 = 1;
-    let mut size = std::mem::size_of::<u32>() as u32;
-    // SAFETY: valid NUL-terminated strings and output buffer of `size` bytes.
-    let rc = unsafe {
-        RegGetValueW(
-            HKEY_CURRENT_USER,
-            key.as_ptr(),
-            value.as_ptr(),
-            RRF_RT_REG_DWORD,
-            std::ptr::null_mut(),
-            (&mut data as *mut u32).cast(),
-            &mut size,
-        )
-    };
-    (rc == 0).then_some(data == 0)
-}
-
 /// User interface style: "Light"/"Dark" force the colour scheme, "Default"
 /// follows the desktop: the values GTK got from the desktop (KDE's GTK
 /// settings, the colour scheme of the settings portal) are left alone, or
@@ -472,7 +421,7 @@ pub fn set_ui_style(name: &str) {
             *c = Some((s.is_gtk_application_prefer_dark_theme(), scheme));
             // Windows: GTK does not follow the app mode of the Windows settings
             #[cfg(windows)]
-            if let Some(dark) = windows_apps_use_dark_theme() {
+            if let Some(dark) = pwtool_app::platform::sys::windows_apps_use_dark_theme() {
                 let nick = if dark { "dark" } else { "light" };
                 let scheme = scheme_prop
                     .as_ref()

@@ -5,6 +5,8 @@
 pub const PROGRAM_NAME: &str = "Password Tool";
 /// Short name (binary, configuration directory).
 pub const PROGRAM_SHORT_NAME: &str = "PwTool";
+/// Application id (D-Bus name, desktop file, portal registration).
+pub const APP_ID: &str = "io.github.coinman_dev.PwTool";
 /// Name of the original program this one is based on.
 pub const ORIGINAL_NAME: &str = "Password Tech";
 /// Version of the original this port corresponds to. Used for the

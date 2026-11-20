@@ -6,7 +6,6 @@ use std::collections::HashMap;
 use gtk4 as gtk;
 use gtk::{gdk, glib};
 
-include!(concat!(env!("OUT_DIR"), "/icons.rs"));
 
 thread_local! {
     static CACHE: RefCell<HashMap<String, Option<gdk::Texture>>> = RefCell::new(HashMap::new());
@@ -19,7 +18,7 @@ pub fn texture(form: &str, collection: &str, name: &str) -> Option<gdk::Texture>
         c.borrow_mut()
             .entry(key.clone())
             .or_insert_with(|| {
-                let bytes = icon_bytes(&key)?;
+                let bytes = pwtool_app::icons::form_icon(form, collection, name)?;
                 gdk::Texture::from_bytes(&glib::Bytes::from_static(bytes)).ok()
             })
             .clone()

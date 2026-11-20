@@ -1,29 +1,23 @@
 //! GTK 4 user interface.
 
-// Platform-specific modules: KWin/portals/StatusNotifierItem on Linux,
-// Win32 API on Windows (`*_win.rs`, same interface).
+// Platform services come from pwtool-app; the modules here adapt them to
+// GTK (windows as portal parents, the GLib main loop as executor). The KWin
+// functions of Linux (`active_window.rs`) still use GIO's D-Bus.
 #[cfg_attr(windows, path = "active_window_win.rs")]
 pub mod active_window;
 pub mod autotype;
 pub mod builder;
 pub mod clipboard;
 pub mod dialogs;
-pub mod form;
-#[cfg_attr(windows, path = "hotkeys_win.rs")]
+pub use pwtool_app::form;
 pub mod hotkeys;
 pub mod icons;
 pub mod layout;
 pub mod main_window;
 pub mod passw_enter;
 pub mod passw_manager;
-#[cfg(unix)]
-pub mod portal;
 pub mod quality_bar;
-#[cfg(windows)]
-#[path = "single_instance_win.rs"]
-mod single_instance;
-#[cfg_attr(windows, path = "tray_win.rs")]
-pub mod tray;
+pub use pwtool_app::platform::tray;
 pub mod update_check;
 pub mod util;
 
@@ -37,13 +31,30 @@ use gtk::glib;
 use crate::app::{AppCore, CmdLineOptions};
 
 /// Application id (D-Bus name, desktop file).
-pub const APP_ID: &str = "io.github.coinman_dev.PwTool";
+pub use pwtool_app::program::APP_ID;
+
+/// The window of a portal request (Linux) for platform services.
+pub async fn platform_parent(w: Option<&gtk::Window>) -> Option<pwtool_app::platform::Parent> {
+    let w = w?;
+    #[cfg(unix)]
+    let p = pwtool_app::platform::Parent { portal: ashpd::WindowIdentifier::from_native(w).await };
+    #[cfg(windows)]
+    let p = {
+        let _ = w;
+        pwtool_app::platform::Parent::default()
+    };
+    Some(p)
+}
 
 /// Run the GUI. Returns the exit code.
 pub fn run(cmd: CmdLineOptions) -> i32 {
+    // platform services run their tasks in the GLib main loop
+    pwtool_app::rt::set_spawner(|f| {
+        glib::spawn_future_local(f);
+    });
     // Windows: no session bus for GApplication's uniqueness
     #[cfg(windows)]
-    let Some(instance) = single_instance::Instance::acquire() else { return 0 };
+    let Some(instance) = pwtool_app::platform::single_instance::Instance::acquire() else { return 0 };
     #[cfg(windows)]
     let flags = gtk::gio::ApplicationFlags::NON_UNIQUE;
     #[cfg(not(windows))]
@@ -56,7 +67,14 @@ pub fn run(cmd: CmdLineOptions) -> i32 {
         .register_session(true)
         .build();
     #[cfg(windows)]
-    instance.watch(&app);
+    {
+        let a = app.downgrade();
+        instance.watch(move || {
+            if let Some(a) = a.upgrade() {
+                a.activate();
+            }
+        });
+    }
     let main: Rc<RefCell<Option<Rc<main_window::MainWindow>>>> = Rc::new(RefCell::new(None));
     let m = main.clone();
     app.connect_activate(move |app| {

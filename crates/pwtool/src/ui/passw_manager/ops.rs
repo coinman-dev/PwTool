@@ -2182,7 +2182,7 @@ impl PasswManager {
             #[cfg(unix)]
             let started = glib::spawn_command_line_async(cmd.as_str()).is_ok();
             #[cfg(windows)]
-            let started = crate::ui::util::system_open(std::ffi::OsStr::new(&cmd));
+            let started = pwtool_app::platform::sys::system_open(std::ffi::OsStr::new(&cmd));
             if !started {
                 open_uri(Some(&self.gwin()), &cmd);
             }

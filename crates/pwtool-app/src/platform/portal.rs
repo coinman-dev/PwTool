@@ -13,7 +13,7 @@ pub async fn ensure_registered() {
     if REGISTERED.with(|r| r.replace(true)) {
         return;
     }
-    if let Ok(id) = super::APP_ID.parse::<ashpd::AppID>() {
+    if let Ok(id) = crate::program::APP_ID.parse::<ashpd::AppID>() {
         if let Err(e) = ashpd::register_host_app(id).await {
             // older portals do not have the registry; not fatal
             eprintln!("pwtool: portal registration: {e}");

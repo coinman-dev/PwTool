@@ -5,8 +5,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use gtk4 as gtk;
-use gtk::glib;
+use crate::platform::Parent;
+use crate::rt;
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, RegisterHotKey, UnregisterHotKey,
@@ -48,7 +48,7 @@ pub fn deactivate() {
 /// is called with the shortcut code. Returns the number of registered keys;
 /// an error if some key could not be registered (used by another program).
 pub async fn activate(
-    _parent: Option<&gtk::Window>,
+    _parent: Option<&Parent>,
     keys: Vec<(u16, String)>,
     on_activated: Rc<dyn Fn(u16)>,
 ) -> Result<usize, String> {
@@ -90,7 +90,7 @@ pub async fn activate(
         .map_err(|e| e.to_string())?;
     let (tid, failed) = rrx.recv().map_err(|e| e.to_string())?;
     ACTIVE.with(|a| *a.borrow_mut() = Some(tid));
-    glib::spawn_future_local(async move {
+    rt::spawn_local(async move {
         while let Ok(code) = rx.recv().await {
             on_activated(code);
         }
@@ -98,7 +98,7 @@ pub async fn activate(
     if failed.is_empty() {
         Ok(keys.len())
     } else {
-        let names: Vec<String> = failed.iter().map(|c| super::builder::shortcut_to_text(*c)).collect();
+        let names: Vec<String> = failed.iter().map(|c| crate::shortcut::shortcut_to_text(*c)).collect();
         Err(format!("RegisterHotKey failed: {}", names.join(", ")))
     }
 }

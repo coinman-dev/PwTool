@@ -5,14 +5,14 @@
 
 use std::rc::Rc;
 
-use gtk4 as gtk;
-use gtk::glib;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
     MAPVK_VK_TO_VSC, MapVirtualKeyW, SendInput, VkKeyScanW,
 };
 
 use super::{INIT_DELAY, KeyStroke};
+use crate::platform::Parent;
+use crate::rt;
 
 /// Virtual key of a keysym of a special key: (VK, extended key).
 fn special_vk(keysym: u32) -> Option<(u16, bool)> {
@@ -114,18 +114,18 @@ fn stroke_inputs(st: &KeyStroke) -> Vec<INPUT> {
 pub fn close_session() {}
 
 /// No permission is needed on Windows.
-pub async fn prepare(_parent: Option<&gtk::Window>, _token: &str) -> Result<Option<String>, String> {
+pub async fn prepare(_parent: Option<&Parent>, _token: &str) -> Result<Option<String>, String> {
     Ok(None)
 }
 
 /// Type a sequence into the foreground window.
 pub async fn send(
-    _parent: Option<&gtk::Window>,
+    _parent: Option<&Parent>,
     _token: &str,
     strokes: Vec<KeyStroke>,
     abort: Rc<std::cell::Cell<bool>>,
 ) -> Result<Option<String>, String> {
-    glib::timeout_future(std::time::Duration::from_millis(INIT_DELAY as u64)).await;
+    rt::sleep(std::time::Duration::from_millis(INIT_DELAY as u64)).await;
     for st in &strokes {
         if abort.get() {
             break;
@@ -144,7 +144,7 @@ pub async fn send(
             }
         }
         if st.delay_ms > 0 {
-            glib::timeout_future(std::time::Duration::from_millis(st.delay_ms as u64)).await;
+            rt::sleep(std::time::Duration::from_millis(st.delay_ms as u64)).await;
         }
     }
     Ok(None)

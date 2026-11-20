@@ -7,9 +7,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use gtk4 as gtk;
-use gtk::gdk::prelude::TextureExt;
-use gtk::glib;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateBitmap, CreateDIBSection, DIB_RGB_COLORS, DeleteObject, HBITMAP,
@@ -454,18 +451,14 @@ pub fn notify(text: &str, error: bool) -> bool {
 
 /// Icon for the tray from PNG images, one entry per size.
 pub fn icon_from_pngs(images: &[&'static [u8]]) -> Vec<Icon> {
-    let mut v = Vec::new();
-    for bytes in images {
-        let Ok(tex) = gtk::gdk::Texture::from_bytes(&glib::Bytes::from_static(bytes)) else { continue };
-        let (w, h) = (tex.width(), tex.height());
-        let mut dl = gtk::gdk::TextureDownloader::new(&tex);
-        dl.set_format(gtk::gdk::MemoryFormat::B8g8r8a8);
-        let (bytes, stride) = dl.download_bytes();
-        let mut data = Vec::with_capacity((w * h * 4) as usize);
-        for y in 0..h as usize {
-            data.extend_from_slice(&bytes[y * stride..y * stride + w as usize * 4]);
-        }
-        v.push(Icon { width: w, height: h, data });
-    }
-    v
+    images
+        .iter()
+        .filter_map(|b| crate::icons::decode_png(b))
+        .map(|img| Icon {
+            width: img.width as i32,
+            height: img.height as i32,
+            // BGRA, straight alpha
+            data: img.pixels.chunks_exact(4).flat_map(|p| [p[2], p[1], p[0], p[3]]).collect(),
+        })
+        .collect()
 }
