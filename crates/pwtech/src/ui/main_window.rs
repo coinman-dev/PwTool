@@ -131,6 +131,11 @@ pub struct MainWindow {
     mp_passw_gen: RefCell<Option<Rc<mp_passw_gen::MpPasswGenWin>>>,
     close_confirmed: Cell<bool>,
     tray: tray_main::TrayState,
+    passw_mng: RefCell<Option<Rc<crate::ui::passw_manager::PasswManager>>>,
+    close_queried: Cell<bool>,
+    /// Edit box receiving the next single password instead of `PasswBox`
+    /// (`GeneratePassw(gpdGuiSingle, pEditBox)`).
+    pub(super) gen_target: RefCell<Option<gtk::Entry>>,
 }
 
 impl MainWindow {
@@ -190,6 +195,9 @@ impl MainWindow {
             mp_passw_gen: RefCell::new(None),
             close_confirmed: Cell::new(false),
             tray: tray_main::TrayState::new(),
+            passw_mng: RefCell::new(None),
+            close_queried: Cell::new(false),
+            gen_target: RefCell::new(None),
         });
         w.setup();
         w
@@ -324,6 +332,19 @@ impl MainWindow {
                         .await
                             == MsgResult::Yes
                         {
+                            w2.close_confirmed.set(true);
+                            win2.close();
+                        }
+                    });
+                    return glib::Propagation::Stop;
+                }
+                // `PasswMngForm->CloseQuery()`: unsaved database
+                let mng = w.passw_mng.borrow().clone();
+                if let Some(m) = mng.filter(|_| !w.close_queried.get()) {
+                    let (w2, win2) = (w.clone(), win.clone());
+                    glib::spawn_future_local(async move {
+                        if m.close_query().await {
+                            w2.close_queried.set(true);
                             w2.close_confirmed.set(true);
                             win2.close();
                         }
@@ -1073,7 +1094,7 @@ impl MainWindow {
     }
 
     /// `LoadProfile(index)`.
-    fn load_profile(&self, i: usize) {
+    pub(super) fn load_profile(&self, i: usize) {
         if i >= self.core.borrow().profiles.len() {
             return;
         }
@@ -1166,8 +1187,9 @@ impl MainWindow {
     // generation
 
     /// `GeneratePassw()`.
-    fn generate_passw(self: &Rc<Self>, dest: GenDest) {
+    pub(super) fn generate_passw(self: &Rc<Self>, dest: GenDest) {
         if self.generating.get() {
+            self.gen_target.borrow_mut().take();
             return;
         }
         self.char_set_list_exit();
@@ -1178,6 +1200,7 @@ impl MainWindow {
     }
 
     async fn generate_passw_async(self: Rc<Self>, dest: GenDest) {
+        let gen_target = self.gen_target.borrow_mut().take();
         let win = self.win();
         let mut num: u64 = 1;
         let mut file: Option<(PathBuf, bool)> = None;
@@ -1513,6 +1536,11 @@ impl MainWindow {
         }
         if summary.count != 0 {
             match dest {
+                GenDest::GuiSingle if gen_target.is_some() => {
+                    if let Some(e) = &gen_target {
+                        e.set_text(&out.single);
+                    }
+                }
                 GenDest::GuiSingle => {
                     let e = self.entry("PasswBox");
                     let tag = self.passw_box_tag.get();
@@ -1645,6 +1673,7 @@ impl MainWindow {
         let w = Rc::downgrade(self);
         key.connect_key_pressed(move |_, k, code, _| {
             if let Some(w) = w.upgrade() {
+                w.notify_user_action();
                 let mut em = EntropyManager::global();
                 let bits = em.add_event(&mut RandomPool::global(), EntropyEventType::Keyboard, k.into_glib() as u64, code as u64, &[], ENTROPY_KEYBOARD);
                 drop(em);
@@ -1661,6 +1690,7 @@ impl MainWindow {
         let w = Rc::downgrade(self);
         click.connect_pressed(move |g, _, x, y| {
             if let Some(w) = w.upgrade() {
+                w.notify_user_action();
                 let pos = ((x as u64) << 32) | (y as u64 & 0xffff_ffff);
                 let bits = EntropyManager::global().add_event(&mut RandomPool::global(), EntropyEventType::MouseClick, g.current_button() as u64, pos, &[], ENTROPY_MOUSECLICK);
                 if bits != 0 {
@@ -1847,6 +1877,8 @@ impl MainWindow {
             self.save_config();
         }
         self.core.borrow().write_rand_seed_file();
+        super::autotype::close_session();
+        crate::ui::hotkeys::deactivate();
         let tag = self.passw_box_tag.get();
         self.passw_box_tag.set(0);
         self.entry("PasswBox").set_text("");
@@ -1886,6 +1918,14 @@ impl MainWindow {
     /// (`FormActivate`).
     pub fn show_startup_errors(self: &Rc<Self>) {
         self.auto_check_updates();
+        let open_mng = {
+            let core = self.core.borrow();
+            core.config.database.open_window_on_startup || core.cmd.passw_db_file_name.is_some()
+        };
+        if open_mng {
+            let w = self.clone();
+            glib::idle_add_local_once(move || w.show_passw_manager());
+        }
         let errs: Vec<String> = self.core.borrow_mut().startup_errors.drain(..).collect();
         if !errs.is_empty() {
             let mut m = trl_format("%1 encountered %2 error(s) during startup:", &[PROGRAM_NAME, &errs.len().to_string()]);

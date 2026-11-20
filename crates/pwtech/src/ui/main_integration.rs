@@ -85,21 +85,64 @@ impl MainWindow {
         });
     }
 
-    /// `TPasswMngForm::AddPassw()`: add a password to the open database.
-    pub(super) fn add_passw_to_db(&self, passw: &str, show_dlg: bool, param: Option<&str>) {
-        let _ = (passw, show_dlg, param);
-        msg(Some(&self.win()), &trl("The password manager is not available yet in this version."), MsgIcon::Info);
+    /// Autotype for other windows (password manager).
+    pub fn send_keys_from(self: &Rc<Self>, parent: &gtk::Window, strokes: Vec<autotype::KeyStroke>, minimize: bool) {
+        self.send_keys(parent, strokes, minimize);
     }
 
-    /// `TPasswMngForm::SearchDbForKeyword()` (hot key action).
-    pub(super) fn search_db_for_keyword(self: &Rc<Self>, autotype: bool) {
-        let _ = autotype;
-        self.show_passw_manager();
+    /// The password manager window (created on first use).
+    pub fn passw_manager(self: &Rc<Self>) -> Rc<crate::ui::passw_manager::PasswManager> {
+        if let Some(m) = self.passw_mng.borrow().as_ref() {
+            return m.clone();
+        }
+        let m = crate::ui::passw_manager::PasswManager::new(self);
+        m.set_passw_enter_dlg(self.passw_enter());
+        *self.passw_mng.borrow_mut() = Some(m.clone());
+        m
+    }
+
+    /// `TPasswMngForm::AddPassw()`: add passwords to the open database
+    /// (`show_num`: report the number of added passwords).
+    pub(super) fn add_passw_to_db(self: &Rc<Self>, passw: &str, show_num: bool, param: Option<&str>) {
+        let _ = param;
+        let m = self.passw_manager();
+        if !m.is_db_open() {
+            return;
+        }
+        m.add_passw_to_db(passw, show_num);
     }
 
     /// `PasswMngBtnClick()`.
     pub(super) fn show_passw_manager(self: &Rc<Self>) {
-        msg(Some(&self.win()), &trl("The password manager is not available yet in this version."), MsgIcon::Info);
+        self.passw_manager().show();
+    }
+
+    /// `TPasswMngForm::SearchDbForKeyword()` (hot key action).
+    pub(super) fn search_db_for_keyword(self: &Rc<Self>, autotype: bool) {
+        self.passw_manager().search_db_for_keyword(autotype);
+    }
+
+    /// `OnEndSession()`: save the database and the configuration before the
+    /// session ends.
+    pub fn on_end_session(&self) {
+        let mng = self.passw_mng.borrow().clone();
+        if let Some(m) = mng {
+            m.save_db_on_shutdown();
+        }
+        if self.action_checked("MainMenu_Options_SaveSettingsOnExit") && !self.core.borrow().cmd.config_readonly {
+            self.save_config();
+        }
+        self.core.borrow().write_rand_seed_file();
+        if let Some(d) = self.tools.passw_enter.borrow().as_ref() {
+            d.clear_passw_cache();
+        }
+    }
+
+    /// User input in any window (idle lock of the database).
+    pub(super) fn notify_user_action(&self) {
+        if let Some(m) = self.passw_mng.borrow().as_ref() {
+            m.notify_user_action();
+        }
     }
 }
 

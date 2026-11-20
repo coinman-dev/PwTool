@@ -283,6 +283,9 @@ impl MainWindow {
         self.save_profile_editor_config(ini);
         self.save_char_set_builder_config(ini);
         self.save_mp_passw_gen_config(ini);
+        if let Some(m) = self.passw_mng.borrow().as_ref() {
+            m.save_config(ini);
+        }
         if let Some(pl) = self.passw_list.borrow().as_ref() {
             pl.save_config(ini);
         }

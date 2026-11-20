@@ -322,6 +322,14 @@ struct Ctx {
     image_lists: HashMap<String, Vec<Option<gdk::Texture>>>,
     image_sizes: HashMap<String, i32>,
     updowns: HashMap<String, Rc<UpDown>>,
+    /// Client size of the tab sheets of the page control being built.
+    sheet_size: (i64, i64),
+}
+
+/// `DesignSize` of a control (tab sheets have no `Width`/`Height`).
+fn design_size(o: &FormObj) -> Option<(i64, i64)> {
+    let l = o.props.get("DesignSize")?.get("list")?.as_array()?;
+    Some((l.first()?.as_i64()?, l.get(1)?.as_i64()?))
 }
 
 impl Ctx {
@@ -498,7 +506,12 @@ fn create(o: &FormObj, ctx: &mut Ctx, form_name: &str) -> Option<gtk::Widget> {
             bx.upcast()
         }
         "TGroupBox" | "TPanel" | "TTabSheet" | "TRadioGroup" | "TScrollBox" => {
-            let bx = VclBox::new(ctx.sc(o.int_or("Width", 100)), ctx.sc(o.int_or("Height", 100)));
+            let (dw, dh) = if o.class == "TTabSheet" {
+                design_size(o).unwrap_or(ctx.sheet_size)
+            } else {
+                (o.int_or("Width", 100), o.int_or("Height", 100))
+            };
+            let bx = VclBox::new(ctx.sc(dw), ctx.sc(dh));
             if o.class == "TGroupBox" || o.class == "TRadioGroup" {
                 let fr = gtk::Frame::new(Some(&strip_mnemonic(&caption)));
                 bx.put(&fr, 0, 0, ctx.sc(o.int_or("Width", 100)), ctx.sc(o.int_or("Height", 100)), 15, Align::None);
@@ -558,10 +571,17 @@ fn create(o: &FormObj, ctx: &mut Ctx, form_name: &str) -> Option<gtk::Widget> {
             // client area of the tab sheets (`TPageControl.DisplayRect`)
             let sheet_w = o.int_or("Width", 200) - 8;
             let sheet_h = o.int_or("Height", 200) - (ctx.form_text_height + 10) - 6;
+            ctx.sheet_size = o
+                .children
+                .iter()
+                .filter(|c| c.class == "TTabSheet")
+                .find_map(design_size)
+                .unwrap_or((sheet_w, sheet_h));
             for (i, sheet) in o.children.iter().filter(|c| c.class == "TTabSheet").enumerate() {
                 let mut sheet = sheet.clone();
-                sheet.props.entry("Width").or_insert(serde_json::json!(sheet_w));
-                sheet.props.entry("Height").or_insert(serde_json::json!(sheet_h));
+                let (sw, sh) = design_size(&sheet).unwrap_or(ctx.sheet_size);
+                sheet.props.entry("Width").or_insert(serde_json::json!(sw));
+                sheet.props.entry("Height").or_insert(serde_json::json!(sh));
                 let sheet = &sheet;
                 let page = create(sheet, ctx, form_name).unwrap();
                 let label = gtk::Label::with_mnemonic(&mnemonic(&tr_caption(sheet.str("Caption").unwrap_or(""))));
@@ -884,6 +904,7 @@ fn build_menu(
     actions: &gio::SimpleActionGroup,
     accels: &mut Vec<(String, String)>,
     maps: &mut MenuMaps,
+    prefix: &str,
 ) -> gio::Menu {
     let menu = gio::Menu::new();
     let mut section = gio::Menu::new();
@@ -910,19 +931,19 @@ fn build_menu(
         actions.add_action(&action);
         if let Some(sc) = it.int("ShortCut") {
             if let Some(a) = shortcut_to_accel(sc) {
-                accels.push((format!("m.{}", it.name), a));
+                accels.push((format!("{prefix}.{}", it.name), a));
             }
         }
         let has_sub = it.children.iter().any(|c| c.class == "TMenuItem");
         if has_sub {
-            let sub = build_menu(&it.children, actions, accels, maps);
+            let sub = build_menu(&it.children, actions, accels, maps, prefix);
             let mi = gio::MenuItem::new_submenu(Some(&label), &sub);
             mi.set_attribute_value("pwtech-name", Some(&it.name.to_variant()));
             maps.items.insert(it.name.clone(), (section.clone(), section.n_items(), mi.clone()));
             section.append_item(&mi);
             maps.submenus.insert(it.name.clone(), sub);
         } else {
-            let mi = gio::MenuItem::new(Some(&label), Some(&format!("m.{}", it.name)));
+            let mi = gio::MenuItem::new(Some(&label), Some(&format!("{prefix}.{}", it.name)));
             if !it.bool_or("Visible", true) {
                 mi.set_attribute_value("hidden-when", Some(&"action-missing".to_variant()));
             }
@@ -938,6 +959,13 @@ fn build_menu(
 
 /// Build a form. `form_name` is the name of the JSON form (for icons).
 pub fn build_form(form: FormObj, form_name: &str) -> Built {
+    build_form_with_prefix(form, form_name, "m")
+}
+
+/// Like [`build_form`], with menu actions in the action group `prefix`
+/// (insert [`Built::actions`] under that name) — windows whose menu item
+/// names collide with those of the main window use their own prefix.
+pub fn build_form_with_prefix(form: FormObj, form_name: &str, prefix: &str) -> Built {
     let scale = form_scale(&form);
     let mut ctx = Ctx {
         widgets: HashMap::new(),
@@ -949,6 +977,7 @@ pub fn build_form(form: FormObj, form_name: &str) -> Built {
         image_lists: HashMap::new(),
         image_sizes: HashMap::new(),
         updowns: HashMap::new(),
+        sheet_size: (100, 100),
     };
 
     // image lists: TVirtualImageList → collection images
@@ -1042,7 +1071,7 @@ pub fn build_form(form: FormObj, form_name: &str) -> Built {
     let mut maps = MenuMaps::default();
     for c in collect_all(&form) {
         if c.class == "TMainMenu" || c.class == "TPopupMenu" {
-            let m = build_menu(&c.children, &actions, &mut accels, &mut maps);
+            let m = build_menu(&c.children, &actions, &mut accels, &mut maps, prefix);
             menus.insert(c.name.clone(), m);
         }
     }

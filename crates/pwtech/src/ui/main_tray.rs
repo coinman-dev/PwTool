@@ -116,7 +116,7 @@ impl MainWindow {
             let Some(surface) = win.surface() else { return };
             let Ok(top) = surface.downcast::<gdk::Toplevel>() else { return };
             let w = w.clone();
-            top.connect_state_notify(move |t| {
+            top.connect_state_notify(move |t: &gdk::Toplevel| {
                 if let Some(w) = w.upgrade() {
                     if t.state().contains(gdk::ToplevelState::MINIMIZED) {
                         w.app_minimize();
@@ -128,7 +128,14 @@ impl MainWindow {
     }
 
     /// `AppMinimize()`.
-    fn app_minimize(&self) {
+    fn app_minimize(self: &Rc<Self>) {
+        // lock the database (`LockMinimize`)
+        if self.core.borrow().config.database.lock_minimize {
+            let mng = self.passw_mng.borrow().clone();
+            if let Some(m) = mng {
+                m.lock_if_open();
+            }
+        }
         if self.core.borrow().config.minimize_to_sys_tray && !self.tray.hidden.get() {
             self.tray.hidden.set(true);
             self.update_tray_icon();

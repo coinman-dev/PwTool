@@ -10,6 +10,7 @@ pub mod icons;
 pub mod layout;
 pub mod main_window;
 pub mod passw_enter;
+pub mod passw_manager;
 pub mod portal;
 pub mod quality_bar;
 pub mod tray;
@@ -33,6 +34,7 @@ pub fn run(cmd: CmdLineOptions) -> i32 {
     let app = gtk::Application::builder()
         .application_id(APP_ID)
         .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
+        .register_session(true)
         .build();
     let main: Rc<RefCell<Option<Rc<main_window::MainWindow>>>> = Rc::new(RefCell::new(None));
     let m = main.clone();
@@ -63,6 +65,13 @@ pub fn run(cmd: CmdLineOptions) -> i32 {
                 }
             });
         }
+        // session end (`OnQueryEndSession()` / `OnEndSession()`)
+        let w4 = Rc::downgrade(&w);
+        app.connect_query_end(move |_| {
+            if let Some(w) = w4.upgrade() {
+                w.on_end_session();
+            }
+        });
         *m.borrow_mut() = Some(w);
     });
     let code = app.run_with_args::<&str>(&[]);
@@ -173,6 +182,7 @@ fn automate(w: Rc<main_window::MainWindow>, script: String) {
                         app.quit();
                     }
                 }
+                c if c.starts_with("pm") && passw_manager::automation::automate(&w, c, rest) => {}
                 _ => eprintln!("automate: unknown command {cmd}"),
             }
             glib::timeout_future(std::time::Duration::from_millis(150)).await;
