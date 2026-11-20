@@ -202,3 +202,19 @@ pub fn stop_watching(app: &gtk::Application) {
         );
     }
 }
+
+/// `TrayMenu_ResetWindowPosClick()`: move all windows of this process to
+/// the top left corner of the work area.
+pub async fn reset_window_positions(app: &gtk::Application) -> bool {
+    let pid = std::process::id();
+    let script = format!(
+        "var list = workspace.windowList ? workspace.windowList() : workspace.clientList();\n\
+         for (var i = 0; i < list.length; i++) {{\n\
+           var w = list[i]; if (w.pid != {pid}) continue;\n\
+           var a = workspace.clientArea(KWin.MaximizeArea, w);\n\
+           var g = w.frameGeometry;\n\
+           w.frameGeometry = {{x: a.x, y: a.y, width: g.width, height: g.height}};\n\
+         }}\n"
+    );
+    run_kwin_script(app, &script, false).await.is_some()
+}

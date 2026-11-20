@@ -155,6 +155,13 @@ impl MainWindow {
                 w.upgrade().map(|w| Zeroizing::new(w.entry("PasswBox").text().to_string())).unwrap_or_default()
             });
         }
+        self.act("TrayMenu_ResetWindowPos", |w| {
+            if let Some(app) = w.window.application() {
+                glib::spawn_future_local(async move {
+                    crate::ui::active_window::reset_window_positions(&app).await;
+                });
+            }
+        });
         // Always on Top (`TopMostManager`): KWin keeps the windows above
         self.act("MainMenu_Options_AlwaysOnTop", |w| {
             w.tools.top_windows.set(0);
