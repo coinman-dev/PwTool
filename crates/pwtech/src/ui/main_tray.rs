@@ -36,6 +36,7 @@ pub(super) struct TrayState {
     title: RefCell<String>,
     icon_name: RefCell<String>,
     last_spawn_failure: Cell<Option<std::time::Instant>>,
+    menu_disabled: Cell<bool>,
 }
 
 impl TrayState {
@@ -49,6 +50,7 @@ impl TrayState {
             title: RefCell::new(String::new()),
             icon_name: RefCell::new(String::new()),
             last_spawn_failure: Cell::new(None),
+            menu_disabled: Cell::new(false),
         }
     }
 }
@@ -238,9 +240,20 @@ impl MainWindow {
         }
     }
 
-    /// Called by the main timer: keep the tray title in sync.
+    /// Called by the main timer: keep the tray title in sync; disable the
+    /// tray menu while a modal dialog is open or a generation is running
+    /// (`TrayMenuPopup()`).
     pub(super) fn tray_timer(&self) {
         if let Some(t) = self.tray.icon.borrow().as_ref() {
+            let busy = self.generating.get()
+                || gtk::Window::list_toplevels()
+                    .into_iter()
+                    .filter_map(|x| x.downcast::<gtk::Window>().ok())
+                    .any(|x| x.is_visible() && x.is_modal());
+            if busy != self.tray.menu_disabled.get() {
+                self.tray.menu_disabled.set(busy);
+                t.set_enabled(!busy);
+            }
             let title = self.window.title().map(|t| t.to_string()).unwrap_or_default();
             if *self.tray.title.borrow() != title {
                 t.set_title(&title);
