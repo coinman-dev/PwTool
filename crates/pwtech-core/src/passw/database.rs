@@ -19,9 +19,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
-use flate2::Compression;
 use flate2::read::ZlibDecoder;
-use flate2::write::ZlibEncoder;
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::crypto::chacha::ChaCha;
@@ -68,6 +66,28 @@ const DB_RECOVERY_KEY_BLOCK_LENGTH: usize = 2 * (DB_SALT_LENGTH + DB_KEY_LENGTH)
 const HASH_SHA256: u8 = 0;
 const HASH_SHA512: u8 = 1;
 const KDF_PBKDF2_SHA256: u8 = 0;
+
+unsafe extern "C" {
+    fn mz_compress2(dest: *mut u8, dest_len: *mut std::ffi::c_ulong, src: *const u8, src_len: std::ffi::c_ulong, level: i32) -> i32;
+    fn mz_compressBound(src_len: std::ffi::c_ulong) -> std::ffi::c_ulong;
+}
+
+/// zlib stream of `data` produced by miniz (the library of the original,
+/// `Deflate` of `DataCompressor.h`), so that files are byte-identical.
+fn miniz_compress(data: &[u8], level: i32) -> io::Result<Zeroizing<Vec<u8>>> {
+    // SAFETY: the buffers are valid for the given lengths; miniz writes at
+    // most `dest_len` bytes and updates it.
+    unsafe {
+        let mut dest_len = mz_compressBound(data.len() as std::ffi::c_ulong);
+        let mut out = Zeroizing::new(vec![0u8; dest_len as usize]);
+        let rc = mz_compress2(out.as_mut_ptr(), &mut dest_len, data.as_ptr(), data.len() as std::ffi::c_ulong, level);
+        if rc != 0 {
+            return Err(io::Error::other("deflate() failed"));
+        }
+        out.truncate(dest_len as usize);
+        Ok(out)
+    }
+}
 
 /// Default compression level of miniz (`MZ_DEFAULT_LEVEL`).
 const MZ_DEFAULT_LEVEL: i32 = 6;
@@ -1386,12 +1406,7 @@ impl PasswDatabase {
         header.uncompressed_size = (buf.len() - DB_HEADER_SIZE) as u32;
         header.compressed_size = header.uncompressed_size;
         if self.compressed {
-            let mut enc = ZlibEncoder::new(
-                Vec::with_capacity(buf.len()),
-                Compression::new(header.compression_level as u32),
-            );
-            enc.write_all(&buf[DB_HEADER_SIZE..])?;
-            let compr = Zeroizing::new(enc.finish()?);
+            let compr = miniz_compress(&buf[DB_HEADER_SIZE..], header.compression_level as i32)?;
             let mut nb = Zeroizing::new(Vec::with_capacity(DB_HEADER_SIZE + compr.len() + 16));
             nb.extend_from_slice(&[0u8; DB_HEADER_SIZE]);
             nb.extend_from_slice(&compr);

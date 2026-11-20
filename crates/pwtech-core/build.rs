@@ -13,6 +13,19 @@ fn main() {
         .warnings(false)
         .compile("minilzo");
 
+    // miniz 3.0.0 by Rich Geldreich (MIT licence), identical to
+    // upstream/src/miniz. Used for the compression of password databases,
+    // so that compressed files are byte-identical to the original's.
+    cc::Build::new()
+        .file("csrc/miniz/miniz.c")
+        .include("csrc/miniz")
+        .define("MINIZ_NO_STDIO", None)
+        .define("MINIZ_NO_TIME", None)
+        .define("MINIZ_NO_ARCHIVE_APIS", None)
+        .define("MINIZ_NO_ZLIB_COMPATIBLE_NAMES", None)
+        .warnings(false)
+        .compile("miniz");
+
     // zxcvbn-c by Tony Evans (MIT licence), identical to upstream/src/zxcvbn,
     // with the dictionary compiled in. Used for "advanced password strength
     // estimation".

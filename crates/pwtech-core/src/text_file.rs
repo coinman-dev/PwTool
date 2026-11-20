@@ -118,6 +118,56 @@ pub fn split_tokens<'a>(text: &'a str, seps: &'a [char]) -> impl Iterator<Item =
     text.split(move |c: char| seps.contains(&c))
 }
 
+/// Tokens as returned by `TStringFileStreamW::ReadString()` with a buffer of
+/// `buf_size` UTF-16 code units (including the terminating zero): a token
+/// and its separator (if one follows) must fit into `buf_size - 1` units;
+/// otherwise reading fails for 8-bit encodings ("Invalid ANSI or UTF-8
+/// character encoding, or Unicode string too long") and the token is
+/// truncated for UTF-16. The separator itself is not part of the tokens.
+pub fn read_string_tokens<'a>(
+    text: &'a str,
+    seps: &[char],
+    enc: CharEncoding,
+    buf_size: usize,
+) -> io::Result<Vec<std::borrow::Cow<'a, str>>> {
+    let max = buf_size.saturating_sub(1);
+    let mut out = Vec::new();
+    let mut rest = text;
+    while !rest.is_empty() {
+        let (token, has_sep, next) = match rest.char_indices().find(|(_, c)| seps.contains(c)) {
+            Some((i, c)) => (&rest[..i], true, &rest[i + c.len_utf8()..]),
+            None => (rest, false, ""),
+        };
+        let units = crate::unicode::utf16_len(token) + has_sep as usize;
+        if units > max {
+            match enc {
+                CharEncoding::Ansi | CharEncoding::Utf8 => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "Invalid ANSI or UTF-8 character encoding, or Unicode string too long",
+                    ));
+                }
+                _ => {
+                    let mut n = 0;
+                    let mut end = 0;
+                    for (i, ch) in token.char_indices() {
+                        n += ch.len_utf16();
+                        if n > max {
+                            break;
+                        }
+                        end = i + ch.len_utf8();
+                    }
+                    out.push(std::borrow::Cow::Borrowed(&token[..end]));
+                }
+            }
+        } else {
+            out.push(std::borrow::Cow::Borrowed(token));
+        }
+        rest = next;
+    }
+    Ok(out)
+}
+
 /// Encode text for writing in the given encoding (without BOM).
 pub fn encode_text(text: &str, enc: CharEncoding) -> Zeroizing<Vec<u8>> {
     Zeroizing::new(match enc {
@@ -128,6 +178,172 @@ pub fn encode_text(text: &str, enc: CharEncoding) -> Zeroizing<Vec<u8>> {
     })
 }
 
+/// Accented Latin letters (U+00C0..U+017F) and their base letters (from the
+/// canonical decomposition), as mapped by Windows' best-fit tables.
+const BEST_FIT_LATIN: &[(char, u8)] = &[
+    ('\u{00c0}', b'A'),
+    ('\u{00c1}', b'A'),
+    ('\u{00c2}', b'A'),
+    ('\u{00c3}', b'A'),
+    ('\u{00c4}', b'A'),
+    ('\u{00c5}', b'A'),
+    ('\u{00c7}', b'C'),
+    ('\u{00c8}', b'E'),
+    ('\u{00c9}', b'E'),
+    ('\u{00ca}', b'E'),
+    ('\u{00cb}', b'E'),
+    ('\u{00cc}', b'I'),
+    ('\u{00cd}', b'I'),
+    ('\u{00ce}', b'I'),
+    ('\u{00cf}', b'I'),
+    ('\u{00d1}', b'N'),
+    ('\u{00d2}', b'O'),
+    ('\u{00d3}', b'O'),
+    ('\u{00d4}', b'O'),
+    ('\u{00d5}', b'O'),
+    ('\u{00d6}', b'O'),
+    ('\u{00d9}', b'U'),
+    ('\u{00da}', b'U'),
+    ('\u{00db}', b'U'),
+    ('\u{00dc}', b'U'),
+    ('\u{00dd}', b'Y'),
+    ('\u{00e0}', b'a'),
+    ('\u{00e1}', b'a'),
+    ('\u{00e2}', b'a'),
+    ('\u{00e3}', b'a'),
+    ('\u{00e4}', b'a'),
+    ('\u{00e5}', b'a'),
+    ('\u{00e7}', b'c'),
+    ('\u{00e8}', b'e'),
+    ('\u{00e9}', b'e'),
+    ('\u{00ea}', b'e'),
+    ('\u{00eb}', b'e'),
+    ('\u{00ec}', b'i'),
+    ('\u{00ed}', b'i'),
+    ('\u{00ee}', b'i'),
+    ('\u{00ef}', b'i'),
+    ('\u{00f1}', b'n'),
+    ('\u{00f2}', b'o'),
+    ('\u{00f3}', b'o'),
+    ('\u{00f4}', b'o'),
+    ('\u{00f5}', b'o'),
+    ('\u{00f6}', b'o'),
+    ('\u{00f9}', b'u'),
+    ('\u{00fa}', b'u'),
+    ('\u{00fb}', b'u'),
+    ('\u{00fc}', b'u'),
+    ('\u{00fd}', b'y'),
+    ('\u{00ff}', b'y'),
+    ('\u{0100}', b'A'),
+    ('\u{0101}', b'a'),
+    ('\u{0102}', b'A'),
+    ('\u{0103}', b'a'),
+    ('\u{0104}', b'A'),
+    ('\u{0105}', b'a'),
+    ('\u{0106}', b'C'),
+    ('\u{0107}', b'c'),
+    ('\u{0108}', b'C'),
+    ('\u{0109}', b'c'),
+    ('\u{010a}', b'C'),
+    ('\u{010b}', b'c'),
+    ('\u{010c}', b'C'),
+    ('\u{010d}', b'c'),
+    ('\u{010e}', b'D'),
+    ('\u{010f}', b'd'),
+    ('\u{0112}', b'E'),
+    ('\u{0113}', b'e'),
+    ('\u{0114}', b'E'),
+    ('\u{0115}', b'e'),
+    ('\u{0116}', b'E'),
+    ('\u{0117}', b'e'),
+    ('\u{0118}', b'E'),
+    ('\u{0119}', b'e'),
+    ('\u{011a}', b'E'),
+    ('\u{011b}', b'e'),
+    ('\u{011c}', b'G'),
+    ('\u{011d}', b'g'),
+    ('\u{011e}', b'G'),
+    ('\u{011f}', b'g'),
+    ('\u{0120}', b'G'),
+    ('\u{0121}', b'g'),
+    ('\u{0122}', b'G'),
+    ('\u{0123}', b'g'),
+    ('\u{0124}', b'H'),
+    ('\u{0125}', b'h'),
+    ('\u{0128}', b'I'),
+    ('\u{0129}', b'i'),
+    ('\u{012a}', b'I'),
+    ('\u{012b}', b'i'),
+    ('\u{012c}', b'I'),
+    ('\u{012d}', b'i'),
+    ('\u{012e}', b'I'),
+    ('\u{012f}', b'i'),
+    ('\u{0130}', b'I'),
+    ('\u{0134}', b'J'),
+    ('\u{0135}', b'j'),
+    ('\u{0136}', b'K'),
+    ('\u{0137}', b'k'),
+    ('\u{0139}', b'L'),
+    ('\u{013a}', b'l'),
+    ('\u{013b}', b'L'),
+    ('\u{013c}', b'l'),
+    ('\u{013d}', b'L'),
+    ('\u{013e}', b'l'),
+    ('\u{0143}', b'N'),
+    ('\u{0144}', b'n'),
+    ('\u{0145}', b'N'),
+    ('\u{0146}', b'n'),
+    ('\u{0147}', b'N'),
+    ('\u{0148}', b'n'),
+    ('\u{014c}', b'O'),
+    ('\u{014d}', b'o'),
+    ('\u{014e}', b'O'),
+    ('\u{014f}', b'o'),
+    ('\u{0150}', b'O'),
+    ('\u{0151}', b'o'),
+    ('\u{0154}', b'R'),
+    ('\u{0155}', b'r'),
+    ('\u{0156}', b'R'),
+    ('\u{0157}', b'r'),
+    ('\u{0158}', b'R'),
+    ('\u{0159}', b'r'),
+    ('\u{015a}', b'S'),
+    ('\u{015b}', b's'),
+    ('\u{015c}', b'S'),
+    ('\u{015d}', b's'),
+    ('\u{015e}', b'S'),
+    ('\u{015f}', b's'),
+    ('\u{0160}', b'S'),
+    ('\u{0161}', b's'),
+    ('\u{0162}', b'T'),
+    ('\u{0163}', b't'),
+    ('\u{0164}', b'T'),
+    ('\u{0165}', b't'),
+    ('\u{0168}', b'U'),
+    ('\u{0169}', b'u'),
+    ('\u{016a}', b'U'),
+    ('\u{016b}', b'u'),
+    ('\u{016c}', b'U'),
+    ('\u{016d}', b'u'),
+    ('\u{016e}', b'U'),
+    ('\u{016f}', b'u'),
+    ('\u{0170}', b'U'),
+    ('\u{0171}', b'u'),
+    ('\u{0172}', b'U'),
+    ('\u{0173}', b'u'),
+    ('\u{0174}', b'W'),
+    ('\u{0175}', b'w'),
+    ('\u{0176}', b'Y'),
+    ('\u{0177}', b'y'),
+    ('\u{0178}', b'Y'),
+    ('\u{0179}', b'Z'),
+    ('\u{017a}', b'z'),
+    ('\u{017b}', b'Z'),
+    ('\u{017c}', b'z'),
+    ('\u{017d}', b'Z'),
+    ('\u{017e}', b'z'),
+];
+
 /// Encode text in the ANSI code page, replacing unmappable characters with
 /// `?` (`WideCharToMultiByte(CP_ACP, 0, …)` without a default char).
 pub fn ansi_encode_lossy(text: &str) -> Zeroizing<Vec<u8>> {
@@ -137,7 +353,12 @@ pub fn ansi_encode_lossy(text: &str) -> Zeroizing<Vec<u8>> {
     for c in text.chars() {
         let (bytes, _, had_errors) = enc.encode(c.encode_utf8(&mut buf));
         if had_errors {
-            out.push(b'?');
+            // Windows' "best fit" mapping: accented Latin letters become the
+            // base letter (e.g. 'ä' -> 'a' in code page 1251)
+            match BEST_FIT_LATIN.binary_search_by_key(&c, |&(k, _)| k) {
+                Ok(i) => out.push(BEST_FIT_LATIN[i].1),
+                Err(_) => out.push(b'?'),
+            }
         } else {
             out.extend_from_slice(&bytes);
         }
@@ -204,6 +425,12 @@ mod tests {
 
     #[test]
     fn tokens() {
+        let t = read_string_tokens("aa bb x", &[' '], CharEncoding::Utf8, 4).unwrap();
+        assert_eq!(t, vec!["aa", "bb", "x"]);
+        // the last token without separator may use the whole buffer
+        assert!(read_string_tokens("aaa", &[' '], CharEncoding::Utf8, 4).is_ok());
+        assert!(read_string_tokens("aaa b", &[' '], CharEncoding::Utf8, 4).is_err());
+        assert_eq!(read_string_tokens("aaaa b", &[' '], CharEncoding::Utf16, 4).unwrap(), vec!["aaa", "b"]);
         let v: Vec<&str> = split_tokens("a b\tc\r\n\nd", &['\n', '\t', ' ']).collect();
         assert_eq!(v, ["a", "b", "c\r", "", "d"]);
     }

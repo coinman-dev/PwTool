@@ -21,7 +21,7 @@ use zeroize::Zeroizing;
 
 use super::tables::{DICEWARE8K, PHONETIC_ENTROPY, PHONETIC_SIGMA, PHONETIC_TRIS};
 use crate::random::{RandomGenerator, permute};
-use crate::text_file::{CharEncoding, read_text_file, split_tokens};
+use crate::text_file::{CharEncoding, read_text_file};
 use crate::unicode::{SecureW32String, W32, W32String, ascii_to_w32, char_to_w32, str_to_w32, w32_to_string};
 
 pub const WORDLIST_DEFAULT_SIZE: i32 = 8192;
@@ -739,38 +739,12 @@ impl PasswordGenerator {
             let max = max_word_len.max(min);
             let mut seen: HashSet<W32String> = HashSet::new();
             let mut list: Vec<W32String> = Vec::new();
-            for token in split_tokens(&text, &['\n', '\t', ' ']) {
+            let tokens = crate::text_file::read_string_tokens(&text, &['\n', '\t', ' '], enc, 1024)
+                .map_err(WordListError::Io)?;
+            for token in tokens {
                 if list.len() >= WORDLIST_MAX_SIZE {
                     break;
                 }
-                // ReadString() reads at most 1023 UTF-16 code units per token
-                // (including the separator); longer tokens are an error for
-                // 8-bit encodings and are truncated for UTF-16.
-                let units = crate::unicode::utf16_len(token) + 1;
-                let token: std::borrow::Cow<str> = if units > 1023 {
-                    match enc {
-                        CharEncoding::Ansi | CharEncoding::Utf8 => {
-                            return Err(WordListError::Io(io::Error::new(
-                                io::ErrorKind::InvalidData,
-                                "Invalid ANSI or UTF-8 character encoding, or Unicode string too long",
-                            )));
-                        }
-                        _ => {
-                            let mut s = String::new();
-                            let mut n = 0;
-                            for ch in token.chars() {
-                                n += ch.len_utf16();
-                                if n > 1023 {
-                                    break;
-                                }
-                                s.push(ch);
-                            }
-                            s.into()
-                        }
-                    }
-                } else {
-                    token.into()
-                };
                 let word = crate::unicode::vcl_trim(&token);
                 if word.is_empty() {
                     continue;
@@ -1508,11 +1482,11 @@ impl PasswordGenerator {
     /// `CreateTrigramFile()`: count letter trigrams of a word list and write a
     /// trigram file. Returns (number of trigrams, entropy per letter).
     pub fn create_trigram_file(src: &Path, dest: &Path, default_enc: CharEncoding) -> Result<(u32, f64), TrigramError> {
-        let (text, _) = read_text_file(src, default_enc)?;
+        let (text, enc) = read_text_file(src, default_enc)?;
         let mut tris = vec![0u32; PHONETIC_TRIS_NUM];
         let mut sigma: u32 = 0;
-        for token in split_tokens(&text, &['\n', '\t', ' ']) {
-            let word = crate::unicode::vcl_trim(token);
+        for token in crate::text_file::read_string_tokens(&text, &['\n', '\t', ' '], enc, 1024)? {
+            let word = crate::unicode::vcl_trim(&token);
             if crate::unicode::utf16_len(word) < 3 {
                 continue;
             }
@@ -1598,13 +1572,19 @@ impl PasswordGenerator {
             return 0.0;
         }
         let p = Zeroizing::new(str_to_w32(passw));
+        // The original iterates over the number of UTF-16 code units
+        // (`wcslen`) while reading the shorter W32 string: for characters
+        // outside the BMP the last iterations read the zero terminator and
+        // the zero-initialized rest of the buffer. Reproduced 1:1.
+        let n16 = crate::unicode::utf16_len(passw);
+        let at = |i: usize| -> W32 { p.get(i).copied().unwrap_or(0) };
         let mut chcount: HashMap<W32, i32> = HashMap::new();
         let mut chdiff: HashMap<i32, i32> = HashMap::new();
         let (mut control, mut upper, mut lower, mut digits, mut special) = (false, false, false, false, false);
         let mut char_space = 0i32;
         let mut eff_len = 0.0f64;
-        for i in 0..p.len() {
-            let c = p[i];
+        for i in 0..n16 {
+            let c = at(i);
             let mut other = false;
             let r = |a: u8, b: u8| (a as u32..=b as u32).contains(&c);
             if c > 0 && c < b' ' as u32 {
@@ -1622,7 +1602,7 @@ impl PasswordGenerator {
             }
             let mut diff_factor = 1.0f64;
             if i > 0 {
-                let diff = c.wrapping_sub(p[i - 1]) as i32;
+                let diff = c.wrapping_sub(at(i - 1)) as i32;
                 let e = chdiff.entry(diff).or_insert(0);
                 *e += 1;
                 diff_factor /= *e as f64;

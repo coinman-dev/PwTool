@@ -180,6 +180,8 @@ pub struct RandomPool {
     num_blocks: u64,
     key_set: bool,
     fast_rng: Option<Jsf32>,
+    /// Test hook, see [`RandomPool::set_deterministic_source`].
+    det_source: Option<Box<dyn RandomGenerator>>,
 }
 
 static GLOBAL: LazyLock<Mutex<RandomPool>> = LazyLock::new(|| {
@@ -203,6 +205,7 @@ impl RandomPool {
             num_blocks: 0,
             key_set: false,
             fast_rng,
+            det_source: None,
         };
         let mut noise = Zeroizing::new(vec![0u8; PAGE_SIZE]);
         pool.clear_buf(&mut noise);
@@ -230,6 +233,15 @@ impl RandomPool {
         p.add_data(&entropy[..]);
         src.flush();
         p
+    }
+
+    /// Test hook: while set, [`get_data`](RandomGenerator::get_data) and
+    /// [`get_byte`](RandomGenerator::get_byte) return the output of `src`
+    /// instead of the pool's own (the pool state is otherwise unaffected).
+    /// Makes salts, IVs and padding reproducible for comparisons with the
+    /// original; `None` restores normal operation. Not used by the program.
+    pub fn set_deterministic_source(&mut self, src: Option<Box<dyn RandomGenerator>>) {
+        self.det_source = src;
     }
 
     /// Whether the page could be locked into RAM.
@@ -534,6 +546,10 @@ impl RandomGenerator for RandomPool {
 
     /// `GetData()`.
     fn get_data(&mut self, buf: &mut [u8]) {
+        if let Some(src) = self.det_source.as_mut() {
+            src.get_data(buf);
+            return;
+        }
         if !self.key_set {
             self.set_key();
         }
@@ -565,6 +581,9 @@ impl RandomGenerator for RandomPool {
     }
 
     fn get_byte(&mut self) -> u8 {
+        if let Some(src) = self.det_source.as_mut() {
+            return src.get_byte();
+        }
         if !self.key_set {
             self.set_key();
         }
