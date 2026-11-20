@@ -47,20 +47,21 @@ async fn call(conn: &gio::DBusConnection, path: &str, iface: &str, method: &str,
         .ok()
 }
 
-/// Caption of the active window, `None` if it cannot be determined (no
-/// KWin, or the session bus is not available).
-pub async fn active_window_title(app: &gtk::Application) -> Option<String> {
+/// Load and run a KWin script (`body` is JavaScript); returns whether KWin
+/// accepted it. `wait_report` waits up to 2 s for a `Report` call of the
+/// script and returns its argument.
+async fn run_kwin_script(app: &gtk::Application, body: &str, wait_report: bool) -> Option<String> {
     let conn = app.dbus_connection()?;
-    let name = app.application_id()?;
-    let rx = receiver(&conn)?;
-    while rx.try_recv().is_ok() {}
+    let rx = if wait_report {
+        let rx = receiver(&conn)?;
+        while rx.try_recv().is_ok() {}
+        Some(rx)
+    } else {
+        None
+    };
     let dir = glib::user_runtime_dir();
-    let file = dir.join(format!("pwtech-active-window-{}.js", std::process::id()));
-    let script = format!(
-        "var w = workspace.activeWindow || workspace.activeClient;\n\
-         callDBus(\"{name}\", \"{OBJ_PATH}\", \"{IFACE}\", \"Report\", w ? String(w.caption) : \"\");\n"
-    );
-    std::fs::write(&file, script).ok()?;
+    let file = dir.join(format!("pwtech-kwin-{}.js", std::process::id()));
+    std::fs::write(&file, body).ok()?;
     // unload a script left over from an earlier call
     let _ = call(&conn, "/Scripting", "org.kde.kwin.Scripting", "unloadScript", Some(&(PLUGIN,).to_variant())).await;
     let id = call(
@@ -77,17 +78,19 @@ pub async fn active_window_title(app: &gtk::Application) -> Option<String> {
         Some(id) if id >= 0 => {
             let ran = call(&conn, &format!("/Scripting/Script{id}"), "org.kde.kwin.Script", "run", None).await.is_some()
                 || call(&conn, &format!("/{id}"), "org.kde.kwin.Script", "run", None).await.is_some();
-            if ran {
-                let timeout = glib::timeout_future(std::time::Duration::from_millis(2000));
-                futures_util::pin_mut!(timeout);
-                let recv = rx.recv();
-                futures_util::pin_mut!(recv);
-                match futures_util::future::select(recv, timeout).await {
-                    futures_util::future::Either::Left((Ok(c), _)) => Some(c),
-                    _ => None,
+            match (ran, rx) {
+                (false, _) => None,
+                (true, None) => Some(String::new()),
+                (true, Some(rx)) => {
+                    let timeout = glib::timeout_future(std::time::Duration::from_millis(2000));
+                    futures_util::pin_mut!(timeout);
+                    let recv = rx.recv();
+                    futures_util::pin_mut!(recv);
+                    match futures_util::future::select(recv, timeout).await {
+                        futures_util::future::Either::Left((Ok(c), _)) => Some(c),
+                        _ => None,
+                    }
                 }
-            } else {
-                None
             }
         }
         _ => None,
@@ -95,4 +98,26 @@ pub async fn active_window_title(app: &gtk::Application) -> Option<String> {
     let _ = call(&conn, "/Scripting", "org.kde.kwin.Scripting", "unloadScript", Some(&(PLUGIN,).to_variant())).await;
     let _ = std::fs::remove_file(&file);
     result
+}
+
+/// Caption of the active window, `None` if it cannot be determined (no
+/// KWin, or the session bus is not available).
+pub async fn active_window_title(app: &gtk::Application) -> Option<String> {
+    let name = app.application_id()?;
+    let script = format!(
+        "var w = workspace.activeWindow || workspace.activeClient;\n\
+         callDBus(\"{name}\", \"{OBJ_PATH}\", \"{IFACE}\", \"Report\", w ? String(w.caption) : \"\");\n"
+    );
+    run_kwin_script(app, &script, true).await
+}
+
+/// "Always on Top" for all windows of this process (KWin `keepAbove`).
+/// Returns `false` if KWin is not available.
+pub async fn set_keep_above(app: &gtk::Application, above: bool) -> bool {
+    let pid = std::process::id();
+    let script = format!(
+        "var list = workspace.windowList ? workspace.windowList() : workspace.clientList();\n\
+         for (var i = 0; i < list.length; i++) {{ if (list[i].pid == {pid}) list[i].keepAbove = {above}; }}\n"
+    );
+    run_kwin_script(app, &script, false).await.is_some()
 }

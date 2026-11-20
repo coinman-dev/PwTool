@@ -28,6 +28,8 @@ pub(super) struct ToolsState {
     profile_accels: RefCell<Vec<String>>,
     last_cache_countdown: Cell<i64>,
     last_total_bits: Cell<i64>,
+    /// Number of visible windows when "Always on Top" was last applied.
+    top_windows: Cell<usize>,
     /// Font of the password boxes set by the user.
     pub passw_font: RefCell<Option<crate::ui::util::FontSpec>>,
 }
@@ -48,6 +50,7 @@ impl ToolsState {
             profile_accels: RefCell::new(Vec::new()),
             last_cache_countdown: Cell::new(-1),
             last_total_bits: Cell::new(-1),
+            top_windows: Cell::new(0),
             passw_font: RefCell::new(None),
         }
     }
@@ -152,10 +155,11 @@ impl MainWindow {
                 w.upgrade().map(|w| Zeroizing::new(w.entry("PasswBox").text().to_string())).unwrap_or_default()
             });
         }
-        // Always on Top: not possible on Wayland
-        if gdk::Display::default().is_some_and(|d| d.type_().name().contains("Wayland")) {
-            self.b.action("MainMenu_Options_AlwaysOnTop").set_enabled(false);
-        }
+        // Always on Top (`TopMostManager`): KWin keeps the windows above
+        self.act("MainMenu_Options_AlwaysOnTop", |w| {
+            w.tools.top_windows.set(0);
+            w.apply_always_on_top();
+        });
         // password box font
         self.entry("PasswBox").add_css_class(PASSW_FONT_CLASS);
         if let Some(f) = crate::ui::util::FontSpec::parse(&self.core.borrow().ini.read_string("Main", "PasswBoxFont", "")) {
@@ -269,9 +273,37 @@ impl MainWindow {
     }
 
     /// Called every second by the main timer.
-    pub(super) fn tools_timer(&self) {
+    pub(super) fn tools_timer(self: &Rc<Self>) {
         self.update_passw_cache_menu();
         self.update_total_ent_bits_menu();
+        // new windows also have to stay on top
+        if self.action_checked("MainMenu_Options_AlwaysOnTop") {
+            let n = gtk::Window::list_toplevels()
+                .into_iter()
+                .filter_map(|x| x.downcast::<gtk::Window>().ok())
+                .filter(|x| x.is_visible())
+                .count();
+            if n != self.tools.top_windows.get() {
+                self.tools.top_windows.set(n);
+                self.apply_always_on_top();
+            }
+        }
+    }
+
+    /// `MainMenu_Options_AlwaysOnTopClick()`.
+    fn apply_always_on_top(self: &Rc<Self>) {
+        let above = self.action_checked("MainMenu_Options_AlwaysOnTop");
+        let Some(app) = self.window.application() else { return };
+        let w = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            if !crate::ui::active_window::set_keep_above(&app, above).await {
+                if let Some(w) = w.upgrade() {
+                    // no KWin: the function is not available
+                    w.set_action_checked("MainMenu_Options_AlwaysOnTop", false);
+                    w.b.action("MainMenu_Options_AlwaysOnTop").set_enabled(false);
+                }
+            }
+        });
     }
 
     pub(super) fn passw_enter(self: &Rc<Self>) -> Rc<PasswEnterDlg> {

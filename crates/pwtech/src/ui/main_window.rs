@@ -632,8 +632,6 @@ impl MainWindow {
             w.update_entropy_progress(true);
         });
         self.act("MainMenu_Options_SaveSettingsOnExit", |_| {});
-        self.act("MainMenu_Options_AlwaysOnTop", |_| {});
-        self.act("MainMenu_Options_ClearPasswCache", |_| {});
         self.act("PasswBoxMenu_Editable", |w| {
             w.entry("PasswBox").set_editable(w.action_checked("PasswBoxMenu_Editable"));
         });
