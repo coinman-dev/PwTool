@@ -1236,7 +1236,7 @@ dependencies = [
 
 [[package]]
 name = "pwtool"
-version = "0.1.0"
+version = "0.1.0-beta"
 dependencies = [
  "ashpd",
  "async-channel",
@@ -1251,7 +1251,7 @@ dependencies = [
 
 [[package]]
 name = "pwtool-core"
-version = "0.1.0"
+version = "0.1.0-beta"
 dependencies = [
  "aes",
  "blake2",

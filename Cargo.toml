@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/pwtool-core", "crates/pwtool"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.0-beta"
 edition = "2024"
 license = "GPL-2.0-or-later"
 rust-version = "1.90"

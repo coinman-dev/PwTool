@@ -1,59 +1,146 @@
-# Password Tool (PwTool)
+[English](README.md) | [Русский](README.ru_RU.md)
 
-**Password Tool** — генератор и менеджер паролей для Linux. Это перенос [Password Tech](https://github.com/cthoeing/PasswordTech) 3.6.1 (автор — Christian Thöing, программа для Windows) на Rust и GTK4 с максимальным сохранением поведения оригинала: те же окна, алгоритмы с теми же результатами, совместимые файлы баз паролей, настроек и переводов.
+<p align="center">
+  <img src="assets/about_logo.png" alt="Password Tool" width="160">
+</p>
 
-Password Tool не связан с автором оригинала; ошибки порта сообщайте сюда: <https://github.com/coinman-dev/PwTool/issues>.
+<h1 align="center">Password Tool</h1>
+<p align="center">Cryptographically secure password generator and encrypted password manager for Linux.</p>
 
-Состояние: перенесены генератор паролей со всеми окнами, менеджер паролей PassCube (файлы `.pwdb` совместимы с оригиналом в обе стороны), шифрование текста, MP-генератор, консольный режим, переводы (13 языков). План, опись функций и описание форматов — в `.ai/` (`PLAN.md`, `PARITY.md`, `FORMATS.md`); отличия от оригинала — `PLAN.md`, раздел 7.
+[![Release](https://img.shields.io/badge/release-0.1.0--beta-orange)](https://github.com/coinman-dev/PwTool/releases/tag/v0.1.0-beta)
+[![Build](https://github.com/coinman-dev/PwTool/actions/workflows/release.yml/badge.svg)](https://github.com/coinman-dev/PwTool/actions/workflows/release.yml)
+[![Linux](https://img.shields.io/badge/Linux-Ubuntu%2024.04%2B%20%2F%20Debian%2013%2B-blue)](#download)
+[![Rust](https://img.shields.io/badge/Rust-1.90%2B-orange)](#building)
+[![License](https://img.shields.io/badge/license-GPL--2.0--or--later-blue)](LICENSE)
 
-## Структура
+**Password Tool** (PwTool) is a Linux port of [Password Tech](https://github.com/cthoeing/PasswordTech) 3.6.1
+written in Rust and GTK4. It preserves the original windows, cryptographic algorithms,
+and file formats: password databases (`.pwdb`), configuration files (`PwTool.ini` / `PwTech.ini`),
+profiles, word lists, Lua scripts, and translations are compatible with the Windows version.
 
-| Путь | Содержимое |
+<p align="center">
+  <img src="doc/images/en/main.png" alt="Password Tool: main window with password generator and 16-block strength meter">
+</p>
+
+> **0.1.0-beta is a prerelease.**
+> Keep backups of important `.pwdb` databases before testing new releases, and report any
+> issues on [GitHub Issues](https://github.com/coinman-dev/PwTool/issues). Password Tool
+> is an independent Linux port and is not affiliated with the author of Password Tech.
+
+## Download
+
+| Edition | Download | Usage |
+|---|---|---|
+| Linux package | [pwtool_0.1.0.beta_amd64.deb](https://github.com/coinman-dev/PwTool/releases/download/v0.1.0-beta/pwtool_0.1.0.beta_amd64.deb) | `sudo apt install ./pwtool_0.1.0.beta_amd64.deb` installs Password Tool, icons, translations, script examples, and PDF manuals. |
+
+Ubuntu 24.04 or newer, Debian 13 or newer, amd64 (GTK 4.10+). No advertising or telemetry.
+Update checks contact only GitHub and can be disabled in **Options → Configuration**.
+[All releases](https://github.com/coinman-dev/PwTool/releases) ·
+[Changelog](CHANGELOG.md).
+
+## Quick start
+
+1. Install the `.deb` package with `sudo apt install ./pwtool_0.1.0.beta_amd64.deb`.
+2. Open **Password Tool** from your application menu (**Utilities**) or run `pwtool`.
+3. Choose a character set, passphrase word list, format string, or Lua script and click
+   **Generate** — the 16-block strength meter shows estimated entropy in bits.
+4. Click the database icon on the toolbar (or **File → Password Manager**) to open
+   **PassCube** and store credentials in an encrypted `.pwdb` database.
+
+The interface supports 13 languages, light, dark, and system themes, and custom GUI fonts.
+
+## Features
+
+- **Cryptographically secure RNG**: entropy pool backed by AES-256-CTR or ChaCha20, seeded
+  from OS entropy, user input events, high-resolution timers, and optional entropy files;
+  persistent random seed file on exit.
+- **Flexible password generation**: character sets with custom frequency weights, ambiguous
+  character exclusion, phonetic (trigram-based) passwords, word-list passphrases, pattern
+  format strings, and embedded **Lua** scripting.
+- **Password strength meter**: 16-block visual strength bar combining entropy calculation,
+  common-password checking, and **zxcvbn** analysis.
+- **PassCube password manager**: encrypted `.pwdb` databases compatible in both directions
+  with Password Tech 3.6.1 (master password + optional key file, recovery key, tags,
+  expiry warnings, password history, custom key-value fields, CSV import/export, backups).
+- **Master-password generator (MP)**: deterministic password generation derived from a
+  master password and site parameters (including Hashapass mode).
+- **Text encryption**: encrypt and decrypt clipboard or arbitrary text directly from the
+  toolbar.
+- **Profiles & batch generation**: save reusable generator presets, generate lists of
+  passwords to a window or file, or create random data and trigram files.
+- **CLI mode**: generate passwords, passphrases, and formatted strings directly from the
+  terminal without opening a window.
+- **Bundled documentation**: `manual.pdf` and `scripting.pdf` are installed locally and
+  open from **Help** or the toolbar.
+
+## Desktop integration
+
+- **System tray**: StatusNotifierItem (KDE Plasma and other SNI-capable desktops), with
+  minimize-to-tray and quick password generation from the tray menu.
+- **Autotype & global hot keys**: implemented via `xdg-desktop-portal` (`RemoteDesktop`
+  and `GlobalShortcuts`); the desktop prompts for permission on first use.
+- **Secure clipboard**: copied passwords are marked as secret (`x-kde-passwordManagerHint`)
+  so clipboard managers such as Klipper do not keep them in history, with configurable
+  auto-clear timeout.
+
+## Settings and data
+
+| What | Where |
 |---|---|
-| `crates/pwtool-core` | ядро без интерфейса: криптография, генераторы случайных чисел, генерация паролей, базы паролей |
-| `crates/pwtool` | программа (интерфейс GTK4 и консольный режим) |
-| `upstream/` | исходники оригинала 3.6.1 (подмодуль git), используются как эталон |
-| `tools/refharness/` | консольная сборка ядра оригинала под Windows для получения эталонных данных (запускается через wine) |
-| `fixtures/` | эталонные файлы и результаты оригинала для тестов |
-| `.ai/` | план работ и справочные материалы |
+| Program binary | `/usr/bin/pwtool` |
+| Bundled data (translations, word lists, script examples, PDF manuals) | `/usr/share/pwtool/` |
+| Settings, profiles, and random seed | `~/.config/pwtool/PwTool.ini`, `~/.config/pwtool/randseed.dat` |
+| Portable mode | Place `PwTool.ini` next to the `pwtool` binary |
+| Password databases (`.pwdb`) | Wherever you save them |
 
-## Сборка
+**Options → Restore Settings from Backup** also accepts backup files from Password Tech
+(`PwTech.ini`).
 
-```sh
+## Command line
+
+```bash
+pwtool --help
+pwtool --gen 5
+pwtool --profile "My Profile" --gen 10
+pwtool --ini /path/to/PwTool.ini --readonly
+pwtool --opendb ~/vault.pwdb
+pwtool --silent
+```
+
+## Building
+
+Requires Rust 1.90+, a C/C++ compiler (`build-essential`), `pkg-config`, and `libgtk-4-dev`
+(GTK 4.10 or newer). LibreOffice (`libreoffice-writer-nogui`) is optional and used to build
+`manual.pdf` and `scripting.pdf` from `upstream/manual/*.odt`.
+
+```bash
 git submodule update --init
-cargo build --release
-cargo test
+cargo test --workspace --locked
+cargo build --release --locked -p pwtool
+
+packaging/install.sh /usr/local    # install to PREFIX
+packaging/build-deb.sh             # build target/pwtool_<version>_<arch>.deb
 ```
 
-Для сборки нужны Rust 1.90+, компилятор C и пакет `libgtk-4-dev` (GTK 4.10 или новее).
+Headless GUI automation and core parity comparison against upstream Password Tech:
 
-## Установка
-
-```sh
-packaging/install.sh /usr/local          # сборка и установка (нужны права на запись в PREFIX)
-packaging/build-deb.sh                   # пакет target/pwtool_<версия>_<архитектура>.deb
+```bash
+tools/headless.sh env PWTOOL_AUTOMATE="click GenerateBtn;wait 400;print PasswBox;quit" ./target/debug/pwtool
+python3 -I tools/refcompare/compare.py
 ```
 
-Установка кладёт программу в `PREFIX/bin/pwtool`, данные (переводы, список распространённых паролей, примеры скриптов, руководства в PDF) — в `PREFIX/share/pwtool/`, а также ярлык и значки. Руководства собираются из `upstream/manual/*.odt`, если установлен LibreOffice.
+## Automated releases
 
-Настройки хранятся в `~/.config/pwtool/PwTool.ini` (формат `PwTech.ini` оригинала). Если рядом с программой лежит `PwTool.ini`, используется он (переносной режим, как в оригинале). «Restore Settings from Backup» принимает и резервную копию оригинала (`PwTech.ini`).
+Pushing a version tag such as `v0.1.0-beta` runs the
+[release workflow](.github/workflows/release.yml). The tag must match `version` in
+`Cargo.toml`. GitHub runs the workspace tests on Ubuntu 24.04, converts the PDF manuals,
+builds and checks `pwtool_<version>_amd64.deb`, computes `SHA256SUMS.txt`, and publishes
+the release. Tags containing a hyphen suffix are automatically marked as prereleases.
 
-## Возможности, зависящие от рабочего стола
+## License
 
-- Значок в трее — через StatusNotifierItem (KDE Plasma и другие окружения с поддержкой SNI).
-- Автонабор и глобальные сочетания клавиш — через порталы `xdg-desktop-portal` (RemoteDesktop и GlobalShortcuts). При первом использовании рабочий стол спрашивает разрешение.
-- Буфер обмена: пароли помечаются для Klipper как секретные и не попадают в его историю.
+GNU General Public License v2 or later — see [LICENSE](LICENSE).
 
-## Проверка
-
-```sh
-cargo test                                 # модульные тесты
-tools/headless.sh env PWTOOL_AUTOMATE="click GenerateBtn;wait 500;print PasswBox;quit" ./target/debug/pwtool
-python3 -I tools/refcompare/compare.py     # сверка с ядром оригинала под wine (нужен tools/refharness)
-```
-
-`tools/headless.sh` запускает программу в невидимом сеансе KWin со своей шиной D-Bus, окна на рабочем столе не появляются.
-
-## Лицензия
-
-GNU GPL v2 или более поздняя версия, как у оригинала (см. `LICENSE`). Password Tech: © 2002–2026 Christian Thöing. Сторонние компоненты оригинала — под своими лицензиями: miniLZO, miniz, zxcvbn-c (`crates/pwtool-core/csrc/`), Lua (через crate `mlua`).
+Based on **Password Tech** (Copyright © 2002–2026 Christian Thöing). Third-party components
+retain their own licenses: miniLZO (GPL v2+), miniz (MIT), zxcvbn-c (MIT), and Lua (MIT,
+via `mlua`).
