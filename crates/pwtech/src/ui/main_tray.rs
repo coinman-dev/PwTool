@@ -149,7 +149,7 @@ impl MainWindow {
     }
 
     /// Show the main window again (`RestoreAction()` / `AppRestore()`).
-    pub(super) fn restore_from_tray(&self) {
+    pub fn restore_from_tray(&self) {
         self.tray.hidden.set(false);
         self.window.set_visible(true);
         self.window.unminimize();

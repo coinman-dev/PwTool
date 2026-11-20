@@ -33,14 +33,16 @@ pub const APP_ID: &str = "io.github.pwtech.PasswordTech";
 pub fn run(cmd: CmdLineOptions) -> i32 {
     let app = gtk::Application::builder()
         .application_id(APP_ID)
-        .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
+        // one instance (the original refuses a second start); a second
+        // start shows the window of the running instance
+        .flags(gtk::gio::ApplicationFlags::empty())
         .register_session(true)
         .build();
     let main: Rc<RefCell<Option<Rc<main_window::MainWindow>>>> = Rc::new(RefCell::new(None));
     let m = main.clone();
     app.connect_activate(move |app| {
         if let Some(w) = m.borrow().as_ref() {
-            w.window.present();
+            w.restore_from_tray();
             return;
         }
         let core = AppCore::new(cmd.clone());
