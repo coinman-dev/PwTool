@@ -1,8 +1,8 @@
 //! Password quality bar (`TCGauge` with `SetPasswQualityBar()` of
 //! `upstream/src/util/Util.cpp`): length ~ entropy (full = 128 bits). The
 //! filled part shows a gradient over the whole scale, from dark red over
-//! yellow (thresholds of the original: 56, 70, 75, 80, 112 bits) to bright
-//! green, so a strong password shows the whole spectrum.
+//! orange, yellow and green to bright green in equal steps, so a strong
+//! password shows the whole spectrum.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -44,17 +44,27 @@ pub fn quality_color(bits: f64) -> (i32, u32) {
     (progress, rgb)
 }
 
-/// Colour stops (entropy bits, 0xRRGGBB) of the bar.
-const GRADIENT: [(f64, u32); 8] = [
-    (0.0, 0x6e0000),
-    (32.0, 0xd00000),
-    (56.0, 0xff6000),
-    (70.0, 0xffe000),
-    (75.0, 0xc8f000),
-    (80.0, 0x70e000),
-    (112.0, 0x00d020),
-    (128.0, 0x00ff40),
-];
+/// Colours of the bar from weak to strong. Every colour gets an equal band
+/// of the scale with a short plateau of the pure colour, so that all colours
+/// (also yellow) are equally visible.
+const COLORS: [u32; 7] = [0x7a0000, 0xe00000, 0xff7000, 0xffe600, 0xa8e000, 0x30d020, 0x00ff40];
+/// Share of a colour band that shows the pure colour.
+const PLATEAU: f64 = 0.35;
+
+/// Gradient stops (position 0..1, colour).
+fn gradient_stops() -> Vec<(f64, u32)> {
+    let n = COLORS.len() as f64;
+    let mut v = Vec::new();
+    for (i, &c) in COLORS.iter().enumerate() {
+        let center = (i as f64 + 0.5) / n;
+        let half = PLATEAU / n / 2.0;
+        let a = if i == 0 { 0.0 } else { center - half };
+        let b = if i + 1 == COLORS.len() { 1.0 } else { center + half };
+        v.push((a, c));
+        v.push((b, c));
+    }
+    v
+}
 
 impl QualityBar {
     pub fn new(area: gtk::DrawingArea, max: i32) -> Self {
@@ -68,9 +78,9 @@ impl QualityBar {
             if progress > 0 {
                 let frac = (progress as f64 / max as f64).min(1.0);
                 let grad = gtk::cairo::LinearGradient::new(0.0, 0.0, w as f64, 0.0);
-                for (bits, rgb) in GRADIENT {
+                for (pos, rgb) in gradient_stops() {
                     grad.add_color_stop_rgb(
-                        bits / max as f64,
+                        pos,
                         ((rgb >> 16) & 0xff) as f64 / 255.0,
                         ((rgb >> 8) & 0xff) as f64 / 255.0,
                         (rgb & 0xff) as f64 / 255.0,
