@@ -582,8 +582,7 @@ impl PasswManager {
 
     fn open_window(self: &Rc<Self>) {
         if self.is_shown() {
-            let ctx = windows::ctx();
-            ctx.send_viewport_cmd_to(win_id(), ViewportCommand::Minimized(false));
+            windows::send_cmd(win_id(), ViewportCommand::Minimized(false));
             windows::focus(win_id());
             return;
         }
@@ -621,7 +620,7 @@ impl PasswManager {
         if let Some(w) = self.window.borrow().as_ref() {
             *w.title.borrow_mut() = t.to_string();
         }
-        windows::ctx().send_viewport_cmd_to(win_id(), ViewportCommand::Title(t.to_string()));
+        windows::send_cmd(win_id(), ViewportCommand::Title(t.to_string()));
     }
 
     /// Minimize/restore and activation of the window (`OnWindowPosChanging`,

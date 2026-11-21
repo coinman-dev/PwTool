@@ -38,6 +38,7 @@ thread_local! {
 /// if typed (the operating system delivers no keys to a window in the
 /// background).
 pub fn inject_input(id: ViewportId, events: Vec<egui::Event>) {
+    let id = native_window(id);
     INJECTED.with(|q| q.borrow_mut().extend(events.into_iter().map(|e| (id, e))));
     ctx().request_repaint_of(id);
 }
@@ -156,8 +157,34 @@ pub fn last_size(id: ViewportId) -> Option<Vec2> {
 
 /// Bring an open window to the front.
 pub fn focus(id: ViewportId) {
-    if is_open(id) || id == ViewportId::ROOT {
-        ctx().send_viewport_cmd_to(id, ViewportCommand::Focus);
+    send_cmd(id, ViewportCommand::Focus);
+}
+
+/// Whether window `id` is drawn inside its parent (no native window).
+fn is_embedded(id: ViewportId) -> bool {
+    embed_modal() && WINDOWS.with(|ws| ws.borrow().iter().any(|x| x.id == id && x.modal))
+}
+
+/// The native window that shows window `id`: the window itself or, for a
+/// dialog drawn inside its parent, the parent's native window.
+fn native_window(id: ViewportId) -> ViewportId {
+    let mut id = id;
+    while is_embedded(id) {
+        match WINDOWS.with(|ws| ws.borrow().iter().find(|x| x.id == id).map(|x| x.parent)) {
+            Some(p) => id = p,
+            None => break,
+        }
+    }
+    id
+}
+
+/// Send a command to the native window of window `id` if it is open.
+/// egui creates a native window for every unknown viewport a command is
+/// sent to (or whose input is read): a window that is closed or drawn
+/// inside its parent must not get one.
+pub fn send_cmd(id: ViewportId, cmd: ViewportCommand) {
+    if id == ViewportId::ROOT || is_open(id) {
+        ctx().send_viewport_cmd_to(native_window(id), cmd);
     }
 }
 
@@ -293,9 +320,9 @@ fn show_window(ctx: &Context, w: &Rc<Window>) {
     if let Some(max) = max {
         b = b.with_max_inner_size(max);
     }
-    if !w.shown.get() {
+    if !w.shown.get() && !embed {
         // centre on the parent window
-        if let Some(pr) = ctx.input_for(w.parent, |i| i.viewport().outer_rect) {
+        if let Some(pr) = ctx.input_for(native_window(w.parent), |i| i.viewport().outer_rect) {
             let pos = pr.center() - w.size.get() / 2.0;
             b = b.with_position(pos.max(egui::pos2(0.0, 0.0)));
         }
@@ -305,15 +332,14 @@ fn show_window(ctx: &Context, w: &Rc<Window>) {
     }
     let w2 = w.clone();
     let close_requested = ctx.show_viewport_immediate(w.id, b, move |ui, class| {
-        let id = w2.id;
-        let embedded = class == ViewportClass::EmbeddedWindow;
-        if embedded {
+        if class == ViewportClass::EmbeddedWindow {
             ui.set_min_size(size);
-        }
-        show(ui, id, &*w2.content);
-        if embedded {
+            show(ui, w2.id, &*w2.content);
             EMBED_CONTENT.with(|c| c.set(ui.min_rect().size()));
+            // the viewport input is the parent's: no close button of its own
+            return false;
         }
+        show(ui, w2.id, &*w2.content);
         ui.input(|i| i.viewport().close_requested())
     });
     if embed {
@@ -321,7 +347,9 @@ fn show_window(ctx: &Context, w: &Rc<Window>) {
         measure_embed_frame(ctx, w.id);
     }
     w.shown.set(true);
-    if let Some(r) = ctx.input_for(w.id, |i| i.viewport().inner_rect) {
+    if embed {
+        w.last_size.set(Some(EMBED_CONTENT.with(|c| c.get())));
+    } else if let Some(r) = ctx.input_for(w.id, |i| i.viewport().inner_rect) {
         w.last_size.set(Some(r.size()));
     }
     #[cfg(windows)]

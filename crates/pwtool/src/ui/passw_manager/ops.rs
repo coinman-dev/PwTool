@@ -2403,7 +2403,7 @@ impl PasswManager {
             self.reset_db_open_controls();
             self.change_caption();
             if self.is_shown() {
-                windows::ctx().send_viewport_cmd_to(win_id(), ViewportCommand::Minimized(true));
+                windows::send_cmd(win_id(), ViewportCommand::Minimized(true));
                 self.last_viewport.set((true, false));
             }
         }
