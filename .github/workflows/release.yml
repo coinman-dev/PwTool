@@ -84,7 +84,10 @@ jobs:
           grep -E "bin/pwtool|\.desktop|hicolor/.*/io\.github\.coinman_dev\.PwTool\.png" <<< "$contents"
           grep -q "usr/share/applications/io.github.coinman_dev.PwTool.desktop" <<< "$contents"
           # the manuals are embedded; the console mode needs no display
-          grep -aq '%PDF-' target/release/pwtool || { echo 'manuals not embedded'; exit 1; }
+          # the PDFs are stored deflate-compressed, so their own bytes cannot be
+          # found; the name of the scripting manual is only in the table of
+          # embedded files (crates/pwtool-app/build.rs)
+          grep -aq 'scripting.pdf' target/release/pwtool || { echo 'manuals not embedded'; exit 1; }
           out="$(target/release/pwtool --gen 3)"
           echo "$out"
           [[ "$(grep -cE '^\S{16}$' <<< "$out")" == 3 ]] || { echo 'console mode did not print 3 passwords'; exit 1; }
@@ -159,7 +162,7 @@ jobs:
           mkdir -p target/release-files
           exe="$PWD/target/release-files/pwtool_${v//-/.}_windows_x64.exe"
           OUTPUT="$exe" packaging/windows/build.sh --tests
-          grep -aq '%PDF-' "$exe" || { echo 'manuals not embedded'; exit 1; }
+          grep -aq 'scripting.pdf' "$exe" || { echo 'manuals not embedded'; exit 1; }
           OUTPUT="$PWD/target/release-files/pwtool_${v//-/.}_windows_x64_setup.exe" \
             packaging/windows/build-installer.sh "$exe"
       - uses: actions/upload-artifact@v7
