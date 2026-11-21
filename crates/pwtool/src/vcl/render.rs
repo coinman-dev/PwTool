@@ -265,6 +265,8 @@ enum Deferred {
     UpDown(usize, i64),
     Speed(usize),
     Splitter(usize, f32),
+    /// Open a popup menu below a point (arrow of a split button).
+    Popup(String, egui::Pos2),
 }
 
 struct Frame<'a> {
@@ -311,7 +313,7 @@ fn draw_label(ui: &mut Ui, c: &Control, enabled: bool, f: &mut Frame) {
     let fid = font_id(&c.font, f.body * c.fit);
     let lines = text.lines().count().max(1);
     let mut job = LayoutJob::simple(text.clone(), fid, color, if *wrap { c.rect.width() } else { f32::INFINITY });
-    if !*wrap && c.autosize.is_none() {
+    if !*wrap && (c.autosize.is_none() || c.cut) {
         job.wrap = TextWrapping::truncate_at_width(c.rect.width().max(1.0));
         // explicit line breaks are kept (VCL draws every line)
         job.wrap.max_rows = lines;
@@ -499,11 +501,14 @@ fn draw_combo(ui: &mut Ui, c: &mut Control, enabled: bool, f: &mut Frame) {
     let State::Combo { items, index, text, editable } = &mut c.state else { return };
     let resp = at(ui, rect, enabled, |ui| {
         if *editable {
-            let button_w = rect.height().min(24.0);
+            // the arrow button lies inside the frame of the edit, at its
+            // right end (like a VCL combo box), not next to it
+            let button_w = (rect.height() - 2.0).clamp(12.0, 22.0);
             let mut changed = false;
-            let te = ui.add_sized(
-                vec2(rect.width() - button_w, rect.height()),
-                egui::TextEdit::singleline(text).id(id).font(fid.clone()).vertical_align(egui::Align::Center),
+            let margin = egui::Margin { left: 4, right: button_w as i8 + 2, top: 2, bottom: 2 };
+            let te = ui.put(
+                rect,
+                egui::TextEdit::singleline(text).id(id).font(fid.clone()).vertical_align(egui::Align::Center).margin(margin),
             );
             if te.changed() {
                 *index = items.iter().position(|i| i == text.as_str());
@@ -512,7 +517,18 @@ fn draw_combo(ui: &mut Ui, c: &mut Control, enabled: bool, f: &mut Frame) {
             if focus {
                 te.request_focus();
             }
-            let b = ui.add_sized(vec2(button_w, rect.height()), egui::Button::new("⏷"));
+            let br = Rect::from_min_max(pos2(rect.max.x - button_w - 1.0, rect.min.y + 1.0), pos2(rect.max.x - 1.0, rect.max.y - 1.0));
+            let b = ui.put(br, egui::Button::new("").frame_when_inactive(false));
+            a11y_hide(ui, &b);
+            // the arrow: the triangle of egui's own combo box
+            let color = if ui.is_enabled() { ui.visuals().widgets.style(&b).fg_stroke.color } else { ui.visuals().weak_text_color() };
+            let c = br.center();
+            let h = (button_w * 0.22).max(3.0);
+            ui.painter().add(egui::Shape::convex_polygon(
+                vec![pos2(c.x - h * 1.2, c.y - h * 0.5), pos2(c.x + h * 1.2, c.y - h * 0.5), pos2(c.x, c.y + h * 0.7)],
+                color,
+                Stroke::NONE,
+            ));
             let popup = egui::Popup::menu(&b).width(rect.width()).align(egui::RectAlign::BOTTOM_END);
             popup.show(|ui| {
                 egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
@@ -928,9 +944,27 @@ fn draw_one(ui: &mut Ui, controls: &mut [Control], idx: usize, enabled: bool, f:
     match &mut c.state {
         State::Label { .. } => draw_label(ui, c, enabled, f),
         State::Link => draw_link(ui, c, enabled, f),
-        State::Button { .. } => {
+        State::Button { split, .. } => {
+            let split = *split;
             let text = rich(ui, &c.caption, &c.font, body * c.fit);
-            let resp = at(ui, rect, enabled, |ui| ui.add_sized(rect.size(), egui::Button::new(text)));
+            let arrow_w = if split { split_arrow_width(f.scale) } else { 0.0 };
+            let main = Rect::from_min_max(rect.min, pos2(rect.max.x - arrow_w, rect.max.y));
+            let resp = at(ui, main, enabled, |ui| ui.add_sized(main.size(), egui::Button::new(text)));
+            if split {
+                let ar = Rect::from_min_max(pos2(main.max.x - 1.0, rect.min.y), rect.max);
+                let r = at(ui, ar, enabled, |ui| ui.add_sized(ar.size(), egui::Button::new("▾")));
+                a11y_hide(ui, &r);
+                if r.clicked() {
+                    // the `DropDownMenu` (set as the button's popup menu)
+                    match &c.popup_menu {
+                        Some(m) => {
+                            f.deferred.push(Deferred::Popup(m.clone(), rect.left_bottom()));
+                            ui.ctx().request_repaint();
+                        }
+                        None => f.events.push(Event::Click(format!("{name}#dropdown"))),
+                    }
+                }
+            }
             if std::mem::take(&mut c.focus_request) {
                 resp.request_focus();
             }
@@ -949,7 +983,24 @@ fn draw_one(ui: &mut Ui, controls: &mut [Control], idx: usize, enabled: bool, f:
                     (Some((t, size)), false) => {
                         egui::Button::image_and_text(egui::Image::new(t).fit_to_exact_size(vec2(*size, *size)), caption.clone())
                     }
-                    (None, _) => egui::Button::new(rich(ui, &c.caption, &c.font, body)),
+                    (None, _) => {
+                        // a dark VCL style draws button captions in its own
+                        // text color (`StyleElements`: seFont)
+                        let mut font = c.font.clone();
+                        if ui.visuals().dark_mode {
+                            font.color = None;
+                        }
+                        // symbol captions ("•••") drawn in a wider font
+                        // than the original: shrink to the button
+                        let fid = font_id(&font, body);
+                        let w = ui.fonts_mut(|fo| fo.layout_no_wrap(strip_amp(&c.caption), fid, Color32::WHITE).size().x);
+                        let room = rect.width() - 2.0 * ui.spacing().button_padding.x;
+                        if w > room && w > 0.0 {
+                            let base = if font.scale > 0.0 { font.scale } else { 1.0 };
+                            font.scale = base * (room / w).max(0.5);
+                        }
+                        egui::Button::new(rich(ui, &c.caption, &font, body))
+                    }
                 };
                 ui.add_sized(rect.size(), b.frame_when_inactive(!*flat).selected(*down))
             });
@@ -1219,7 +1270,7 @@ impl Form {
         let memo_focus = controls.iter().any(|c| c.has_focus && matches!(c.state, State::Memo { .. }));
         let enter = !memo_focus && ui.input(|i| i.key_pressed(Key::Enter) && i.modifiers.is_none());
         for (i, c) in controls.iter().enumerate() {
-            if let State::Button { default, cancel } = c.state {
+            if let State::Button { default, cancel, .. } = c.state {
                 if usable(i) && ((esc && cancel) || (enter && default)) {
                     events.push(Event::Click(c.name.clone()));
                     return;
@@ -1270,6 +1321,7 @@ impl Form {
 
     /// Draw the form into `ui`: main menu at the top, controls below.
     pub fn show(&self, ui: &mut Ui) {
+        let popup_before = self.data.borrow().open_popup.as_ref().map(|p| p.0.clone());
         let full = ui.max_rect();
         let body = body_size(ui);
         let mut area = full;
@@ -1322,18 +1374,18 @@ impl Form {
                     let mut f = Frame { events: &mut events, deferred: Vec::new(), body, scale, text_height, form: &self.name, a11y_label };
                     draw_one(ui, &mut d.controls, i, enabled, &mut f);
                     deferred.append(&mut f.deferred);
-                    // context menu of the control
+                    // context menu of the control: a right click on it (read
+                    // from the pointer; a widget over the control would take
+                    // its left clicks too)
                     if let Some(menu) = d.controls[i].popup_menu.clone() {
-                        let rect = d.controls[i].rect;
-                        let cname = d.controls[i].name.clone();
-                        let FormData { menus, items, popup_owner, .. } = &mut *d;
-                        if let Some(nodes) = menus.get(&menu) {
-                            let resp = ui.interact(rect, ui.id().with(("ctx", i)), Sense::click());
-                            a11y_hide(ui, &resp);
-                            if resp.secondary_clicked() {
-                                *popup_owner = Some(cname);
+                        let rect = d.controls[i].rect.intersect(ui.clip_rect());
+                        let at_pos = ui.input(|inp| inp.pointer.secondary_clicked().then(|| inp.pointer.interact_pos()).flatten());
+                        if let Some(pos) = at_pos.filter(|p| rect.contains(*p) && ui.ctx().layer_id_at(*p) == Some(ui.layer_id())) {
+                            if d.menus.contains_key(&menu) {
+                                d.popup_owner = Some(d.controls[i].name.clone());
+                                d.open_popup = Some((menu, Some(pos)));
+                                ui.ctx().request_repaint();
                             }
-                            resp.context_menu(|ui| menu_items(ui, nodes, items, &mut events));
                         }
                     }
                     None
@@ -1373,7 +1425,10 @@ impl Form {
             }
         }
         self.apply_deferred(deferred, &mut events);
-        self.show_open_popup(ui, &mut events);
+        // a popup opened in this frame: the click that opened it is not a
+        // click outside it
+        let fresh = self.data.borrow().open_popup.as_ref().map(|p| p.0.clone()) != popup_before;
+        self.show_open_popup(ui, &mut events, fresh);
         self.data.borrow_mut().events.append(&mut events);
     }
 
@@ -1381,6 +1436,7 @@ impl Form {
         let mut d = self.data.borrow_mut();
         for x in deferred {
             match x {
+                Deferred::Popup(menu, pos) => d.open_popup = Some((menu, Some(pos))),
                 Deferred::Radio(i) => {
                     let parent = d.controls[i].parent;
                     for c in d.controls.iter_mut().filter(|c| c.parent == parent) {
@@ -1455,7 +1511,7 @@ impl Form {
     }
 
     /// A popup menu opened by the logic (`popup_menu`).
-    fn show_open_popup(&self, ui: &mut Ui, events: &mut Vec<Event>) {
+    fn show_open_popup(&self, ui: &mut Ui, events: &mut Vec<Event>, fresh: bool) {
         let Some((menu, pos)) = self.data.borrow().open_popup.clone() else { return };
         let ctx = ui.ctx().clone();
         let pos = pos.or_else(|| ctx.pointer_latest_pos()).unwrap_or(ui.max_rect().center());
@@ -1473,7 +1529,8 @@ impl Form {
                 ui.with_layout(egui::Layout::top_down_justified(egui::Align::Min), |ui| menu_items(ui, nodes, items, events));
             })
         });
-        let clicked_outside = ctx.input(|i| i.pointer.any_pressed())
+        let clicked_outside = !fresh
+            && ctx.input(|i| i.pointer.any_pressed())
             && ctx.pointer_interact_pos().is_some_and(|p| !area.response.rect.contains(p))
             && !egui::Popup::is_any_open(&ctx);
         if events.len() > n_before || clicked_outside || ctx.input(|i| i.key_pressed(Key::Escape)) {
@@ -1482,13 +1539,40 @@ impl Form {
     }
 }
 
-/// Size of a form's window: client area plus the main menu.
+/// Width of the arrow part of a split button.
+fn split_arrow_width(scale: f32) -> f32 {
+    18.0 * scale
+}
+
+/// Size of a form's window: client area plus the main menu; wider if the
+/// tabs of a page control do not fit in one row (fonts wider than Tahoma).
 pub fn window_size(form: &Form, ctx: &egui::Context) -> Vec2 {
     let mut s = form.client_size();
     if form.has_main_menu() {
         s.y += menu_bar_height(ctx);
     }
+    s.x += tabs_extra_width(form, ctx);
     s
+}
+
+/// Width missing for the tabs of the widest page control.
+fn tabs_extra_width(form: &Form, ctx: &egui::Context) -> f32 {
+    let body = ctx.global_style().text_styles.get(&TextStyle::Body).map_or(12.0, |f| f.size);
+    let d = form.data.borrow();
+    let mut extra: f32 = 0.0;
+    for c in &d.controls {
+        if !matches!(c.state, State::Pages { .. }) || !c.visible {
+            continue;
+        }
+        let fid = font_id(&c.font, body);
+        let texts: Vec<String> = c.children.iter().filter(|&&k| d.controls[k].visible).map(|&k| strip_amp(&d.controls[k].caption)).collect();
+        let n = texts.len() as f32;
+        let sum: f32 = texts.iter().map(|t| ctx.fonts_mut(|f| f.layout_no_wrap(t.clone(), fid.clone(), Color32::WHITE).size().x)).sum();
+        // as in `draw_pages`: 4 + 2 per tab + text + padding (at least 8)
+        let need = 4.0 + n * (2.0 + 8.0) + sum;
+        extra = extra.max(need - c.design.width());
+    }
+    extra.max(0.0).ceil()
 }
 
 /// Width of the caption of a check box, radio button, button or fixed-size
@@ -1498,7 +1582,7 @@ fn caption_need(c: &Control, ctx: &egui::Context, body: f32, sp: &egui::style::S
     let extra = match &c.state {
         State::Check { .. } | State::Radio { .. } => sp.icon_width + sp.icon_spacing,
         State::Label { wrap: false, .. } if c.autosize.is_none() => 0.0,
-        State::Button { .. } => 2.0 * sp.button_padding.x,
+        State::Button { split, .. } => 2.0 * sp.button_padding.x + if *split { split_arrow_width(1.0) } else { 0.0 },
         _ => return None,
     };
     let text = strip_amp(&c.caption);
@@ -1537,19 +1621,72 @@ fn fit_captions(d: &mut FormData, ctx: &egui::Context, area: Rect, body: f32) {
             }
             continue;
         }
+        // auto-sized right-aligned labels growing over the control on their
+        // left (the info text next to a spin button): a smaller font, then cut
+        if let State::Label { wrap: false, halign, .. } = c.state {
+            if c.autosize.is_some() && halign > 0.9 {
+                let r = c.rect;
+                let lo = obstacle_left(d, i, gap);
+                if lo > r.min.x {
+                    let avail = (r.max.x - lo).max(1.0);
+                    let text = strip_amp(&c.caption);
+                    let fid = font_id(&c.font, body);
+                    let text_w = ctx.fonts_mut(|f| text.lines().map(|l| f.layout_no_wrap(l.to_string(), fid.clone(), Color32::WHITE).size().x).fold(0.0, f32::max));
+                    let c = &mut d.controls[i];
+                    c.rect.min.x = lo;
+                    c.fit = (avail / text_w).clamp(0.8, 1.0);
+                    c.cut = text_w * c.fit > avail + 0.5;
+                }
+                continue;
+            }
+        }
+        // auto-sized labels (left-aligned) that run under the control on
+        // their right: a smaller font, then cut (wider fonts than Tahoma)
+        if let State::Label { wrap: false, halign, .. } = c.state {
+            if c.autosize.is_some() && halign < 0.1 {
+                let r = c.rect;
+                let next = obstacle_inside(d, i, gap).min(parent_right(d, i, area, gap));
+                if next < r.max.x {
+                    let avail = (next - r.min.x).max(1.0);
+                    let text = strip_amp(&c.caption);
+                    let fid = font_id(&c.font, body);
+                    let text_w = ctx.fonts_mut(|f| text.lines().map(|l| f.layout_no_wrap(l.to_string(), fid.clone(), Color32::WHITE).size().x).fold(0.0, f32::max));
+                    let c = &mut d.controls[i];
+                    c.rect.max.x = r.min.x + avail;
+                    c.fit = (avail / text_w).clamp(0.8, 1.0);
+                    c.cut = text_w * c.fit > avail + 0.5;
+                }
+                continue;
+            }
+        }
         let Some((text_w, extra)) = caption_need(c, ctx, body, &sp) else { continue };
         let need = text_w + extra;
+        let r = c.rect;
+        let right_aligned = matches!(c.state, State::Label { halign, .. } if halign > 0.9);
+        // a control placed over the right part of this one (the caption runs
+        // under it with fonts wider than Tahoma)
+        if !right_aligned && !matches!(c.state, State::Button { .. }) {
+            let inner = obstacle_inside(d, i, gap);
+            if inner < r.max.x {
+                let w = (inner - r.min.x).max(1.0);
+                if need > w + 0.5 {
+                    let c = &mut d.controls[i];
+                    c.rect.max.x = inner.max(r.min.x + 1.0);
+                    c.fit = ((w - extra) / text_w).clamp(0.8, 1.0);
+                    c.cut = text_w * c.fit + extra > w + 0.5;
+                }
+                continue;
+            }
+        }
         if need <= c.rect.width() + 0.5 {
             continue;
         }
-        let r = c.rect;
         if matches!(c.state, State::Button { .. }) {
             let c = &mut d.controls[i];
             c.fit = ((r.width() - extra) / text_w).clamp(0.8, 1.0);
             c.cut = text_w * c.fit + extra > r.width() + 0.5;
             continue;
         }
-        let right_aligned = matches!(c.state, State::Label { halign, .. } if halign > 0.9);
         // free space in the parent, up to the nearest sibling on that side
         let bounds = match c.parent {
             Some(p) => {
@@ -1591,6 +1728,61 @@ fn fit_captions(d: &mut FormData, ctx: &egui::Context, area: Rect, body: f32) {
             c.fit = ((w - extra) / text_w).clamp(0.8, 1.0);
             c.cut = text_w * c.fit + extra > w + 0.5;
         }
+    }
+}
+
+/// Left edge (minus `gap`) of the nearest visible sibling that starts
+/// inside control `i` on its row (`INFINITY` if none).
+fn obstacle_inside(d: &FormData, i: usize, gap: f32) -> f32 {
+    let r = d.controls[i].rect;
+    let siblings: &[usize] = match d.controls[i].parent {
+        Some(p) => &d.controls[p].children,
+        None => &d.roots,
+    };
+    siblings
+        .iter()
+        .filter(|&&k| k != i)
+        .map(|&k| &d.controls[k])
+        .filter(|s| s.visible && s.rect.is_positive() && !matches!(s.state, State::Bevel { .. }))
+        .filter(|s| !(matches!(s.state, State::Label { .. }) && s.caption.is_empty()))
+        .filter(|s| s.rect.max.y > r.min.y + 1.0 && s.rect.min.y < r.max.y - 1.0)
+        .filter(|s| s.rect.min.x > r.min.x + 1.0 && s.rect.min.x < r.max.x - 1.0)
+        .map(|s| s.rect.min.x - gap)
+        .fold(f32::INFINITY, f32::min)
+}
+
+/// Right edge (plus `gap`) of the nearest visible sibling that ends inside
+/// control `i` on its row (`NEG_INFINITY` if none).
+fn obstacle_left(d: &FormData, i: usize, gap: f32) -> f32 {
+    let r = d.controls[i].rect;
+    let siblings: &[usize] = match d.controls[i].parent {
+        Some(p) => &d.controls[p].children,
+        None => &d.roots,
+    };
+    siblings
+        .iter()
+        .filter(|&&k| k != i)
+        .map(|&k| &d.controls[k])
+        .filter(|s| s.visible && s.rect.is_positive() && !matches!(s.state, State::Bevel { .. }))
+        .filter(|s| !(matches!(s.state, State::Label { .. }) && s.caption.is_empty()))
+        .filter(|s| s.rect.max.y > r.min.y + 1.0 && s.rect.min.y < r.max.y - 1.0)
+        .filter(|s| s.rect.max.x > r.min.x + 1.0 && s.rect.max.x < r.max.x - 1.0)
+        .map(|s| s.rect.max.x + gap)
+        .fold(f32::NEG_INFINITY, f32::max)
+}
+
+/// Right edge of the inside of control `i`'s parent (the form area for a
+/// control at the top level), less `gap`.
+fn parent_right(d: &FormData, i: usize, area: Rect, gap: f32) -> f32 {
+    match d.controls[i].parent {
+        Some(p) => {
+            let pc = &d.controls[p];
+            match pc.state {
+                State::Group | State::RadioGroup { .. } | State::Panel { bevel: true } => pc.rect.max.x - 6.0 * d.scale,
+                _ => pc.rect.max.x - gap,
+            }
+        }
+        None => area.max.x - gap,
     }
 }
 
@@ -1641,9 +1833,8 @@ pub fn fit_report(form: &Form, ctx: &egui::Context) -> Vec<String> {
             out.push(format!("{}.{}: {text:?} font {:.0} %", form.name, c.name, c.fit * 100.0));
         }
         let need = match &c.state {
-            State::Speed { show_caption: true, icon, .. } => {
-                width(&text, &fid) + 2.0 * sp.button_padding.x + icon.as_ref().map_or(0.0, |i| i.size + sp.icon_spacing)
-            }
+            // (a caption without an icon is shrunk to the button when drawn)
+            State::Speed { show_caption: true, icon: Some(i), .. } => width(&text, &fid) + 2.0 * sp.button_padding.x + i.size + sp.icon_spacing,
             State::Group | State::RadioGroup { .. } => width(&text, &fid) + 14.0 * d.scale,
             _ => 0.0,
         };

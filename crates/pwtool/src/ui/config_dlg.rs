@@ -130,6 +130,9 @@ impl ConfigDlg {
         f.set_control_caption("UseAdvancedPasswEst", &trl_format("Use advanced password strength estimation (%1)", &["zxcvbn"]));
         f.set_read_only("HotKeyBox", true);
         f.set_popup_menu("SelectFontBtn", "SelectFontMenu");
+        // the original shows only the split button "Select font ▾" (its menu
+        // has "Restore Default"); the old separate button stays hidden
+        f.set_visible("DefaultFontBtn", false);
         let d = Rc::new(ConfigDlg {
             form,
             hot_keys: RefCell::new(HotKeyList::new()),

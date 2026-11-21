@@ -82,7 +82,10 @@ pub struct FontStyle {
 pub enum State {
     Label { halign: f32, wrap: bool, vcenter: bool, focus_control: Option<String> },
     Link,
-    Button { default: bool, cancel: bool },
+    /// `split`: `bsSplitButton` — an arrow part at the right opens the
+    /// button's popup menu (its `DropDownMenu`), else sends
+    /// `Click("<name>#dropdown")`.
+    Button { default: bool, cancel: bool, split: bool },
     Speed { toggle: bool, down: bool, flat: bool, icon: Option<Icon>, show_caption: bool },
     Check { checked: bool },
     Radio { checked: bool },
@@ -286,6 +289,12 @@ fn vcl_color(id: &str) -> Option<Color32> {
     })
 }
 
+/// Text in the Windows "Symbol" font → Unicode (the characters the forms
+/// use: `·` is a bullet there — the "●●●" of the show/hide password button).
+fn symbol_font_text(s: &str) -> String {
+    s.chars().map(|c| if c == '\u{b7}' { '\u{2022}' } else { c }).collect()
+}
+
 fn font_of(o: &FormObj, form_font_height: i64) -> FontStyle {
     let style = o.set("Font.Style").unwrap_or_default();
     let has = |s: &str| style.iter().any(|x| x == s);
@@ -383,7 +392,11 @@ impl Builder<'_> {
                 focus_control: o.ident("FocusControl").map(String::from),
             },
             "TLinkLabel" => State::Link,
-            "TButton" => State::Button { default: o.bool_or("Default", false), cancel: o.bool_or("Cancel", false) },
+            "TButton" => State::Button {
+                default: o.bool_or("Default", false),
+                cancel: o.bool_or("Cancel", false),
+                split: o.ident("Style") == Some("bsSplitButton"),
+            },
             "TSpeedButton" => State::Speed {
                 toggle: o.int_or("GroupIndex", 0) != 0 || o.bool_or("AllowAllUp", false),
                 down: o.bool_or("Down", false),
@@ -482,7 +495,10 @@ impl Builder<'_> {
         let autosize = ((o.class == "TLabel" || o.class == "TLinkLabel") && o.bool_or("AutoSize", true) && !o.bool_or("WordWrap", false) && align == Align::None)
             .then(|| halign_of(o));
         // panels with `ShowCaption = false` show a caption only when the logic sets one
-        let caption = if o.class == "TPanel" && !o.bool_or("ShowCaption", true) { String::new() } else { o.str("Caption").map(trl).unwrap_or_default() };
+        let mut caption = if o.class == "TPanel" && !o.bool_or("ShowCaption", true) { String::new() } else { o.str("Caption").map(trl).unwrap_or_default() };
+        if o.str("Font.Name") == Some("Symbol") {
+            caption = symbol_font_text(&caption);
+        }
         let idx = self.controls.len();
         self.controls.push(Control {
             name: o.name.clone(),

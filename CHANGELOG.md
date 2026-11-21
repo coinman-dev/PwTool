@@ -38,6 +38,16 @@
   list below the field; arrow keys and Enter or a click choose one), as in Password Tech.
 - Messages about things that are normal on many systems (no tray host, no session monitor
   of the portal) are printed only when `PWTOOL_DEBUG` is set.
+- Windows look closer to Password Tech: the arrow of editable combo boxes lies inside the
+  field (it was cut off by the buttons next to it), "Generate ▾", "Advanced ▾" and "Select
+  font ▾" are split buttons whose arrow opens their menu, the show/hide password button
+  shows "•••", the separate "Reset to default" font button is gone (its menu has "Restore
+  Default"), and a window with tabs is only as wide as its tabs need. Labels that ran under
+  the field next to them or out of the window (wider fonts than Tahoma, mainly on Linux)
+  use a smaller font.
+- Buttons and fields with a context menu (such as "Generate", "Advanced" and the password
+  box) did not react to a left click in some cases; the right-click menu no longer covers
+  them.
 - Hungarian translation: the "At least" check boxes of the Character Set Builder showed a
   wrong text taken over from the original translation.
 
