@@ -72,6 +72,8 @@ pub struct FontStyle {
     /// Size relative to the form font.
     pub scale: f32,
     pub color: Option<Color32>,
+    /// Named font family (`fonts::PASSW`) instead of the form font.
+    pub family: Option<&'static str>,
 }
 
 /// Kind-specific state of a control.
@@ -91,7 +93,8 @@ pub enum State {
     Panel { bevel: bool },
     Sheet,
     Pages { active: usize },
-    ListBox { items: Vec<String>, sel: Option<usize> },
+    /// `marks`: selected items of a `MultiSelect` list (`None` = single selection).
+    ListBox { items: Vec<String>, sel: Option<usize>, marks: Option<Vec<bool>> },
     CheckList { items: Vec<String>, checked: Vec<bool>, sel: Option<usize> },
     Status { text: String },
     Track { min: i64, max: i64, pos: i64 },
@@ -186,6 +189,7 @@ pub(super) struct FormData {
     pub events: Vec<Event>,
     /// Popup menu to open at the pointer (`TPopupMenu.Popup`).
     pub open_popup: Option<(String, Option<egui::Pos2>)>,
+    pub popup_owner: Option<String>,
 }
 
 type Painter = Box<dyn FnMut(&mut egui::Ui, Rect)>;
@@ -275,6 +279,7 @@ fn font_of(o: &FormObj, form_font_height: i64) -> FontStyle {
         mono: name.contains("Courier") || name.contains("Consolas") || name.contains("Lucida Console"),
         scale,
         color: o.ident("Font.Color").and_then(vcl_color),
+        family: None,
     }
 }
 
@@ -367,7 +372,11 @@ impl Builder<'_> {
             }
             "TTabSheet" => State::Sheet,
             "TPageControl" => State::Pages { active: 0 },
-            "TListBox" => State::ListBox { items: strings("Items.Strings"), sel: None },
+            "TListBox" => {
+                let items = strings("Items.Strings");
+                let marks = o.bool_or("MultiSelect", false).then(|| vec![false; items.len()]);
+                State::ListBox { items, sel: None, marks }
+            }
             "TCheckListBox" => {
                 let items: Vec<String> = strings("Items.Strings").iter().map(|s| trl(s)).collect();
                 let n = items.len();
@@ -407,7 +416,7 @@ impl Builder<'_> {
         };
         let (w, h) = (self.sc(dw), self.sc(dh));
         let align = align_of(o);
-        let autosize = (o.class == "TLabel" && o.bool_or("AutoSize", true) && !o.bool_or("WordWrap", false) && align == Align::None)
+        let autosize = ((o.class == "TLabel" || o.class == "TLinkLabel") && o.bool_or("AutoSize", true) && !o.bool_or("WordWrap", false) && align == Align::None)
             .then(|| halign_of(o));
         let caption = o.str("Caption").map(trl).unwrap_or_default();
         let idx = self.controls.len();
@@ -638,6 +647,7 @@ impl Form {
                 items,
                 events: Vec::new(),
                 open_popup: None,
+                popup_owner: None,
             }),
             painters: RefCell::new(HashMap::new()),
             handlers: RefCell::new(Vec::new()),
@@ -904,6 +914,11 @@ impl Form {
     }
 
     /// Use a monospaced font for a control.
+    /// Font family of a control (`None` = form font).
+    pub fn set_font_family(&self, name: &str, family: Option<&'static str>) {
+        self.with(name, |c| c.font.family = family);
+    }
+
     pub fn set_mono(&self, name: &str, mono: bool) {
         self.with(name, |c| c.font.mono = mono);
     }
@@ -979,9 +994,12 @@ impl Form {
                     text.set("");
                 }
             }
-            State::ListBox { items, sel } => {
+            State::ListBox { items, sel, marks } => {
                 *items = new;
                 *sel = sel.filter(|&s| s < items.len());
+                if let Some(m) = marks {
+                    *m = vec![false; items.len()];
+                }
             }
             State::CheckList { items, checked, sel } => {
                 checked.resize(new.len(), false);
@@ -1013,10 +1031,40 @@ impl Form {
                 text.set(index.map(|i| items[i].as_str()).unwrap_or(""));
             }
             State::RadioGroup { index, items, .. } => *index = i.filter(|&i| i < items.len()),
-            State::ListBox { sel, items } => *sel = i.filter(|&i| i < items.len()),
+            State::ListBox { sel, items, marks } => {
+                *sel = i.filter(|&i| i < items.len());
+                if let Some(m) = marks {
+                    m.iter_mut().for_each(|x| *x = false);
+                    if let Some(s) = *sel {
+                        m[s] = true;
+                    }
+                }
+            }
             State::CheckList { sel, items, .. } => *sel = i.filter(|&i| i < items.len()),
             State::Pages { active } => *active = i.unwrap_or(0),
             _ => {}
+        });
+    }
+
+    /// Selected items of a list box (`Selected[]`; with single selection
+    /// the item index).
+    pub fn list_selected(&self, name: &str) -> Vec<usize> {
+        self.with(name, |c| match &c.state {
+            State::ListBox { marks: Some(m), .. } => m.iter().enumerate().filter(|(_, x)| **x).map(|(i, _)| i).collect(),
+            State::ListBox { sel, .. } => sel.iter().copied().collect(),
+            _ => Vec::new(),
+        })
+    }
+
+    /// Clear the selection of a list box.
+    pub fn clear_selection(&self, name: &str) {
+        self.with(name, |c| {
+            if let State::ListBox { sel, marks, .. } = &mut c.state {
+                *sel = None;
+                if let Some(m) = marks {
+                    m.iter_mut().for_each(|x| *x = false);
+                }
+            }
         });
     }
 
@@ -1229,6 +1277,11 @@ impl Form {
     /// Open a popup menu at `pos` (or the pointer).
     pub fn popup_menu(&self, menu: &str, pos: Option<egui::Pos2>) {
         self.data.borrow_mut().open_popup = Some((menu.to_string(), pos));
+    }
+
+    /// Control whose context menu was opened last (`PopupComponent`).
+    pub fn popup_owner(&self) -> Option<String> {
+        self.data.borrow().popup_owner.clone()
     }
 
     // ----------------------------------------------------------- events

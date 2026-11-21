@@ -55,6 +55,13 @@ fn body_size(ui: &Ui) -> f32 {
 }
 
 fn font_id(f: &FontStyle, body: f32) -> FontId {
+    if let Some(fam) = f.family {
+        let size = match (fam == super::fonts::PASSW).then(super::fonts::passw_size).flatten() {
+            Some(s) => s,
+            None => body * if f.scale > 0.0 { f.scale } else { 1.0 },
+        };
+        return FontId::new(size, FontFamily::Name(fam.into()));
+    }
     let family = if f.mono {
         FontFamily::Monospace
     } else if f.bold {
@@ -104,6 +111,12 @@ pub fn vk_to_key(vk: u16) -> Option<Key> {
         0x2e => Key::Delete,
         _ => return None,
     })
+}
+
+/// egui key → Windows virtual key code (digits and letters as on the
+/// main keyboard).
+pub fn key_to_vk(key: Key) -> Option<u16> {
+    (0u16..=0xff).find(|&vk| vk_to_key(vk) == Some(key))
 }
 
 /// VCL `TShortCut` → egui modifiers and key.
@@ -259,9 +272,12 @@ fn draw_label(ui: &mut Ui, c: &Control, enabled: bool, f: &mut Frame) {
     let text = strip_amp(&c.caption);
     let color = text_color(ui, &c.font, enabled);
     let fid = font_id(&c.font, f.body);
+    let lines = text.lines().count().max(1);
     let mut job = LayoutJob::simple(text, fid, color, if *wrap { c.rect.width() } else { f32::INFINITY });
     if !*wrap && c.autosize.is_none() {
         job.wrap = TextWrapping::truncate_at_width(c.rect.width().max(1.0));
+        // explicit line breaks are kept (VCL draws every line)
+        job.wrap.max_rows = lines;
     }
     job.halign = egui::Align::Min;
     let galley = ui.painter().layout_job(job);
@@ -273,6 +289,29 @@ fn draw_label(ui: &mut Ui, c: &Control, enabled: bool, f: &mut Frame) {
         f.events.push(Event::Click(c.name.clone()));
     }
     tooltip(resp, &c.hint);
+}
+
+/// Visible text of a `TLinkLabel` caption (without the `<a>` tags).
+fn link_text(caption: &str) -> String {
+    let mut out = String::new();
+    let mut rest = caption;
+    while let Some(lt) = rest.find('<') {
+        out.push_str(&rest[..lt]);
+        let tag = &rest[lt..];
+        if tag.starts_with("<a") || tag.starts_with("</a") {
+            match tag.find('>') {
+                Some(gt) => rest = &tag[gt + 1..],
+                None => {
+                    rest = "";
+                }
+            }
+        } else {
+            out.push('<');
+            rest = &tag[1..];
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// `TLinkLabel`: text with `<a href="…">…</a>` links.
@@ -602,12 +641,40 @@ fn draw_list(ui: &mut Ui, c: &mut Control, enabled: bool, f: &mut Frame) {
     at(ui, rect.shrink(2.0), enabled, |ui| {
         egui::ScrollArea::vertical().id_salt(id).auto_shrink(false).show(ui, |ui| {
             ui.with_layout(egui::Layout::top_down_justified(egui::Align::Min), |ui| match &mut c.state {
-                State::ListBox { items, sel } => {
+                State::ListBox { items, sel, marks } => {
                     for (i, it) in items.iter().enumerate() {
-                        let r = ui.selectable_label(*sel == Some(i), RichText::new(it.as_str()).font(fid.clone()));
-                        if r.clicked() && *sel != Some(i) {
-                            *sel = Some(i);
-                            f.events.push(Event::Change(name.clone()));
+                        let on = match marks {
+                            Some(m) => m[i],
+                            None => *sel == Some(i),
+                        };
+                        let r = ui.selectable_label(on, RichText::new(it.as_str()).font(fid.clone()));
+                        if r.clicked() {
+                            match marks {
+                                // Ctrl+click toggles, Shift+click selects a range
+                                Some(m) => {
+                                    let mods = ui.input(|i| i.modifiers);
+                                    if mods.command {
+                                        m[i] = !m[i];
+                                    } else if let (true, Some(a)) = (mods.shift, *sel) {
+                                        let (lo, hi) = (a.min(i), a.max(i));
+                                        for (j, x) in m.iter_mut().enumerate() {
+                                            *x = (lo..=hi).contains(&j);
+                                        }
+                                    } else {
+                                        m.iter_mut().for_each(|x| *x = false);
+                                        m[i] = true;
+                                    }
+                                    if !mods.shift {
+                                        *sel = Some(i);
+                                    }
+                                    f.events.push(Event::Change(name.clone()));
+                                }
+                                None if *sel != Some(i) => {
+                                    *sel = Some(i);
+                                    f.events.push(Event::Change(name.clone()));
+                                }
+                                None => {}
+                            }
                         }
                         if r.double_clicked() {
                             f.events.push(Event::DblClick(name.clone()));
@@ -917,7 +984,8 @@ impl Form {
         let mut d = self.data.borrow_mut();
         let mut measure = |c: &Control| {
             let fid = font_id(&c.font, body);
-            ctx.fonts_mut(|f| f.layout_no_wrap(strip_amp(&c.caption), fid, Color32::WHITE).size().x.ceil() + 1.0)
+            let text = if c.class == "TLinkLabel" { link_text(&c.caption) } else { strip_amp(&c.caption) };
+            ctx.fonts_mut(|f| f.layout_no_wrap(text, fid, Color32::WHITE).size().x.ceil() + 1.0)
         };
         layout::layout(&mut d, area, &mut measure);
     }
@@ -1073,9 +1141,13 @@ impl Form {
                     // context menu of the control
                     if let Some(menu) = d.controls[i].popup_menu.clone() {
                         let rect = d.controls[i].rect;
-                        let FormData { menus, items, .. } = &mut *d;
+                        let cname = d.controls[i].name.clone();
+                        let FormData { menus, items, popup_owner, .. } = &mut *d;
                         if let Some(nodes) = menus.get(&menu) {
                             let resp = ui.interact(rect, ui.id().with(("ctx", i)), Sense::click());
+                            if resp.secondary_clicked() {
+                                *popup_owner = Some(cname);
+                            }
                             resp.context_menu(|ui| menu_items(ui, nodes, items, &mut events));
                         }
                     }
@@ -1097,9 +1169,12 @@ impl Form {
                 tooltip(resp, &hint);
                 if let Some(menu) = menu {
                     let mut d = self.data.borrow_mut();
-                    let FormData { menus, items, .. } = &mut *d;
+                    let FormData { menus, items, popup_owner, .. } = &mut *d;
                     if let Some(nodes) = menus.get(&menu) {
                         let resp = ui.interact(rect, ui.id().with(("ctxc", &name)), Sense::click());
+                        if resp.secondary_clicked() {
+                            *popup_owner = Some(name.clone());
+                        }
                         resp.context_menu(|ui| menu_items(ui, nodes, items, &mut events));
                     }
                 }

@@ -188,3 +188,8 @@ pub async fn open_file(title: &str, dir: Option<&std::path::Path>, filters: &[Fi
 pub async fn save_file(title: &str, dir: Option<&std::path::Path>, name: Option<&str>, filters: &[Filter<'_>]) -> Option<std::path::PathBuf> {
     file_dialog(title, dir, name, filters).save_file().await.map(|f| f.path().to_path_buf())
 }
+
+/// Choose a folder.
+pub async fn pick_folder(title: &str) -> Option<std::path::PathBuf> {
+    file_dialog(title, None, None, &[]).pick_folder().await.map(|f| f.path().to_path_buf())
+}

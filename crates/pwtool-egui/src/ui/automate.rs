@@ -47,8 +47,53 @@ pub fn start(w: Rc<MainWindow>, script: String) {
                     let (tx, rx) = async_channel::bounded(1);
                     SNAP_DONE.with(|s| *s.borrow_mut() = Some(tx));
                     crate::windows::ctx().send_viewport_cmd(ViewportCommand::Screenshot(UserData::new(rest.to_string())));
-                    let _ = rx.recv().await;
+                    let _ = futures_util::future::select(Box::pin(rx.recv()), Box::pin(pwtool_app::rt::sleep(Duration::from_secs(5)))).await;
                 }
+                // picture of the form of another window, drawn in software
+                // (eframe takes screenshots of the main window only)
+                "snapw" => {
+                    let (id, path) = rest.split_once(' ').unwrap_or((rest, ""));
+                    match super::dialogs::form_of_window(id) {
+                        Some(form) => {
+                            let size = crate::windows::last_size(egui::ViewportId::from_hash_of(id))
+                                .unwrap_or_else(|| crate::vcl::window_size(&form, &crate::windows::ctx()));
+                            if let Err(e) = snap_form(&form, size, std::path::Path::new(path)) {
+                                eprintln!("automate: {path}: {e}");
+                            }
+                        }
+                        None => eprintln!("automate: no window {id}"),
+                    }
+                }
+                // commands for the form of another window: `fclick WIN NAME`,
+                // `ftoggle WIN NAME`, `ftext WIN NAME VALUE`, `fprint WIN NAME`,
+                // `fact WIN MENU`, `fsel WIN NAME INDEX`
+                "fclick" | "ftoggle" | "ftext" | "fprint" | "fact" | "fsel" => {
+                    let mut it = rest.splitn(3, ' ');
+                    let (win, name, val) = (it.next().unwrap_or(""), it.next().unwrap_or(""), it.next().unwrap_or(""));
+                    let Some(f) = super::dialogs::form_of_window(win) else {
+                        eprintln!("automate: no window {win}");
+                        continue;
+                    };
+                    match cmd {
+                        "fclick" => f.push_event(Event::Click(name.to_string())),
+                        "ftoggle" => {
+                            f.set_checked(name, !f.checked(name));
+                            f.push_event(Event::Click(name.to_string()));
+                        }
+                        "ftext" => {
+                            f.set_text(name, val);
+                            f.push_event(Event::Change(name.to_string()));
+                        }
+                        "fsel" => {
+                            f.set_item_index(name, val.parse().ok());
+                            f.push_event(Event::Change(name.to_string()));
+                        }
+                        "fact" => f.push_event(Event::Menu(name.to_string())),
+                        _ => println!("{win}.{name}={}", f.text(name)),
+                    }
+                    crate::windows::ctx().request_repaint();
+                }
+                "windows" => println!("open={}", crate::windows::open_ids().join(",")),
                 "quit" => {
                     crate::windows::ctx().send_viewport_cmd(ViewportCommand::Close);
                     return;
@@ -58,6 +103,32 @@ pub fn start(w: Rc<MainWindow>, script: String) {
             pwtool_app::rt::sleep(Duration::from_millis(50)).await;
         }
     });
+}
+
+thread_local! {
+    static SNAPSHOT: RefCell<Option<crate::vcl::snapshot::Snapshot>> = const { RefCell::new(None) };
+}
+
+/// Draw a form in a context of its own and save the picture.
+fn snap_form(form: &crate::vcl::Form, size: egui::Vec2, path: &std::path::Path) -> std::io::Result<()> {
+    let dark = crate::windows::ctx().global_style().visuals.dark_mode;
+    let img = SNAPSHOT.with(|s| {
+        let mut s = s.borrow_mut();
+        let snap = s.get_or_insert_with(|| {
+            let ctx = egui::Context::default();
+            crate::vcl::fonts::install(&ctx, &crate::vcl::fonts::user_font());
+            let mut snap = crate::vcl::snapshot::Snapshot::new(ctx);
+            snap.render(egui::vec2(100.0, 100.0), 1.0, 1, |_| {});
+            snap
+        });
+        snap.ctx.set_theme(if dark { egui::Theme::Dark } else { egui::Theme::Light });
+        snap.render(size, 1.0, 3, |ui| {
+            let fill = ui.visuals().panel_fill;
+            ui.painter().rect_filled(ui.max_rect(), 0.0, fill);
+            form.show(ui);
+        })
+    });
+    crate::vcl::snapshot::save_png(&img, path)
 }
 
 /// Save screenshots requested by `snap` (called every frame).

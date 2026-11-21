@@ -1,7 +1,7 @@
 //! Main window (`TMainForm`): the password generator. Port of the GTK
-//! version's `main_window.rs` to the `vcl` forms; tray, hot keys, autotype,
-//! tools and the password manager follow in later stages (their menu items
-//! do nothing yet).
+//! version's `main_window.rs` to the `vcl` forms. Child modules: tray, hot
+//! keys and autotype (`main_integration.rs`), tools (`main_tools.rs`),
+//! configuration, profile editor, character set builder, MP generator.
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -39,6 +39,16 @@ use crate::windows::{self, Content};
 
 #[path = "main_integration.rs"]
 mod integration;
+#[path = "main_tools.rs"]
+mod tools;
+#[path = "config_dlg.rs"]
+pub(crate) mod config_dlg;
+#[path = "profile_editor.rs"]
+mod profile_editor;
+#[path = "char_set_builder.rs"]
+mod char_set_builder;
+#[path = "mp_passw_gen.rs"]
+mod mp_passw_gen;
 
 const ENTROPY_SYSTEM: u32 = 24;
 const ENTROPY_MOUSECLICK: u32 = 2;
@@ -123,6 +133,7 @@ pub struct MainWindow {
     /// Edit receiving the next single password instead of `PasswBox`.
     pub gen_target: RefCell<Option<(Rc<Form>, String)>>,
     integ: integration::Integration,
+    tools: tools::ToolsState,
 }
 
 impl MainWindow {
@@ -157,6 +168,7 @@ impl MainWindow {
             last_pointer: Cell::new(None),
             gen_target: RefCell::new(None),
             integ: integration::Integration::new(),
+            tools: tools::ToolsState::new(),
         });
         w.setup();
         w
@@ -256,6 +268,7 @@ impl MainWindow {
         self.connect_events();
         self.setup_timer();
         self.setup_integration();
+        self.connect_tools();
         self.update_entropy_progress(true);
         self.set_advanced_btn_caption();
         let w = self.weak();
@@ -1610,6 +1623,7 @@ impl MainWindow {
         }
         self.timer_cnt.set(c);
         self.tray_timer();
+        self.tools_timer();
         let n = self.auto_clear_clip_cnt.get();
         if n > 0 {
             self.auto_clear_clip_cnt.set(n - 1);
@@ -1712,6 +1726,7 @@ impl MainWindow {
             ini.write_bool("Main", "PasswEditable", f.menu_checked("PasswBoxMenu_Editable"));
             ini.write_bool("Main", "EnablePasswTest", f.menu_checked("PasswBoxMenu_EnablePasswTest"));
         }
+        self.save_tools_config();
         let r = self.core.borrow_mut().save_config_to(path);
         match r {
             Ok(()) => true,
@@ -1789,16 +1804,18 @@ impl MainWindow {
     }
 
     /// Show start-up errors (`FormActivate`, once).
-    pub fn show_startup_errors(&self) {
+    pub fn show_startup_errors(self: &Rc<Self>) {
         if self.startup_shown.replace(true) {
             return;
         }
+        self.auto_check_updates();
         let errs: Vec<String> = self.core.borrow_mut().startup_errors.drain(..).collect();
         if !errs.is_empty() {
             let mut m = trl_format("%1 encountered %2 error(s) during startup:", &[PROGRAM_NAME, &errs.len().to_string()]);
             for e in errs {
                 m.push_str("\n- ");
                 m.push_str(&e);
+                eprintln!("pwtool: {e}");
             }
             msg(ROOT, &m, MsgIcon::Warning);
         }
@@ -1812,6 +1829,7 @@ impl Content for MainContent {
     fn ui(&self, ui: &mut Ui) {
         let w = &self.0;
         w.update_passw_box_menu();
+        w.update_tool_menus();
         if let Some(pl) = w.passw_list.borrow().as_ref() {
             pl.update_menu(false);
         }

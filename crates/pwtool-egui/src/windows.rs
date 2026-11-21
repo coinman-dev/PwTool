@@ -54,6 +54,8 @@ pub struct Window {
     /// (`OnCloseQuery`).
     pub on_close: RefCell<Option<Box<dyn Fn() -> bool>>>,
     shown: Cell<bool>,
+    /// Size of the window after the last frame (resized by the user).
+    pub last_size: Cell<Option<Vec2>>,
     #[cfg(windows)]
     owner_set: Cell<bool>,
 }
@@ -72,6 +74,7 @@ impl Window {
             decorated: true,
             on_close: RefCell::new(None),
             shown: Cell::new(false),
+            last_size: Cell::new(None),
             #[cfg(windows)]
             owner_set: Cell::new(false),
         }
@@ -79,6 +82,12 @@ impl Window {
 
     pub fn modal(mut self, on: bool) -> Self {
         self.modal = on;
+        self
+    }
+
+    /// Draw `content` instead (a wrapper of the form, for example).
+    pub fn with_content(mut self, content: Rc<dyn Content>) -> Self {
+        self.content = content;
         self
     }
 
@@ -131,6 +140,28 @@ pub fn is_open(id: ViewportId) -> bool {
     WINDOWS.with(|ws| ws.borrow().iter().any(|x| x.id == id))
 }
 
+/// Size of an open window after the last frame.
+pub fn last_size(id: ViewportId) -> Option<Vec2> {
+    WINDOWS.with(|ws| ws.borrow().iter().find(|x| x.id == id).and_then(|x| x.last_size.get()))
+}
+
+/// Bring an open window to the front.
+pub fn focus(id: ViewportId) {
+    if is_open(id) || id == ViewportId::ROOT {
+        ctx().send_viewport_cmd_to(id, ViewportCommand::Focus);
+    }
+}
+
+/// Show a window that may be open already: an open one is only brought
+/// to the front (`Show()` of a form that is kept).
+pub fn present(w: Rc<Window>) {
+    if is_open(w.id) {
+        focus(w.id);
+    } else {
+        open(w);
+    }
+}
+
 /// The modal window that blocks `id`, if any.
 pub fn modal_child(id: ViewportId) -> Option<ViewportId> {
     WINDOWS.with(|ws| ws.borrow().iter().rev().find(|x| x.modal && x.parent == id).map(|x| x.id))
@@ -155,6 +186,7 @@ pub fn show(ui: &mut Ui, id: ViewportId, content: &dyn Content) {
         h(&ctx);
     }
     ui.add_enabled_ui(blocker.is_none(), |ui| content.ui(ui));
+    crate::ui::automate::save_screenshots(&ctx);
     if let Some(b) = blocker {
         if !embed_modal() && ctx.input(|i| i.pointer.any_pressed()) {
             ctx.send_viewport_cmd_to(b, ViewportCommand::Focus);
@@ -209,6 +241,9 @@ fn show_window(ctx: &Context, w: &Rc<Window>) {
         ctx.set_embed_viewports(false);
     }
     w.shown.set(true);
+    if let Some(r) = ctx.input_for(w.id, |i| i.viewport().inner_rect) {
+        w.last_size.set(Some(r.size()));
+    }
     #[cfg(windows)]
     if !w.owner_set.get() && !embed {
         if win32::set_owner(&w.title.borrow(), w.id, w.parent) {
@@ -311,4 +346,9 @@ mod win32 {
         KNOWN.with(|k| k.borrow_mut().push((id, dlg as isize)));
         true
     }
+}
+
+/// Titles of the open windows (test automation).
+pub fn open_ids() -> Vec<String> {
+    WINDOWS.with(|ws| ws.borrow().iter().map(|w| w.title.borrow().clone()).collect())
 }

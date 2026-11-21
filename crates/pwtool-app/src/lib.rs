@@ -9,6 +9,7 @@
 pub mod app;
 pub mod app_config;
 pub mod autotype;
+pub mod char_set_builder;
 pub mod cli;
 pub mod form;
 pub mod icons;

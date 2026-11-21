@@ -23,8 +23,8 @@ pub mod active_window;
 #[path = "clipboard_win.rs"]
 pub mod clipboard;
 
-#[cfg(windows)]
-#[path = "single_instance_win.rs"]
+#[cfg_attr(unix, path = "single_instance_unix.rs")]
+#[cfg_attr(windows, path = "single_instance_win.rs")]
 pub mod single_instance;
 
 pub mod autostart;

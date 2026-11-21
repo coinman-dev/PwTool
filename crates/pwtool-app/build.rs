@@ -4,7 +4,8 @@ use std::fmt::Write;
 use std::path::Path;
 
 fn main() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/icons");
+    let manifest = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
+    let root = Path::new(&manifest).join("../../assets/icons");
     println!("cargo:rerun-if-changed={}", root.display());
     for d in ["Main", "PasswManager"] {
         for c in ["ImageCollection16", "ImageCollection32"] {

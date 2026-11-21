@@ -365,7 +365,12 @@ impl MainWindow {
                 show_main(false);
                 Some(GenDest::Autotype)
             }
-            // password manager and MP generator: stage 3c/4
+            hot_key_action::SHOW_MPPG => {
+                show_main(true);
+                self.mp_passw_gen();
+                None
+            }
+            // password manager: stage 4
             _ => {
                 show_main(true);
                 None

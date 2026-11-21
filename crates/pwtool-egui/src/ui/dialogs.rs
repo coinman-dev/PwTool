@@ -20,8 +20,19 @@ pub fn load(name: &str) -> Rc<Form> {
     Rc::new(vcl::load_form(&windows::ctx(), name))
 }
 
+thread_local! {
+    /// Forms of the windows by window id (test automation).
+    static FORMS: RefCell<std::collections::HashMap<String, std::rc::Weak<Form>>> = RefCell::new(std::collections::HashMap::new());
+}
+
+/// The form last shown in window `id` (test automation).
+pub fn form_of_window(id: &str) -> Option<Rc<Form>> {
+    FORMS.with(|f| f.borrow().get(id).and_then(|w| w.upgrade()))
+}
+
 /// A window for a form: size of the form, caption as title.
 pub fn form_window(id: &str, form: Rc<Form>, parent: ViewportId, modal: bool) -> Window {
+    FORMS.with(|f| f.borrow_mut().insert(id.to_string(), Rc::downgrade(&form)));
     let ctx = windows::ctx();
     let size = vcl::window_size(&form, &ctx);
     let title = strip_amp(&form.caption());

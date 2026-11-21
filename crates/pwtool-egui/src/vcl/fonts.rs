@@ -46,10 +46,7 @@ pub const DEFAULT_SIZE: f32 = 12.0;
 #[cfg(not(windows))]
 pub const DEFAULT_SIZE: f32 = 13.0;
 
-struct Face {
-    data: Vec<u8>,
-    index: u32,
-}
+type Face = Arc<FontData>;
 
 fn database() -> &'static fontdb::Database {
     static DB: OnceLock<fontdb::Database> = OnceLock::new();
@@ -58,6 +55,28 @@ fn database() -> &'static fontdb::Database {
         db.load_system_fonts();
         db
     })
+}
+
+thread_local! {
+    /// Loaded faces by id (the fonts are installed again when the user
+    /// changes a font).
+    static CACHE: std::cell::RefCell<std::collections::HashMap<fontdb::ID, Face>> = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+fn face_data(id: fontdb::ID) -> Option<Face> {
+    if let Some(f) = CACHE.with(|c| c.borrow().get(&id).cloned()) {
+        return Some(f);
+    }
+    let (src, index) = database().face_source(id)?;
+    let data = match src {
+        fontdb::Source::File(p) | fontdb::Source::SharedFile(p, _) => std::fs::read(p).ok()?,
+        fontdb::Source::Binary(b) => b.as_ref().as_ref().to_vec(),
+    };
+    let mut fd = FontData::from_owned(data);
+    fd.index = index;
+    let f = Arc::new(fd);
+    CACHE.with(|c| c.borrow_mut().insert(id, f.clone()));
+    Some(f)
 }
 
 fn load(family: &str, weight: fontdb::Weight, style: fontdb::Style) -> Option<Face> {
@@ -69,12 +88,22 @@ fn load(family: &str, weight: fontdb::Weight, style: fontdb::Style) -> Option<Fa
     if (weight == fontdb::Weight::BOLD) != (info.weight.0 >= 600) || (style != fontdb::Style::Normal) != (info.style != fontdb::Style::Normal) {
         return None;
     }
-    let (src, index) = db.face_source(id)?;
-    let data = match src {
-        fontdb::Source::File(p) | fontdb::Source::SharedFile(p, _) => std::fs::read(p).ok()?,
-        fontdb::Source::Binary(b) => b.as_ref().as_ref().to_vec(),
-    };
-    Some(Face { data, index })
+    face_data(id)
+}
+
+/// A face of `family` close to the wanted style (any face if not found).
+fn load_near(family: &str, bold: bool, italic: bool) -> Option<Face> {
+    let w = if bold { fontdb::Weight::BOLD } else { fontdb::Weight::NORMAL };
+    let s = if italic { fontdb::Style::Italic } else { fontdb::Style::Normal };
+    if let Some(f) = load(family, w, s) {
+        return Some(f);
+    }
+    let db = database();
+    let id = db.query(&fontdb::Query { families: &[fontdb::Family::Name(family)], weight: w, style: s, ..Default::default() })?;
+    if !db.face(id)?.families.iter().any(|(n, _)| n == family) {
+        return None;
+    }
+    face_data(id)
 }
 
 /// Font chosen by the user (`GUIFontString`), if any: family and size in points.
@@ -96,9 +125,7 @@ pub fn install(ctx: &egui::Context, user: &UserFont) -> FontSet {
     let egui_prop = defs.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
     let egui_mono = defs.families.get(&FontFamily::Monospace).cloned().unwrap_or_default();
     let add = |defs: &mut FontDefinitions, key: String, face: Face| {
-        let mut fd = FontData::from_owned(face.data);
-        fd.index = face.index;
-        defs.font_data.insert(key.clone(), Arc::new(fd));
+        defs.font_data.insert(key.clone(), face);
         key
     };
     let normal = fontdb::Style::Normal;
@@ -142,6 +169,17 @@ pub fn install(ctx: &egui::Context, user: &UserFont) -> FontSet {
     defs.families.insert(FontFamily::Monospace, chain(mono.as_ref().or(regular.as_ref()), &egui_mono));
     defs.families.insert(FontFamily::Name(BOLD.into()), chain(bold.as_ref().or(regular.as_ref()), &egui_prop));
     defs.families.insert(FontFamily::Name(ITALIC.into()), chain(italic.as_ref().or(regular.as_ref()), &egui_prop));
+    // fonts chosen by the user for the password boxes and the font dialog
+    let (passw, preview) = EXTRA.with(|e| {
+        let mut e = e.borrow_mut();
+        e.user = user.clone();
+        (e.passw.clone(), e.preview.clone())
+    });
+    let passw = passw
+        .and_then(|p| load_near(&p.name, p.style & 1 != 0, p.style & 2 != 0).map(|f| add(&mut defs, format!("passw:{}", p.name), f)));
+    defs.families.insert(FontFamily::Name(PASSW.into()), chain(passw.as_ref().or(mono.as_ref()).or(regular.as_ref()), &egui_mono));
+    let preview = preview.and_then(|(p, b, i)| load_near(&p, b, i).map(|f| add(&mut defs, format!("preview:{p}:{b}:{i}"), f)));
+    defs.families.insert(FontFamily::Name(PREVIEW.into()), chain(preview.as_ref().or(regular.as_ref()), &egui_prop));
     ctx.set_fonts(defs);
 
     let body = user.size.filter(|s| (6.0..=40.0).contains(s)).unwrap_or(DEFAULT_SIZE);
@@ -156,4 +194,119 @@ pub fn install(ctx: &egui::Context, user: &UserFont) -> FontSet {
         .into();
     });
     FontSet { body_size: body }
+}
+
+// ---------------------------------------------------------------------------
+// Fonts chosen by the user
+
+/// Family of the password boxes (`PasswBoxFont`).
+pub const PASSW: &str = "passw";
+/// Family of the sample in the font dialog.
+pub const PREVIEW: &str = "preview";
+
+/// Font of a `FontToString()` string ("Name;Size;Style;Color"; size in
+/// points; style bits: 1 bold, 2 italic, 4 underline, 8 strikeout).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FontSpec {
+    pub name: String,
+    pub size: i32,
+    pub style: i32,
+    pub color: String,
+}
+
+impl FontSpec {
+    /// `StringToFont()`; `None` if name or size are missing.
+    pub fn parse(s: &str) -> Option<FontSpec> {
+        let mut it = s.split(';');
+        let name = it.next()?.trim().to_string();
+        let size: i32 = it.next()?.trim().parse().ok().filter(|&v| v != 0)?;
+        let style = it.next().and_then(|v| v.trim().parse().ok()).unwrap_or(0);
+        let color = it.next().unwrap_or("clWindowText").trim().to_string();
+        if name.is_empty() {
+            return None;
+        }
+        Some(FontSpec { name, size, style, color })
+    }
+
+    /// `FontToString()`.
+    pub fn to_font_string(&self) -> String {
+        format!("{};{};{};{}", self.name, self.size, self.style, self.color)
+    }
+
+    /// Size in egui points (1 pt = 4/3 px at 96 dpi).
+    pub fn points(&self) -> f32 {
+        self.size.unsigned_abs() as f32 * 4.0 / 3.0
+    }
+
+    /// The user interface font of this specification.
+    pub fn user_font(&self) -> UserFont {
+        UserFont { family: Some(self.name.clone()), size: Some(self.points()) }
+    }
+}
+
+struct Extra {
+    user: UserFont,
+    passw: Option<FontSpec>,
+    preview: Option<(String, bool, bool)>,
+}
+
+thread_local! {
+    static EXTRA: std::cell::RefCell<Extra> = const { std::cell::RefCell::new(Extra { user: UserFont { family: None, size: None }, passw: None, preview: None }) };
+}
+
+static PASSW_SIZE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Size of the password box font in points (`None` = size of the control).
+pub fn passw_size() -> Option<f32> {
+    let v = f32::from_bits(PASSW_SIZE.load(std::sync::atomic::Ordering::Relaxed));
+    (v > 0.0).then_some(v)
+}
+
+/// The password box font (`None` = monospaced default).
+pub fn passw_font() -> Option<FontSpec> {
+    EXTRA.with(|e| e.borrow().passw.clone())
+}
+
+fn reinstall(ctx: &egui::Context) {
+    let user = EXTRA.with(|e| e.borrow().user.clone());
+    install(ctx, &user);
+}
+
+/// Set the password box font and install the fonts again.
+pub fn set_passw_font(ctx: &egui::Context, f: Option<FontSpec>) {
+    PASSW_SIZE.store(f.as_ref().map_or(0.0f32, |f| f.points()).to_bits(), std::sync::atomic::Ordering::Relaxed);
+    EXTRA.with(|e| e.borrow_mut().passw = f);
+    reinstall(ctx);
+}
+
+/// Family and style (bold, italic) of the [`PREVIEW`] font (`None` = user
+/// interface font).
+pub fn set_preview_font(ctx: &egui::Context, font: Option<(&str, bool, bool)>) {
+    let changed = EXTRA.with(|e| {
+        let mut e = e.borrow_mut();
+        let new = font.map(|(f, b, i)| (f.to_string(), b, i));
+        let ch = e.preview != new;
+        e.preview = new;
+        ch
+    });
+    if changed {
+        reinstall(ctx);
+    }
+}
+
+/// Names of all font families of the system, sorted, and whether a
+/// family is monospaced.
+pub fn families() -> Vec<(String, bool)> {
+    let mut v: Vec<(String, bool)> = database()
+        .faces()
+        .filter_map(|f| f.families.first().map(|(n, _)| (n.clone(), f.monospaced)))
+        .collect();
+    v.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()).then(a.0.cmp(&b.0)));
+    v.dedup_by(|a, b| a.0 == b.0);
+    v
+}
+
+/// The user interface font installed last.
+pub fn user_font() -> UserFont {
+    EXTRA.with(|e| e.borrow().user.clone())
 }
