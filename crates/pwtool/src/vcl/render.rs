@@ -531,9 +531,10 @@ fn draw_combo(ui: &mut Ui, c: &mut Control, enabled: bool, f: &mut Frame) {
             ));
             let popup = egui::Popup::menu(&b).width(rect.width()).align(egui::RectAlign::BOTTOM_END);
             popup.show(|ui| {
+                ui.spacing_mut().interact_size.y = rect.height();
                 egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
                     for (i, it) in items.iter().enumerate() {
-                        if ui.selectable_label(*index == Some(i), it.as_str()).clicked() {
+                        if ui.selectable_label(*index == Some(i), RichText::new(it.as_str()).font(fid.clone())).clicked() {
                             *index = Some(i);
                             text.set(it);
                             changed = true;
@@ -554,10 +555,15 @@ fn draw_combo(ui: &mut Ui, c: &mut Control, enabled: bool, f: &mut Frame) {
             te
         } else {
             let mut changed = false;
+            // as tall as the control (like the buttons and edits next to it)
+            ui.spacing_mut().interact_size.y = rect.height();
+            let row_h = rect.height();
             let ir = egui::ComboBox::from_id_salt(id)
                 .width(rect.width() - ui.spacing().icon_width - 8.0)
                 .selected_text(RichText::new(text.as_str()).font(fid.clone()))
                 .show_ui(ui, |ui| {
+                    // list rows as tall as the field
+                    ui.spacing_mut().interact_size.y = row_h;
                     for (i, it) in items.iter().enumerate() {
                         if ui.selectable_label(*index == Some(i), RichText::new(it.as_str()).font(fid.clone())).clicked() && *index != Some(i)
                         {
@@ -1053,10 +1059,19 @@ fn draw_one(ui: &mut Ui, controls: &mut [Control], idx: usize, enabled: bool, f:
         State::UpDown { .. } => {
             let half = Rect::from_min_size(rect.min, vec2(rect.width(), rect.height() / 2.0));
             let lower = half.translate(vec2(0.0, rect.height() / 2.0));
-            for (r, d, sym) in [(half, 1, "⏶"), (lower, -1, "⏷")] {
-                let resp = at(ui, r, enabled, |ui| {
-                    ui.add_sized(r.size(), egui::Button::new(RichText::new(sym).size(r.height().clamp(6.0, 12.0))).frame_when_inactive(true))
-                });
+            for (r, d) in [(half, 1), (lower, -1)] {
+                let resp = at(ui, r, enabled, |ui| ui.add_sized(r.size(), egui::Button::new("").frame_when_inactive(true)));
+                // the arrow: a triangle filling the half (glyphs were tiny)
+                let color = if enabled { ui.visuals().widgets.style(&resp).fg_stroke.color } else { ui.visuals().weak_text_color() };
+                let c = r.center();
+                let w = (r.width() * 0.28).min(r.height() * 0.45).max(2.5);
+                let h = w * 0.75;
+                let pts = if d > 0 {
+                    vec![pos2(c.x - w, c.y + h * 0.5), pos2(c.x + w, c.y + h * 0.5), pos2(c.x, c.y - h * 0.5)]
+                } else {
+                    vec![pos2(c.x - w, c.y - h * 0.5), pos2(c.x + w, c.y - h * 0.5), pos2(c.x, c.y + h * 0.5)]
+                };
+                ui.painter().add(egui::Shape::convex_polygon(pts, color, Stroke::NONE));
                 if resp.clicked() {
                     f.deferred.push(Deferred::UpDown(idx, d));
                 }
