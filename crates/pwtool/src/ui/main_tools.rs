@@ -300,7 +300,8 @@ impl MainWindow {
         let ini = &mut core.ini;
         for (id, s) in sizes {
             ini.write_integer(id, "WindowWidth", s.x as i64);
-            if id != "CreateRandDataFile" && id != "CreateTrigramFile" {
+            // windows of a fixed height
+            if !["CreateRandDataFile", "CreateTrigramFile", "MPPasswGen"].contains(&id) {
                 ini.write_integer(id, "WindowHeight", s.y as i64);
             }
         }

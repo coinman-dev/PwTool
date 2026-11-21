@@ -389,7 +389,10 @@ impl MainWindow {
                 d
             }
         };
-        let win = self.show_tool(WINDOW_ID, CONFIG_ID, true, &d.form, ROOT, false);
+        // nothing in the window grows with its height: only its width
+        // changes (a taller window had empty space between the groups)
+        let win = self.show_tool(WINDOW_ID, CONFIG_ID, false, &d.form, ROOT, false);
+        win.max_height.set(Some(win.min_size.y));
         let w = self.weak();
         let wid = Rc::downgrade(&win);
         let dd = Rc::downgrade(&d);

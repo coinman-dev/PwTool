@@ -58,6 +58,8 @@ pub struct Window {
     pub parent: ViewportId,
     pub size: Cell<Vec2>,
     pub min_size: Vec2,
+    /// Largest height of a resizable window (one that only gets wider).
+    pub max_height: Cell<Option<f32>>,
     pub resizable: bool,
     pub decorated: bool,
     /// Asked when the user closes the window; `false` keeps it open
@@ -80,6 +82,7 @@ impl Window {
             parent,
             size: Cell::new(size),
             min_size: Vec2::ZERO,
+            max_height: Cell::new(None),
             resizable: false,
             decorated: true,
             on_close: RefCell::new(None),
@@ -298,7 +301,11 @@ fn show_window(ctx: &Context, w: &Rc<Window>) {
     let embed = w.modal && embed_modal();
     let mut size = w.size.get();
     let mut min = if w.resizable { w.min_size } else { size };
-    let mut max = (!w.resizable).then_some(size);
+    // (a finite width: winit takes no infinite maximum)
+    let mut max = if w.resizable { w.max_height.get().map(|h| egui::vec2(100_000.0, h)) } else { Some(size) };
+    if let Some(m) = max {
+        size = size.min(m);
+    }
     if embed {
         // a dialog drawn inside its parent is no larger than the parent:
         // its controls follow their anchors to the smaller size
