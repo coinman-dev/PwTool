@@ -7,7 +7,7 @@
 <h1 align="center">Password Tool</h1>
 <p align="center">Криптографически стойкий генератор паролей и зашифрованный менеджер паролей для Linux и Windows.</p>
 
-[![Релиз](https://img.shields.io/badge/release-0.1.0--beta-orange)](https://github.com/coinman-dev/PwTool/releases/tag/v0.1.0-beta)
+[![Релиз](https://img.shields.io/badge/release-0.2.0--beta-orange)](https://github.com/coinman-dev/PwTool/releases/tag/v0.2.0-beta)
 [![Сборка](https://github.com/coinman-dev/PwTool/actions/workflows/release.yml/badge.svg)](https://github.com/coinman-dev/PwTool/actions/workflows/release.yml)
 [![Linux](https://img.shields.io/badge/Linux-Ubuntu%2024.04%2B%20%2F%20Debian%2013%2B-blue)](#скачать)
 [![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011%20x64-blue)](#скачать)
@@ -26,7 +26,7 @@
   <img src="doc/images/ru/main.png" alt="Password Tool: главное окно с генератором паролей и 16-сегментным индикатором стойкости">
 </p>
 
-> **0.1.0-beta — предварительный релиз.**
+> **0.2.0-beta — предварительный релиз.**
 > Держите резервные копии важных баз `.pwdb` при тестировании бета-версий, а об ошибках
 > сообщайте в [GitHub Issues](https://github.com/coinman-dev/PwTool/issues). Password Tool —
 > независимый порт и не связан с автором Password Tech.
@@ -35,9 +35,9 @@
 
 | Вариант | Скачать | Как использовать |
 |---|---|---|
-| Пакет для Linux | [pwtool_0.1.0.beta_amd64.deb](https://github.com/coinman-dev/PwTool/releases/download/v0.1.0-beta/pwtool_0.1.0.beta_amd64.deb) | `sudo apt install ./pwtool_0.1.0.beta_amd64.deb` ставит Password Tool с пунктом меню и значками. |
-| Установщик для Windows | `pwtool_<версия>_windows_x64_setup.exe` на [странице релизов](https://github.com/coinman-dev/PwTool/releases) (начиная со следующего релиза) | Устанавливает для всех пользователей или только для вас (без прав администратора), с ярлыком в «Пуске» и программой удаления. |
-| Переносная версия для Windows | `pwtool_<версия>_windows_x64.exe` на [странице релизов](https://github.com/coinman-dev/PwTool/releases) (начиная со следующего релиза) | Один файл: сохраните в любую папку и запустите. Ничего не устанавливается. |
+| Пакет для Linux | [pwtool_0.2.0.beta_amd64.deb](https://github.com/coinman-dev/PwTool/releases/download/v0.2.0-beta/pwtool_0.2.0.beta_amd64.deb) | `sudo apt install ./pwtool_0.2.0.beta_amd64.deb` ставит Password Tool с пунктом меню и значками. |
+| Установщик для Windows | [pwtool_0.2.0.beta_windows_x64_setup.exe](https://github.com/coinman-dev/PwTool/releases/download/v0.2.0-beta/pwtool_0.2.0.beta_windows_x64_setup.exe) | Устанавливает для всех пользователей или только для вас (без прав администратора), с ярлыком в «Пуске» и программой удаления. |
+| Переносная версия для Windows | [pwtool_0.2.0.beta_windows_x64.exe](https://github.com/coinman-dev/PwTool/releases/download/v0.2.0-beta/pwtool_0.2.0.beta_windows_x64.exe) | Один файл: сохраните в любую папку и запустите. Ничего не устанавливается. |
 
 Переводы, примеры скриптов и руководства в PDF встроены в программу.
 Linux: Ubuntu 24.04 и новее, Debian 13 и новее, amd64, Wayland или X11 с OpenGL.
@@ -49,9 +49,9 @@ Windows: 10 или 11, x64.
 
 ## Быстрый старт
 
-1. Linux: установите `.deb`-пакет командой `sudo apt install ./pwtool_0.1.0.beta_amd64.deb`.
-   Windows: запустите `pwtool_<версия>_windows_x64_setup.exe` или сохраните переносной
-   `pwtool_<версия>_windows_x64.exe` в любую папку.
+1. Linux: установите `.deb`-пакет командой `sudo apt install ./pwtool_0.2.0.beta_amd64.deb`.
+   Windows: запустите `pwtool_0.2.0.beta_windows_x64_setup.exe` или сохраните переносной
+   `pwtool_0.2.0.beta_windows_x64.exe` в любую папку.
 2. Откройте **Password Tool** из меню приложений (**Служебные**) или запустите `pwtool`;
    в Windows запустите `.exe` (его можно закрепить в «Пуске» или на панели задач).
 3. Выберите набор символов, список слов для парольной фразы, шаблон формата или скрипт Lua

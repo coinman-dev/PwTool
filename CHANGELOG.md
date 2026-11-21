@@ -2,7 +2,7 @@
 
 # Changelog
 
-## Unreleased
+## 0.2.0-beta — 2026-11-21
 
 ### Added
 
@@ -70,6 +70,15 @@
   them.
 - Hungarian translation: the "At least" check boxes of the Character Set Builder showed a
   wrong text taken over from the original translation.
+- Wayland: a dialog drawn inside its parent window is no larger than the parent (the
+  Configuration window with a large remembered size was cut off), and opening a dialog
+  inside PassCube no longer makes the program fail with a Wayland protocol error.
+- The main window is no longer cut off at the status bar on Wayland with fractional
+  scaling (eframe took a 2560x1440 monitor at 125 % for 1280x720).
+- PassCube: the splitters between the tag list, the entry list and the edit panel can be
+  moved; the entry list ends at its last column, and the edit panel keeps its design width.
+- The master password generator window has a fixed size (a taller window showed empty
+  space between its groups); the Close button of the profile editor is at the right.
 
 ### Known limitations
 

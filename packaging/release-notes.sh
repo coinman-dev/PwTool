@@ -38,6 +38,7 @@ cat <<EOF
 $kind for Linux (Ubuntu 24.04+, Debian 13+, amd64) and Windows (10/11, x64).
 
 - **pwtool_${deb_v}_amd64.deb** — Debian/Ubuntu package: \`sudo apt install ./pwtool_${deb_v}_amd64.deb\` installs **Password Tool** with its desktop entry and icons.
+- **pwtool_${deb_v}_windows_x64_setup.exe** — Windows installer: for all users or only for you (no administrator rights needed), with a Start menu entry and an uninstaller.
 - **pwtool_${deb_v}_windows_x64.exe** — the Windows program in one file: no installation, run it from any folder.
 
 Translations, script examples and the user manuals are built into the program.

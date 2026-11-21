@@ -7,7 +7,7 @@
 <h1 align="center">Password Tool</h1>
 <p align="center">Cryptographically secure password generator and encrypted password manager for Linux and Windows.</p>
 
-[![Release](https://img.shields.io/badge/release-0.1.0--beta-orange)](https://github.com/coinman-dev/PwTool/releases/tag/v0.1.0-beta)
+[![Release](https://img.shields.io/badge/release-0.2.0--beta-orange)](https://github.com/coinman-dev/PwTool/releases/tag/v0.2.0-beta)
 [![Build](https://github.com/coinman-dev/PwTool/actions/workflows/release.yml/badge.svg)](https://github.com/coinman-dev/PwTool/actions/workflows/release.yml)
 [![Linux](https://img.shields.io/badge/Linux-Ubuntu%2024.04%2B%20%2F%20Debian%2013%2B-blue)](#download)
 [![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011%20x64-blue)](#download)
@@ -24,7 +24,7 @@ profiles, word lists, Lua scripts, and translations are compatible with the orig
   <img src="doc/images/en/main.png" alt="Password Tool: main window with password generator and 16-block strength meter">
 </p>
 
-> **0.1.0-beta is a prerelease.**
+> **0.2.0-beta is a prerelease.**
 > Keep backups of important `.pwdb` databases before testing new releases, and report any
 > issues on [GitHub Issues](https://github.com/coinman-dev/PwTool/issues). Password Tool
 > is an independent port and is not affiliated with the author of Password Tech.
@@ -33,9 +33,9 @@ profiles, word lists, Lua scripts, and translations are compatible with the orig
 
 | Edition | Download | Usage |
 |---|---|---|
-| Linux package | [pwtool_0.1.0.beta_amd64.deb](https://github.com/coinman-dev/PwTool/releases/download/v0.1.0-beta/pwtool_0.1.0.beta_amd64.deb) | `sudo apt install ./pwtool_0.1.0.beta_amd64.deb` installs Password Tool with its menu entry and icons. |
-| Windows installer | `pwtool_<version>_windows_x64_setup.exe` on the [releases page](https://github.com/coinman-dev/PwTool/releases) (from the next release on) | Installs for all users or only for you (no administrator rights needed), with a Start menu entry and an uninstaller. |
-| Windows portable | `pwtool_<version>_windows_x64.exe` on the [releases page](https://github.com/coinman-dev/PwTool/releases) (from the next release on) | One file: save it to any folder and run it. Nothing is installed. |
+| Linux package | [pwtool_0.2.0.beta_amd64.deb](https://github.com/coinman-dev/PwTool/releases/download/v0.2.0-beta/pwtool_0.2.0.beta_amd64.deb) | `sudo apt install ./pwtool_0.2.0.beta_amd64.deb` installs Password Tool with its menu entry and icons. |
+| Windows installer | [pwtool_0.2.0.beta_windows_x64_setup.exe](https://github.com/coinman-dev/PwTool/releases/download/v0.2.0-beta/pwtool_0.2.0.beta_windows_x64_setup.exe) | Installs for all users or only for you (no administrator rights needed), with a Start menu entry and an uninstaller. |
+| Windows portable | [pwtool_0.2.0.beta_windows_x64.exe](https://github.com/coinman-dev/PwTool/releases/download/v0.2.0-beta/pwtool_0.2.0.beta_windows_x64.exe) | One file: save it to any folder and run it. Nothing is installed. |
 
 Translations, script examples, and the PDF manuals are built into the program.
 Linux: Ubuntu 24.04 or newer, Debian 13 or newer, amd64, Wayland or X11 with OpenGL.
@@ -47,9 +47,9 @@ Update checks contact only GitHub and can be disabled in **Options → Configura
 
 ## Quick start
 
-1. Linux: install the `.deb` package with `sudo apt install ./pwtool_0.1.0.beta_amd64.deb`.
-   Windows: run `pwtool_<version>_windows_x64_setup.exe`, or save the portable
-   `pwtool_<version>_windows_x64.exe` to any folder.
+1. Linux: install the `.deb` package with `sudo apt install ./pwtool_0.2.0.beta_amd64.deb`.
+   Windows: run `pwtool_0.2.0.beta_windows_x64_setup.exe`, or save the portable
+   `pwtool_0.2.0.beta_windows_x64.exe` to any folder.
 2. Open **Password Tool** from your application menu (**Utilities**) or run `pwtool`;
    on Windows start the `.exe` (pin it to Start or the taskbar if you like).
 3. Choose a character set, passphrase word list, format string, or Lua script and click
