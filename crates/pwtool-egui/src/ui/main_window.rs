@@ -131,7 +131,7 @@ pub struct MainWindow {
     profile_list_guard: Cell<bool>,
     last_pointer: Cell<Option<egui::Pos2>>,
     /// Edit receiving the next single password instead of `PasswBox`.
-    pub gen_target: RefCell<Option<(Rc<Form>, String)>>,
+    pub gen_target: RefCell<Option<Rc<dyn Fn(&str)>>>,
     integ: integration::Integration,
     tools: tools::ToolsState,
 }
@@ -762,7 +762,7 @@ impl MainWindow {
         set("PasswBoxMenu_Paste", editable);
         set("PasswBoxMenu_PerformAutotype", false);
         set("PasswBoxMenu_Delete", editable && selected);
-        set("PasswBoxMenu_AddToDb", false);
+        set("PasswBoxMenu_AddToDb", selected && self.db_open());
         set("PasswBoxMenu_SelectAll", has_text);
         set("PasswBoxMenu_SaveAsFile", has_text);
         set("PasswBoxMenu_EnablePasswTest", editable);
@@ -1421,8 +1421,8 @@ impl MainWindow {
         if summary.count != 0 {
             match dest {
                 GenDest::GuiSingle if gen_target.is_some() => {
-                    if let Some((form, name)) = &gen_target {
-                        form.set_text(name, &out.single);
+                    if let Some(f) = &gen_target {
+                        f(&out.single);
                     }
                 }
                 GenDest::GuiSingle => {
@@ -1453,6 +1453,16 @@ impl MainWindow {
                             }),
                         );
                         pl.load_config(&self.core.borrow().ini);
+                        let w_db = self.weak();
+                        let plf = Rc::downgrade(&pl.form);
+                        pl.form.on_menu("PasswListMenu_AddToDb", move |_| {
+                            if let (Some(w), Some(f)) = (w_db.upgrade(), plf.upgrade()) {
+                                let t = f.selected_text("PasswList");
+                                if !t.is_empty() {
+                                    w.add_passw_to_db(&t, true, None);
+                                }
+                            }
+                        });
                         *self.passw_list.borrow_mut() = Some(pl);
                     }
                     self.passw_list.borrow().as_ref().unwrap().show_list(ROOT, &out.list);
@@ -1740,6 +1750,17 @@ impl MainWindow {
     /// `FormCloseQuery()`: whether the window may close now; asks if needed
     /// and closes it again afterwards.
     pub fn close_query(self: &Rc<Self>) -> bool {
+        // the password manager closes its database first (`CloseQuery()`)
+        if !self.close_confirmed.get() && !pwtool_app::app::restart_requested() {
+            if let Some(pm) = self.tools.passw_mng.borrow().clone().filter(|pm| pm.is_db_open()) {
+                spawn(async move {
+                    if pm.close_query().await {
+                        windows::ctx().send_viewport_cmd(ViewportCommand::Close);
+                    }
+                });
+                return false;
+            }
+        }
         if self.close_confirmed.get() || !self.core.borrow().config.confirm_exit || pwtool_app::app::restart_requested() {
             return true;
         }
@@ -1809,6 +1830,13 @@ impl MainWindow {
             return;
         }
         self.auto_check_updates();
+        let open_mng = {
+            let core = self.core.borrow();
+            core.config.database.open_window_on_startup || core.cmd.passw_db_file_name.is_some()
+        };
+        if open_mng {
+            self.show_passw_manager();
+        }
         let errs: Vec<String> = self.core.borrow_mut().startup_errors.drain(..).collect();
         if !errs.is_empty() {
             let mut m = trl_format("%1 encountered %2 error(s) during startup:", &[PROGRAM_NAME, &errs.len().to_string()]);
@@ -1831,7 +1859,7 @@ impl Content for MainContent {
         w.update_passw_box_menu();
         w.update_tool_menus();
         if let Some(pl) = w.passw_list.borrow().as_ref() {
-            pl.update_menu(false);
+            pl.update_menu(w.db_open());
         }
         let title = w.title.borrow().clone();
         if *w.title_shown.borrow() != title {

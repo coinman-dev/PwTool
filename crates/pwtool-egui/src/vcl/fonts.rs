@@ -170,14 +170,18 @@ pub fn install(ctx: &egui::Context, user: &UserFont) -> FontSet {
     defs.families.insert(FontFamily::Name(BOLD.into()), chain(bold.as_ref().or(regular.as_ref()), &egui_prop));
     defs.families.insert(FontFamily::Name(ITALIC.into()), chain(italic.as_ref().or(regular.as_ref()), &egui_prop));
     // fonts chosen by the user for the password boxes and the font dialog
-    let (passw, preview) = EXTRA.with(|e| {
+    let (named, preview) = EXTRA.with(|e| {
         let mut e = e.borrow_mut();
         e.user = user.clone();
-        (e.passw.clone(), e.preview.clone())
+        (e.named.clone(), e.preview.clone())
     });
-    let passw = passw
-        .and_then(|p| load_near(&p.name, p.style & 1 != 0, p.style & 2 != 0).map(|f| add(&mut defs, format!("passw:{}", p.name), f)));
-    defs.families.insert(FontFamily::Name(PASSW.into()), chain(passw.as_ref().or(mono.as_ref()).or(regular.as_ref()), &egui_mono));
+    for fam in NAMED.iter().copied() {
+        let spec = named.iter().find(|(n, _)| *n == fam).map(|(_, s)| s);
+        let key = spec.and_then(|p| load_near(&p.name, p.style & 1 != 0, p.style & 2 != 0).map(|f| add(&mut defs, format!("{fam}:{}", p.name), f)));
+        // the password boxes fall back to the monospaced font
+        let fallback = if fam.contains("passw") { mono.as_ref().or(regular.as_ref()) } else { regular.as_ref() };
+        defs.families.insert(FontFamily::Name(fam.into()), chain(key.as_ref().or(fallback), if fam.contains("passw") { &egui_mono } else { &egui_prop }));
+    }
     let preview = preview.and_then(|(p, b, i)| load_near(&p, b, i).map(|f| add(&mut defs, format!("preview:{p}:{b}:{i}"), f)));
     defs.families.insert(FontFamily::Name(PREVIEW.into()), chain(preview.as_ref().or(regular.as_ref()), &egui_prop));
     ctx.set_fonts(defs);
@@ -201,6 +205,11 @@ pub fn install(ctx: &egui::Context, user: &UserFont) -> FontSet {
 
 /// Family of the password boxes (`PasswBoxFont`).
 pub const PASSW: &str = "passw";
+/// Families of PassCube: entry list and password box.
+pub const PM_LIST: &str = "pm-list";
+pub const PM_PASSW: &str = "pm-passw";
+/// Families the user can choose a font for.
+pub const NAMED: [&str; 3] = [PASSW, PM_LIST, PM_PASSW];
 /// Family of the sample in the font dialog.
 pub const PREVIEW: &str = "preview";
 
@@ -246,25 +255,44 @@ impl FontSpec {
 
 struct Extra {
     user: UserFont,
-    passw: Option<FontSpec>,
+    named: Vec<(&'static str, FontSpec)>,
     preview: Option<(String, bool, bool)>,
 }
 
 thread_local! {
-    static EXTRA: std::cell::RefCell<Extra> = const { std::cell::RefCell::new(Extra { user: UserFont { family: None, size: None }, passw: None, preview: None }) };
+    static EXTRA: std::cell::RefCell<Extra> = const { std::cell::RefCell::new(Extra { user: UserFont { family: None, size: None }, named: Vec::new(), preview: None }) };
 }
 
-static PASSW_SIZE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// Font chosen by the user for family `name` (one of [`NAMED`]).
+pub fn named_font(name: &str) -> Option<FontSpec> {
+    EXTRA.with(|e| e.borrow().named.iter().find(|(n, _)| *n == name).map(|(_, s)| s.clone()))
+}
+
+/// Size of a named family in points (`None` = size of the control).
+pub fn named_size(name: &str) -> Option<f32> {
+    named_font(name).map(|f| f.points())
+}
+
+/// Set (or reset) the font of a named family and install the fonts again.
+pub fn set_named_font(ctx: &egui::Context, name: &'static str, f: Option<FontSpec>) {
+    EXTRA.with(|e| {
+        let mut e = e.borrow_mut();
+        e.named.retain(|(n, _)| *n != name);
+        if let Some(f) = f {
+            e.named.push((name, f));
+        }
+    });
+    reinstall(ctx);
+}
 
 /// Size of the password box font in points (`None` = size of the control).
 pub fn passw_size() -> Option<f32> {
-    let v = f32::from_bits(PASSW_SIZE.load(std::sync::atomic::Ordering::Relaxed));
-    (v > 0.0).then_some(v)
+    named_size(PASSW)
 }
 
 /// The password box font (`None` = monospaced default).
 pub fn passw_font() -> Option<FontSpec> {
-    EXTRA.with(|e| e.borrow().passw.clone())
+    named_font(PASSW)
 }
 
 fn reinstall(ctx: &egui::Context) {
@@ -274,9 +302,7 @@ fn reinstall(ctx: &egui::Context) {
 
 /// Set the password box font and install the fonts again.
 pub fn set_passw_font(ctx: &egui::Context, f: Option<FontSpec>) {
-    PASSW_SIZE.store(f.as_ref().map_or(0.0f32, |f| f.points()).to_bits(), std::sync::atomic::Ordering::Relaxed);
-    EXTRA.with(|e| e.borrow_mut().passw = f);
-    reinstall(ctx);
+    set_named_font(ctx, PASSW, f);
 }
 
 /// Family and style (bold, italic) of the [`PREVIEW`] font (`None` = user

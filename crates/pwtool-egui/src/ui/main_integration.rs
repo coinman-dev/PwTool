@@ -145,7 +145,7 @@ impl MainWindow {
 
     /// Show/hide the tray icon according to the configuration and update
     /// icon, title and profiles.
-    pub(super) fn update_tray_icon(&self) {
+    pub(crate) fn update_tray_icon(&self) {
         let (visible, icon_name) = {
             let core = self.core.borrow();
             (core.config.show_sys_tray_icon_const || self.integ.hidden.get(), core.config.app_icon_name.clone())
@@ -215,6 +215,12 @@ impl MainWindow {
         let (minimized, focused) = ctx.input(|i| (i.viewport().minimized.unwrap_or(false), i.viewport().focused.unwrap_or(false)));
         self.integ.focused.set(focused);
         if minimized && !self.integ.was_minimized.get() {
+            // `LockMinimize`: lock the database with the main window
+            if self.core.borrow().config.database.lock_minimize && !self.integ.autotype_active.get() {
+                if let Some(pm) = self.tools.passw_mng.borrow().clone() {
+                    pm.lock_if_open();
+                }
+            }
             self.app_minimize();
         }
         self.integ.was_minimized.set(minimized);
@@ -370,7 +376,18 @@ impl MainWindow {
                 self.mp_passw_gen();
                 None
             }
-            // password manager: stage 4
+            hot_key_action::SHOW_PASSW_MANAGER => {
+                show_main(true);
+                self.show_passw_manager();
+                None
+            }
+            hot_key_action::SEARCH_DATABASE | hot_key_action::SEARCH_DATABASE_AUTOTYPE => {
+                if let Some(pm) = self.tools.passw_mng.borrow().clone() {
+                    pm.search_db_for_keyword(hke.action == hot_key_action::SEARCH_DATABASE_AUTOTYPE);
+                }
+                show_main(false);
+                None
+            }
             _ => {
                 show_main(true);
                 None

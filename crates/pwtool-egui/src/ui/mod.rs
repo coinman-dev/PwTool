@@ -5,6 +5,7 @@ pub mod clipboard;
 pub mod dialogs;
 pub mod font_dialog;
 pub mod main_window;
+pub mod passw_manager;
 pub mod passw_enter;
 pub mod quality_bar;
 pub mod update_check;

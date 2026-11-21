@@ -106,12 +106,23 @@ impl Content for MsgBox {
 
 thread_local! {
     static COUNTER: Cell<u64> = const { Cell::new(0) };
+    static AUTO_ANSWER: Cell<Option<MsgResult>> = const { Cell::new(None) };
+}
+
+/// Answer the next message box with `r` without showing it (test
+/// automation); the text is printed.
+pub fn set_auto_answer(r: Option<MsgResult>) {
+    AUTO_ANSWER.with(|a| a.set(r));
 }
 
 /// `MsgBox()`: modal message box over window `parent`; `default_second`
 /// makes the second button the default (`MB_DEFBUTTON2`).
 pub async fn msg_box(ctx: &egui::Context, parent: ViewportId, text: &str, icon: MsgIcon, buttons: MsgButtons, default_second: bool) -> MsgResult {
     use MsgResult::*;
+    if let Some(r) = AUTO_ANSWER.with(|a| a.take()) {
+        println!("msgbox: {:?} -> {r:?}", text.lines().collect::<Vec<_>>().join(" "));
+        return r;
+    }
     let list: Vec<(String, MsgResult)> = match buttons {
         MsgButtons::Ok => vec![(trl("OK"), Ok)],
         MsgButtons::OkCancel => vec![(trl("OK"), Ok), (trl("Cancel"), Cancel)],

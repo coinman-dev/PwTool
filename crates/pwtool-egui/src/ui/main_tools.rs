@@ -25,6 +25,7 @@ pub(super) struct ToolsState {
     pub profile_dlg: RefCell<Option<Rc<super::profile_editor::ProfileEditDlg>>>,
     pub char_set_builder: RefCell<Option<Rc<super::char_set_builder::CharSetBuilderWin>>>,
     pub mp_passw_gen: RefCell<Option<Rc<super::mp_passw_gen::MpPasswGenWin>>>,
+    pub passw_mng: RefCell<Option<Rc<crate::ui::passw_manager::PasswManager>>>,
     /// Window sizes of the tool dialogs (`WindowWidth`/`WindowHeight`).
     sizes: RefCell<std::collections::HashMap<&'static str, egui::Vec2>>,
 }
@@ -44,6 +45,7 @@ impl ToolsState {
             profile_dlg: RefCell::new(None),
             char_set_builder: RefCell::new(None),
             mp_passw_gen: RefCell::new(None),
+            passw_mng: RefCell::new(None),
             sizes: RefCell::new(std::collections::HashMap::new()),
         }
     }
@@ -111,6 +113,19 @@ impl MainWindow {
             });
         }
         self.click("MPPasswGenBtn", |w| w.mp_passw_gen());
+        for name in ["MainMenu_File_PasswManager", "TrayMenu_PasswManager"] {
+            self.menu(name, |w| {
+                w.restore_from_tray();
+                w.show_passw_manager();
+            });
+        }
+        self.click("PasswMngBtn", |w| w.show_passw_manager());
+        self.menu("PasswBoxMenu_AddToDb", |w| {
+            let passw = w.f().selected_text("PasswBox");
+            if !passw.is_empty() {
+                w.add_passw_to_db(&passw, false, None);
+            }
+        });
         self.menu("PasswBoxMenu_PerformAutotype", |w| {
             let passw = w.f().secret_text("PasswBox");
             w.perform_autotype("", None, Some(&passw));
@@ -222,7 +237,7 @@ impl MainWindow {
         self.update_total_ent_bits_menu();
     }
 
-    pub(super) fn passw_enter(&self) -> Rc<PasswEnterDlg> {
+    pub(crate) fn passw_enter(&self) -> Rc<PasswEnterDlg> {
         if let Some(d) = self.tools.passw_enter.borrow().as_ref() {
             d.use_advanced_passw_est.set(self.core.borrow().use_advanced_passw_est);
             return d.clone();
@@ -303,6 +318,73 @@ impl MainWindow {
         if let Some(d) = self.tools.mp_passw_gen.borrow().as_ref() {
             d.save_config(ini);
         }
+        if let Some(pm) = self.tools.passw_mng.borrow().as_ref() {
+            pm.save_config(ini);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // password manager
+
+    /// The password manager (created on first use).
+    pub fn passw_manager(self: &Rc<Self>) -> Rc<crate::ui::passw_manager::PasswManager> {
+        if let Some(pm) = self.tools.passw_mng.borrow().as_ref() {
+            return pm.clone();
+        }
+        let pm = crate::ui::passw_manager::PasswManager::new(self);
+        *self.tools.passw_mng.borrow_mut() = Some(pm.clone());
+        pm
+    }
+
+    /// `MainMenu_File_PasswManagerClick()`.
+    pub fn show_passw_manager(self: &Rc<Self>) {
+        self.passw_manager().show();
+    }
+
+    /// Whether a database is open in the password manager.
+    pub(super) fn db_open(&self) -> bool {
+        self.tools.passw_mng.borrow().as_ref().is_some_and(|pm| pm.is_db_open())
+    }
+
+    /// "Add to Database" (one entry per line).
+    pub fn add_passw_to_db(self: &Rc<Self>, passw: &str, show_num_passw: bool, param: Option<&str>) -> usize {
+        let pm = self.tools.passw_mng.borrow().clone();
+        match pm {
+            Some(pm) if pm.is_db_open() => pm.add_passw_to_db(passw, show_num_passw, param),
+            _ => 0,
+        }
+    }
+
+    /// Generate a single password with the current settings and pass it to
+    /// `f` instead of showing it (`GeneratePassw(gpdGuiSingle, pEditBox)`).
+    pub fn generate_passw_for(self: &Rc<Self>, f: Rc<dyn Fn(&str)>) {
+        *self.gen_target.borrow_mut() = Some(f);
+        self.generate_passw(GenDest::GuiSingle);
+    }
+
+    /// `LoadProfile(name)`: `false` if there is no such profile.
+    pub fn load_profile_by_name(&self, name: &str) -> bool {
+        let idx = pwtool_core::config::find_profile(&self.core.borrow().profiles, name);
+        match idx {
+            Some(i) => {
+                self.load_profile(i);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Formatted password from the deterministic generator if active, else
+    /// the random pool (PassCube's "FormatPW" key and new entries).
+    pub fn format_passw_with_active_rng(&self, format: &str) -> Option<Zeroizing<String>> {
+        let pg = PasswordGenerator::new();
+        let f = pwtool_core::unicode::str_to_w32(format);
+        let r = if let Some(det) = self.key_seeded_prng.borrow_mut().as_mut() {
+            pg.get_format_passw(det, &f, 0, None, 16000, None)
+        } else {
+            pg.get_format_passw(&mut *RandomPool::global(), &f, 0, None, 16000, None)
+        };
+        if r.passw.is_empty() { None } else { Some(pwtool_core::unicode::w32_to_string_secure(&r.passw)) }
     }
 
     // ------------------------------------------------------------------

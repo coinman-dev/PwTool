@@ -56,7 +56,7 @@ fn body_size(ui: &Ui) -> f32 {
 
 fn font_id(f: &FontStyle, body: f32) -> FontId {
     if let Some(fam) = f.family {
-        let size = match (fam == super::fonts::PASSW).then(super::fonts::passw_size).flatten() {
+        let size = match super::fonts::named_size(fam) {
             Some(s) => s,
             None => body * if f.scale > 0.0 { f.scale } else { 1.0 },
         };
@@ -376,8 +376,10 @@ fn draw_frame_box(ui: &mut Ui, c: &Control, enabled: bool, f: &mut Frame) {
                 painter.rect_stroke(c.rect, 2.0, stroke, StrokeKind::Inside);
             }
             let text = strip_amp(&c.caption);
-            if !text.is_empty() && c.children.is_empty() {
-                painter.text(c.rect.center(), Align2::CENTER_CENTER, text, font_id(&c.font, f.body), text_color(ui, &c.font, enabled));
+            if !text.is_empty() {
+                // panels without a frame show a status text on the left
+                let (pos, al) = if *bevel { (c.rect.center(), Align2::CENTER_CENTER) } else { (pos2(c.rect.min.x + 4.0, c.rect.center().y), Align2::LEFT_CENTER) };
+                painter.with_clip_rect(c.rect).text(pos, al, text, font_id(&c.font, f.body), text_color(ui, &c.font, enabled));
             }
         }
         _ => {}
@@ -615,6 +617,9 @@ fn draw_edit(ui: &mut Ui, c: &mut Control, enabled: bool, f: &mut Frame) {
     if resp.changed() {
         f.events.push(Event::Change(name.clone()));
     }
+    if resp.gained_focus() {
+        f.events.push(Event::FocusIn(name.clone()));
+    }
     if resp.lost_focus() {
         if matches!(c.state, State::Edit { .. }) && ui.input(|i| i.key_pressed(Key::Enter)) {
             f.events.push(Event::Enter(name.clone()));
@@ -712,7 +717,7 @@ fn draw_tool_bar(ui: &mut Ui, controls: &mut [Control], idx: usize, enabled: boo
             continue;
         }
         match &mut c.state {
-            State::ToolButton { icon, separator, down, toggle } => {
+            State::ToolButton { icon, separator, down, toggle, dropdown } => {
                 if *separator {
                     let w = 8.0 * f.scale;
                     ui.painter().vline(x + w / 2.0, rect.y_range().shrink(4.0), frame_stroke(ui));
@@ -739,6 +744,15 @@ fn draw_tool_bar(ui: &mut Ui, controls: &mut [Control], idx: usize, enabled: boo
                     f.events.push(Event::Click(c.name.clone()));
                 }
                 tooltip(resp, &c.hint);
+                if *dropdown {
+                    let w = 12.0 * f.scale;
+                    let ar = Rect::from_min_size(pos2(x - 1.0, rect.min.y), vec2(w, h));
+                    x += w;
+                    let resp = at(ui, ar, on, |ui| ui.add_sized(ar.size(), egui::Button::new("▾").frame_when_inactive(false)));
+                    if resp.clicked() {
+                        f.events.push(Event::Click(format!("{}#dropdown", c.name)));
+                    }
+                }
             }
             _ => {
                 // other controls on a tool bar (search box…) keep their width

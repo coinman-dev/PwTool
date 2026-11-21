@@ -49,6 +49,8 @@ pub enum Event {
     DblClick(String),
     /// Enter pressed in a single-line edit or combo box.
     Enter(String),
+    /// An edit or memo got the keyboard focus (`OnEnter`).
+    FocusIn(String),
     /// A control lost the keyboard focus (`OnExit`).
     Exit(String),
 }
@@ -101,7 +103,8 @@ pub enum State {
     Progress { pos: i64, max: i64 },
     Date { ymd: (i32, u32, u32), checked: bool, show_check: bool },
     ToolBar,
-    ToolButton { icon: Option<Icon>, separator: bool, down: bool, toggle: bool },
+    /// `dropdown`: an arrow next to the button emits `Click("<name>#dropdown")`.
+    ToolButton { icon: Option<Icon>, separator: bool, down: bool, toggle: bool, dropdown: bool },
     Splitter,
     Bevel { shape: String },
     Image { png: Option<Vec<u8>>, version: u32, stretch: bool, center: bool },
@@ -190,6 +193,8 @@ pub(super) struct FormData {
     /// Popup menu to open at the pointer (`TPopupMenu.Popup`).
     pub open_popup: Option<(String, Option<egui::Pos2>)>,
     pub popup_owner: Option<String>,
+    /// Image lists (`TVirtualImageList`) by name.
+    pub images: HashMap<String, (Vec<Option<Icon>>, f32)>,
 }
 
 type Painter = Box<dyn FnMut(&mut egui::Ui, Rect)>;
@@ -239,7 +244,13 @@ fn align_of(o: &FormObj) -> Align {
         Some("alLeft") => Align::Left,
         Some("alRight") => Align::Right,
         Some("alClient") => Align::Client,
-        _ => Align::None,
+        Some(_) => Align::None,
+        // defaults of the classes (not stored in the form files)
+        None => match o.class.as_str() {
+            "TToolBar" => Align::Top,
+            "TStatusBar" => Align::Bottom,
+            _ => Align::None,
+        },
     }
 }
 
@@ -394,6 +405,7 @@ impl Builder<'_> {
                     separator: style == "tbsSeparator" || style == "tbsDivider",
                     down: o.bool_or("Down", false),
                     toggle: style == "tbsCheck",
+                    dropdown: style == "tbsDropDown",
                 }
             }
             "TSplitter" => State::Splitter,
@@ -418,7 +430,8 @@ impl Builder<'_> {
         let align = align_of(o);
         let autosize = ((o.class == "TLabel" || o.class == "TLinkLabel") && o.bool_or("AutoSize", true) && !o.bool_or("WordWrap", false) && align == Align::None)
             .then(|| halign_of(o));
-        let caption = o.str("Caption").map(trl).unwrap_or_default();
+        // panels with `ShowCaption = false` show a caption only when the logic sets one
+        let caption = if o.class == "TPanel" && !o.bool_or("ShowCaption", true) { String::new() } else { o.str("Caption").map(trl).unwrap_or_default() };
         let idx = self.controls.len();
         self.controls.push(Control {
             name: o.name.clone(),
@@ -610,6 +623,7 @@ impl Form {
             main_menu = Some(m.to_string());
         }
         let caption = obj.str("Caption").map(trl).unwrap_or_default();
+        let images = b.images;
         let mut controls = b.controls;
         // up-down buttons show their position in the associated edit
         let assoc: Vec<(String, i64)> = controls
@@ -648,6 +662,7 @@ impl Form {
                 events: Vec::new(),
                 open_popup: None,
                 popup_owner: None,
+                images,
             }),
             painters: RefCell::new(HashMap::new()),
             handlers: RefCell::new(Vec::new()),
@@ -1224,49 +1239,82 @@ impl Form {
         self.item(name, |i| i.caption.clone())
     }
 
+    /// Shortcut of a menu item (`TShortCut`).
+    pub fn menu_shortcut(&self, name: &str) -> Option<u16> {
+        self.item(name, |i| i.shortcut)
+    }
+
     /// Replace the sub-items of menu item `parent` with dynamic items
     /// (name, caption) placed before the items of the form description;
     /// they produce [`Event::Menu`] with the name `"dyn:<name>"`.
     pub fn set_dynamic_items(&self, parent: &str, new: &[(String, String, Option<u16>)]) {
+        self.dynamic_items(parent, None, new, true);
+    }
+
+    /// Like [`Self::set_dynamic_items`], but the items are placed before
+    /// the item `before` (at the end if `None`), without a separator.
+    /// `parent` may also be a popup menu (`TagMenu`).
+    pub fn set_dynamic_items_before(&self, parent: &str, before: Option<&str>, new: &[(String, String, Option<u16>)]) {
+        self.dynamic_items(parent, Some(before.unwrap_or("")), new, false);
+    }
+
+    fn dynamic_items(&self, parent: &str, before: Option<&str>, new: &[(String, String, Option<u16>)], separator: bool) {
         let mut d = self.data.borrow_mut();
         let FormData { menus, items, .. } = &mut *d;
-        fn find<'a>(nodes: &'a mut [MenuNode], name: &str) -> Option<&'a mut MenuNode> {
-            for n in nodes {
-                if n.name == name {
-                    return Some(n);
-                }
-                if let Some(x) = find(&mut n.children, name) {
-                    return Some(x);
-                }
-            }
-            None
-        }
-        for tree in menus.values_mut() {
-            if let Some(node) = find(tree, parent) {
-                node.children.retain(|c| !c.name.starts_with("dyn:"));
-                let mut dynamic: Vec<MenuNode> = Vec::new();
-                for (n, caption, shortcut) in new {
-                    let key = format!("dyn:{n}");
-                    items.insert(
-                        key.clone(),
-                        MenuItemState {
-                            caption: caption.clone(),
-                            enabled: true,
-                            visible: true,
-                            checked: None,
-                            radio: false,
-                            shortcut: *shortcut,
-                            default: false,
-                        },
-                    );
-                    dynamic.push(MenuNode { name: key, separator: false, children: Vec::new() });
-                }
-                if !dynamic.is_empty() && !node.children.is_empty() {
-                    dynamic.push(MenuNode { name: "dyn:-".into(), separator: true, children: Vec::new() });
-                }
-                node.children.splice(0..0, dynamic);
+        fn find<'a>(nodes: &'a mut Vec<MenuNode>, name: &str) -> Option<&'a mut Vec<MenuNode>> {
+            let pos = nodes.iter().position(|n| n.name == name);
+            match pos {
+                Some(i) => Some(&mut nodes[i].children),
+                None => nodes.iter_mut().find_map(|n| find(&mut n.children, name)),
             }
         }
+        let mut targets: Vec<&mut Vec<MenuNode>> = Vec::new();
+        for (key, tree) in menus.iter_mut() {
+            if key == parent {
+                targets.push(tree);
+            } else if let Some(c) = find(tree, parent) {
+                targets.push(c);
+            }
+        }
+        for children in targets {
+            // the old dynamic items and their states
+            for c in children.iter().filter(|c| c.name.starts_with("dyn:")) {
+                items.remove(&c.name);
+            }
+            children.retain(|c| !c.name.starts_with("dyn:"));
+            let mut dynamic: Vec<MenuNode> = Vec::new();
+            for (n, caption, shortcut) in new {
+                let key = format!("dyn:{n}");
+                items.insert(
+                    key.clone(),
+                    MenuItemState { caption: caption.clone(), enabled: true, visible: true, checked: None, radio: false, shortcut: *shortcut, default: false },
+                );
+                dynamic.push(MenuNode { name: key, separator: false, children: Vec::new() });
+            }
+            let at = match before {
+                None => 0,
+                Some(b) => children.iter().position(|c| c.name == b).unwrap_or(children.len()),
+            };
+            if separator && !dynamic.is_empty() && !children.is_empty() {
+                dynamic.push(MenuNode { name: format!("dyn:-{parent}"), separator: true, children: Vec::new() });
+            }
+            children.splice(at..at, dynamic);
+        }
+    }
+
+    /// Whether a popup menu has (visible) items.
+    pub fn menu_has_items(&self, menu: &str) -> bool {
+        let d = self.data.borrow();
+        d.menus.get(menu).is_some_and(|m| m.iter().any(|n| !n.separator))
+    }
+
+    /// Image `index` of the image list `list` of the form.
+    pub fn image(&self, list: &str, index: usize) -> Option<Icon> {
+        let d = self.data.borrow();
+        let (icons, size) = d.images.get(list)?;
+        let mut icon = icons.get(index)?.clone()?;
+        icon.size = *size;
+        Some(icon)
     }
 
     /// Attach a popup menu to a control (right click), like `PopupMenu`.

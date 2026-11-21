@@ -94,6 +94,17 @@ pub fn start(w: Rc<MainWindow>, script: String) {
                     crate::windows::ctx().request_repaint();
                 }
                 "windows" => println!("open={}", crate::windows::open_ids().join(",")),
+                // `msgauto yes|no|ok|cancel`: answer of the next message box
+                "msgauto" => {
+                    use crate::vcl::dialogs::MsgResult::*;
+                    crate::vcl::dialogs::set_auto_answer(match rest {
+                        "yes" => Some(Yes),
+                        "no" => Some(No),
+                        "cancel" => Some(Cancel),
+                        _ => Some(Ok),
+                    });
+                }
+                c if c.starts_with("pm") && super::passw_manager::automation::automate(&w, c, rest) => {}
                 "quit" => {
                     crate::windows::ctx().send_viewport_cmd(ViewportCommand::Close);
                     return;

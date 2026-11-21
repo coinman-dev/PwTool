@@ -494,3 +494,9 @@ impl PasswListWindow {
 pub fn clicked(events: &[Event], name: &str) -> bool {
     events.iter().any(|e| matches!(e, Event::Click(n) if n == name))
 }
+
+/// Make the form of window `id` known to the test automation (windows not
+/// made with [`form_window`]).
+pub fn register_form(id: &str, form: &Rc<Form>) {
+    FORMS.with(|f| f.borrow_mut().insert(id.to_string(), Rc::downgrade(form)));
+}

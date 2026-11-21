@@ -183,7 +183,7 @@ impl MpPasswGenWin {
             ("PasswBoxMenu_Paste", false),
             ("PasswBoxMenu_Delete", false),
             ("PasswBoxMenu_PerformAutotype", has_text),
-            ("PasswBoxMenu_AddToDatabase", false),
+            ("PasswBoxMenu_AddToDatabase", has_text && self.main.upgrade().is_some_and(|m| m.db_open())),
             ("PasswBoxMenu_SelectAll", has_text),
         ] {
             if f.has_menu_item(name) {
@@ -216,6 +216,13 @@ impl MpPasswGenWin {
                 let seq = f.text("AutotypeBox");
                 if let Some(m) = self.main.upgrade() {
                     m.perform_autotype(&seq, Some(&param), Some(&passw));
+                }
+            }
+            "PasswBoxMenu_AddToDatabase" => {
+                let passw = f.secret_text("PasswBox");
+                let param = f.text("ParameterBox");
+                if let Some(m) = self.main.upgrade() {
+                    m.add_passw_to_db(&passw, false, Some(&param));
                 }
             }
             "PasswBoxMenu_SelectAll" => f.select_all("PasswBox"),
