@@ -88,6 +88,23 @@ mod tests {
         }
     }
 
+    /// Fields are named by their labels for screen readers.
+    #[test]
+    fn field_labels() {
+        let ctx = egui::Context::default();
+        fonts::install(&ctx, &fonts::UserFont::default());
+        snapshot::Snapshot::new(ctx.clone()).render(egui::vec2(50.0, 50.0), 1.0, 1, |_| {});
+        let label_of = |form: &str, field: &str| {
+            let f = load_form(&ctx, form);
+            let d = f.data.borrow();
+            d.by_name.get(field).and_then(|&i| d.controls[i].label).map(|l| d.controls[l].name.clone())
+        };
+        assert_eq!(label_of("Main", "CharsLengthBox").as_deref(), Some("CharsLengthLbl"));
+        assert_eq!(label_of("Main", "SpecifyLengthBox").as_deref(), Some("SpecifyLengthCheck"));
+        assert_eq!(label_of("PasswManager", "TitleBox").as_deref(), Some("TitleLbl"));
+        assert_eq!(label_of("PasswEnter", "PasswBox").as_deref(), Some("PasswLbl"));
+    }
+
     #[test]
     fn form_api() {
         let ctx = egui::Context::default();

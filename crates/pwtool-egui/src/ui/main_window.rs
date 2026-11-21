@@ -326,7 +326,11 @@ impl MainWindow {
         self.show_ent_progress.set(!ini.read_bool("Main", "HideEntropyProgress", false));
         f.set_menu_checked("MainMenu_Options_HideEntProgress", !self.show_ent_progress.get());
         f.set_menu_checked("MainMenu_Options_SaveSettingsOnExit", ini.read_bool("Main", "SaveSettingsOnExit", true));
-        f.set_menu_checked("MainMenu_Options_AlwaysOnTop", ini.read_bool("Main", "AlwaysOnTop", false));
+        let on_top = ini.read_bool("Main", "AlwaysOnTop", false);
+        f.set_menu_checked("MainMenu_Options_AlwaysOnTop", on_top);
+        if on_top {
+            set_always_on_top(true);
+        }
         let editable = ini.read_bool("Main", "PasswEditable", true);
         f.set_menu_checked("PasswBoxMenu_Editable", editable);
         f.set_menu_checked("PasswBoxMenu_EnablePasswTest", ini.read_bool("Main", "EnablePasswTest", true));
@@ -513,14 +517,7 @@ impl MainWindow {
             w.update_entropy_progress(true);
         });
         self.check_menu("MainMenu_Options_SaveSettingsOnExit", |_| {});
-        self.check_menu("MainMenu_Options_AlwaysOnTop", |w| {
-            let on = w.f().menu_checked("MainMenu_Options_AlwaysOnTop");
-            windows::ctx().send_viewport_cmd(ViewportCommand::WindowLevel(if on {
-                egui::WindowLevel::AlwaysOnTop
-            } else {
-                egui::WindowLevel::Normal
-            }));
-        });
+        self.check_menu("MainMenu_Options_AlwaysOnTop", |w| set_always_on_top(w.f().menu_checked("MainMenu_Options_AlwaysOnTop")));
         self.check_menu("PasswBoxMenu_Editable", |w| {
             let editable = w.f().menu_checked("PasswBoxMenu_Editable");
             w.f().set_read_only("PasswBox", !editable);
@@ -1729,6 +1726,11 @@ impl MainWindow {
                 pl.save_config(&mut core.ini);
             }
             let ini = &mut core.ini;
+            // the window has the fixed size of its form; written for the
+            // original and the GTK version (PLAN.md, section 7)
+            let size = crate::vcl::window_size(&f, &crate::windows::ctx());
+            ini.write_integer("Main", "WindowWidth", size.x.round() as i64);
+            ini.write_integer("Main", "WindowHeight", size.y.round() as i64);
             ini.write_bool("Main", "AlwaysOnTop", f.menu_checked("MainMenu_Options_AlwaysOnTop"));
             ini.write_bool("Main", "HidePassw", f.checked("TogglePasswBtn"));
             ini.write_bool("Main", "HideEntropyProgress", f.menu_checked("MainMenu_Options_HideEntProgress"));
@@ -1794,6 +1796,20 @@ impl MainWindow {
         self.passw_box_tag.set(0);
         self.f().set_text("PasswBox", "");
         self.passw_box_tag.set(tag);
+    }
+
+    /// `OnEndSession()`: save the database and the configuration before the
+    /// user session ends.
+    pub fn on_end_session(&self) {
+        let mng = self.tools.passw_mng.borrow().clone();
+        if let Some(m) = mng {
+            m.save_db_on_shutdown();
+        }
+        if self.f().menu_checked("MainMenu_Options_SaveSettingsOnExit") && !self.core.borrow().cmd.config_readonly {
+            self.save_config();
+        }
+        self.core.borrow().write_rand_seed_file();
+        self.passw_enter().clear_passw_cache();
     }
 
     /// Profile given on the command line or configured for start-up.
@@ -1955,4 +1971,10 @@ fn build_format_help() -> String {
         ],
     ));
     s
+}
+
+/// "Always on Top" for the main window.
+fn set_always_on_top(on: bool) {
+    let level = if on { egui::WindowLevel::AlwaysOnTop } else { egui::WindowLevel::Normal };
+    windows::ctx().send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::WindowLevel(level));
 }

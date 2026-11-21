@@ -137,6 +137,15 @@ pub struct Control {
     pub state: State,
     /// Rectangle on screen after the last layout.
     pub rect: Rect,
+    /// Font size factor of a caption that is too long for its control even
+    /// after taking the free space next to it (translations), 0.8..=1.
+    pub fit: f32,
+    /// The caption does not fit even with `fit`: it is cut, the full text
+    /// is shown as a tooltip.
+    pub cut: bool,
+    /// Label (or check box) that names this field for screen readers
+    /// (`FocusControl` of a label, else the label left of or above the field).
+    pub label: Option<usize>,
     /// Text field needs the focus at the next frame.
     pub focus_request: bool,
     pub has_focus: bool,
@@ -291,6 +300,46 @@ fn font_of(o: &FormObj, form_font_height: i64) -> FontStyle {
         scale,
         color: o.ident("Font.Color").and_then(vcl_color),
         family: None,
+    }
+}
+
+/// Labels of the fields for screen readers: the label whose `FocusControl`
+/// is the field, else the nearest label or check box of the same parent on
+/// the left of the field (same row), else just above it.
+fn assign_labels(controls: &mut [Control]) {
+    let field = |c: &Control| {
+        matches!(
+            c.state,
+            State::Edit { .. } | State::Memo { .. } | State::Combo { .. } | State::ListBox { .. } | State::CheckList { .. } | State::Track { .. } | State::Date { .. }
+        )
+    };
+    let mut found: Vec<(usize, usize)> = Vec::new();
+    for (i, c) in controls.iter().enumerate() {
+        if !field(c) {
+            continue;
+        }
+        let by_focus = controls.iter().enumerate().find(|(_, l)| matches!(&l.state, State::Label { focus_control: Some(f), .. } if *f == c.name));
+        let d = c.design;
+        let labels = || {
+            controls
+                .iter()
+                .enumerate()
+                .filter(|(_, l)| l.parent == c.parent && matches!(l.state, State::Label { .. } | State::Check { .. }) && !l.caption.is_empty())
+        };
+        let left = labels()
+            .filter(|(_, l)| (l.design.center().y - d.center().y).abs() <= d.height() / 2.0 + 4.0 && l.design.min.x < d.min.x && d.min.x - l.design.max.x < 120.0)
+            .min_by(|(_, a), (_, b)| (d.min.x - a.design.max.x).total_cmp(&(d.min.x - b.design.max.x)));
+        let above = || {
+            labels()
+                .filter(|(_, l)| l.design.max.y <= d.min.y + 2.0 && d.min.y - l.design.max.y < 24.0 && l.design.min.x < d.max.x && l.design.max.x > d.min.x - 4.0)
+                .min_by(|(_, a), (_, b)| (d.min.y - a.design.max.y).total_cmp(&(d.min.y - b.design.max.y)))
+        };
+        if let Some((l, _)) = by_focus.or(left).or_else(above) {
+            found.push((i, l));
+        }
+    }
+    for (i, l) in found {
+        controls[i].label = Some(l);
     }
 }
 
@@ -452,6 +501,9 @@ impl Builder<'_> {
             tab_order: o.int("TabOrder").map(|t| t + 1).unwrap_or(0),
             state,
             rect: Rect::NOTHING,
+            fit: 1.0,
+            cut: false,
+            label: None,
             focus_request: false,
             has_focus: false,
             selection: None,
@@ -640,6 +692,7 @@ impl Form {
                 }
             }
         }
+        assign_labels(&mut controls);
         let active = obj.ident("ActiveControl").map(String::from);
         if let Some(c) = active.and_then(|a| controls.iter_mut().find(|c| c.name == a)) {
             c.focus_request = true;

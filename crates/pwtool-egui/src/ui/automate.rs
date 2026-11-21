@@ -94,6 +94,21 @@ pub fn start(w: Rc<MainWindow>, script: String) {
                     crate::windows::ctx().request_repaint();
                 }
                 "windows" => println!("open={}", crate::windows::open_ids().join(",")),
+                // `fit [WIN]`: captions of a window (main window without
+                // WIN) that do not fit or lack glyphs, as drawn last
+                "fit" => {
+                    let form = if rest.is_empty() { Some(w.form.clone()) } else { super::dialogs::form_of_window(rest) };
+                    match form {
+                        Some(f) => {
+                            let lines = crate::vcl::render::fit_report(&f, &crate::windows::ctx());
+                            println!("fit {}: {} problems", f.name, lines.len());
+                            for l in lines {
+                                println!("fit: {l}");
+                            }
+                        }
+                        None => eprintln!("automate: no window {rest}"),
+                    }
+                }
                 // `msgauto yes|no|ok|cancel`: answer of the next message box
                 "msgauto" => {
                     use crate::vcl::dialogs::MsgResult::*;

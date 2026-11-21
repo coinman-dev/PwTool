@@ -64,6 +64,13 @@ impl eframe::App for App {
                 if let Ok(script) = std::env::var("PWTOOL_AUTOMATE") {
                     automate::start(w.clone(), script);
                 }
+                // log off / shut down: save the database and the settings
+                let weak = Rc::downgrade(&w);
+                pwtool_app::platform::session_end::watch(move || {
+                    if let Some(w) = weak.upgrade() {
+                        w.on_end_session();
+                    }
+                });
                 if self.silent {
                     w.start_hidden();
                 }

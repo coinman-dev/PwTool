@@ -18,7 +18,7 @@ zeroize = "1.9"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 ksni = { version = "0.3", default-features = false, features = ["async-io", "blocking"] }
-ashpd = { version = "0.14", default-features = false, features = ["async-io", "global_shortcuts", "remote_desktop", "screencast", "notification"] }
+ashpd = { version = "0.14", default-features = false, features = ["async-io", "global_shortcuts", "remote_desktop", "screencast", "notification", "inhibit"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [

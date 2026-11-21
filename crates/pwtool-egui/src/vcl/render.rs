@@ -74,10 +74,10 @@ fn font_id(f: &FontStyle, body: f32) -> FontId {
     FontId::new(body * if f.scale > 0.0 { f.scale } else { 1.0 }, family)
 }
 
-fn rich(text: &str, f: &FontStyle, body: f32) -> RichText {
+fn rich(ui: &Ui, text: &str, f: &FontStyle, body: f32) -> RichText {
     let mut r = RichText::new(strip_amp(text)).font(font_id(f, body));
     if let Some(c) = f.color {
-        r = r.color(c);
+        r = r.color(readable(ui, c));
     }
     if f.underline {
         r = r.underline();
@@ -179,8 +179,21 @@ fn text_color(ui: &Ui, f: &FontStyle, enabled: bool) -> Color32 {
     if !enabled {
         ui.visuals().weak_text_color()
     } else {
-        f.color.unwrap_or_else(|| ui.visuals().text_color())
+        f.color.map_or_else(|| ui.visuals().text_color(), |c| readable(ui, c))
     }
+}
+
+/// A text colour of the form (`clMaroon`, `clNavy`…) made lighter for the
+/// dark theme, where the dark VCL colours are hard to read; greys stay.
+pub fn readable(ui: &Ui, c: Color32) -> Color32 {
+    let [r, g, b, a] = c.to_array();
+    if !ui.visuals().dark_mode || (r == g && g == b) {
+        return c;
+    }
+    let max = r.max(g).max(b).max(1) as f32;
+    let k = 0xe0 as f32 / max;
+    let lift = |v: u8| ((v as f32 * k).min(255.0) * 0.75 + 255.0 * 0.25) as u8;
+    Color32::from_rgba_unmultiplied(lift(r), lift(g), lift(b), a)
 }
 
 /// Frame of a read-only edit.
@@ -261,6 +274,30 @@ struct Frame<'a> {
     scale: f32,
     text_height: f32,
     form: &'a str,
+    /// Text of the label of the control being drawn (screen readers).
+    a11y_label: Option<String>,
+}
+
+/// Screen readers: name a field by its label (see `Control::label`).
+fn label_field(ui: &Ui, resp: Response, f: &Frame) -> Response {
+    if let Some(l) = &f.a11y_label {
+        ui.ctx().accesskit_node_builder(resp.id, |b| b.set_label(l.as_str()));
+    }
+    resp
+}
+
+/// Screen readers: leave out a response that is not a control of its own
+/// (context menu areas, decorations).
+fn a11y_hide(ui: &Ui, resp: &Response) {
+    ui.ctx().accesskit_node_builder(resp.id, |b| b.set_hidden());
+}
+
+/// Screen readers: name a button that shows only an icon by its hint.
+fn name_icon_button(resp: &Response, enabled: bool, selected: bool, hint: &str) {
+    if !hint.is_empty() {
+        let label = strip_amp(hint);
+        resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, selected, &label));
+    }
 }
 
 fn tooltip(resp: Response, hint: &str) -> Response {
@@ -271,9 +308,9 @@ fn draw_label(ui: &mut Ui, c: &Control, enabled: bool, f: &mut Frame) {
     let State::Label { halign, wrap, vcenter, .. } = &c.state else { return };
     let text = strip_amp(&c.caption);
     let color = text_color(ui, &c.font, enabled);
-    let fid = font_id(&c.font, f.body);
+    let fid = font_id(&c.font, f.body * c.fit);
     let lines = text.lines().count().max(1);
-    let mut job = LayoutJob::simple(text, fid, color, if *wrap { c.rect.width() } else { f32::INFINITY });
+    let mut job = LayoutJob::simple(text.clone(), fid, color, if *wrap { c.rect.width() } else { f32::INFINITY });
     if !*wrap && c.autosize.is_none() {
         job.wrap = TextWrapping::truncate_at_width(c.rect.width().max(1.0));
         // explicit line breaks are kept (VCL draws every line)
@@ -285,10 +322,15 @@ fn draw_label(ui: &mut Ui, c: &Control, enabled: bool, f: &mut Frame) {
     let y = if *vcenter { c.rect.center().y - galley.size().y / 2.0 } else { c.rect.min.y };
     ui.painter().with_clip_rect(c.rect.expand(1.0)).galley(pos2(x, y), galley, color);
     let resp = ui.interact(c.rect, ui.id().with(("label", &c.name)), Sense::click());
+    if text.is_empty() {
+        a11y_hide(ui, &resp);
+    } else {
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, enabled, &text));
+    }
     if resp.clicked() && enabled {
         f.events.push(Event::Click(c.name.clone()));
     }
-    tooltip(resp, &c.hint);
+    tooltip(resp, if c.cut && c.hint.is_empty() { &c.caption } else { &c.hint });
 }
 
 /// Visible text of a `TLinkLabel` caption (without the `<a>` tags).
@@ -516,6 +558,7 @@ fn draw_combo(ui: &mut Ui, c: &mut Control, enabled: bool, f: &mut Frame) {
         }
     });
     c.has_focus = resp.has_focus();
+    let resp = label_field(ui, resp, f);
     tooltip(resp, &c.hint);
 }
 
@@ -633,6 +676,7 @@ fn draw_edit(ui: &mut Ui, c: &mut Control, enabled: bool, f: &mut Frame) {
             st.store(&ctx, id);
         }
     }
+    let resp = label_field(ui, resp, f);
     tooltip(resp, &c.hint);
 }
 
@@ -737,6 +781,9 @@ fn draw_tool_bar(ui: &mut Ui, controls: &mut [Control], idx: usize, enabled: boo
                     };
                     ui.add_sized(r.size(), b.frame_when_inactive(false).selected(*down))
                 });
+                if tex.is_some() {
+                    name_icon_button(&resp, on, *down, &c.hint);
+                }
                 if resp.clicked() {
                     if *toggle {
                         *down = !*down;
@@ -782,7 +829,7 @@ fn draw_one(ui: &mut Ui, controls: &mut [Control], idx: usize, enabled: bool, f:
         State::Label { .. } => draw_label(ui, c, enabled, f),
         State::Link => draw_link(ui, c, enabled, f),
         State::Button { .. } => {
-            let text = rich(&c.caption, &c.font, body);
+            let text = rich(ui, &c.caption, &c.font, body * c.fit);
             let resp = at(ui, rect, enabled, |ui| ui.add_sized(rect.size(), egui::Button::new(text)));
             if std::mem::take(&mut c.focus_request) {
                 resp.request_focus();
@@ -791,7 +838,7 @@ fn draw_one(ui: &mut Ui, controls: &mut [Control], idx: usize, enabled: bool, f:
             if resp.clicked() {
                 f.events.push(Event::Click(name));
             }
-            tooltip(resp, &c.hint);
+            tooltip(resp, if c.cut && c.hint.is_empty() { &c.caption } else { &c.hint });
         }
         State::Speed { toggle, down, flat, icon, show_caption } => {
             let tex = icon.as_ref().and_then(|i| icon_texture(ui.ctx(), i).map(|t| (t, i.size)));
@@ -802,10 +849,13 @@ fn draw_one(ui: &mut Ui, controls: &mut [Control], idx: usize, enabled: bool, f:
                     (Some((t, size)), false) => {
                         egui::Button::image_and_text(egui::Image::new(t).fit_to_exact_size(vec2(*size, *size)), caption.clone())
                     }
-                    (None, _) => egui::Button::new(rich(&c.caption, &c.font, body)),
+                    (None, _) => egui::Button::new(rich(ui, &c.caption, &c.font, body)),
                 };
                 ui.add_sized(rect.size(), b.frame_when_inactive(!*flat).selected(*down))
             });
+            if tex.is_some() && caption.is_empty() {
+                name_icon_button(&resp, enabled, *down, &c.hint);
+            }
             if resp.clicked() {
                 if *toggle {
                     f.deferred.push(Deferred::Speed(idx));
@@ -815,8 +865,14 @@ fn draw_one(ui: &mut Ui, controls: &mut [Control], idx: usize, enabled: bool, f:
             tooltip(resp, &c.hint);
         }
         State::Check { checked } => {
-            let text = rich(&c.caption, &c.font, body);
-            let resp = at(ui, rect, enabled, |ui| ui.checkbox(checked, text));
+            let text = rich(ui, &c.caption, &c.font, body * c.fit);
+            let cut = c.cut;
+            let resp = at(ui, rect, enabled, |ui| {
+                if cut {
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                }
+                ui.checkbox(checked, text)
+            });
             if std::mem::take(&mut c.focus_request) {
                 resp.request_focus();
             }
@@ -824,17 +880,22 @@ fn draw_one(ui: &mut Ui, controls: &mut [Control], idx: usize, enabled: bool, f:
             if resp.changed() {
                 f.events.push(Event::Click(name));
             }
-            tooltip(resp, &c.hint);
+            tooltip(resp, if c.cut && c.hint.is_empty() { &c.caption } else { &c.hint });
         }
         State::Radio { checked } => {
-            let text = rich(&c.caption, &c.font, body);
-            let on = *checked;
-            let resp = at(ui, rect, enabled, |ui| ui.radio(on, text));
+            let text = rich(ui, &c.caption, &c.font, body * c.fit);
+            let (on, cut) = (*checked, c.cut);
+            let resp = at(ui, rect, enabled, |ui| {
+                if cut {
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                }
+                ui.radio(on, text)
+            });
             if resp.clicked() && !on {
                 f.deferred.push(Deferred::Radio(idx));
                 f.events.push(Event::Click(name));
             }
-            tooltip(resp, &c.hint);
+            tooltip(resp, if c.cut && c.hint.is_empty() { &c.caption } else { &c.hint });
         }
         State::Edit { .. } | State::Memo { .. } => draw_edit(ui, c, enabled, f),
         State::Combo { .. } => draw_combo(ui, c, enabled, f),
@@ -948,6 +1009,12 @@ fn draw_one(ui: &mut Ui, controls: &mut [Control], idx: usize, enabled: bool, f:
                 }
             }
             let resp = ui.interact(rect, ui.id().with(("image", &name)), Sense::click());
+            if c.hint.is_empty() {
+                a11y_hide(ui, &resp);
+            } else {
+                let label = strip_amp(&c.hint);
+                resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, enabled, &label));
+            }
             if resp.clicked() {
                 f.events.push(Event::Click(name));
             }
@@ -1002,6 +1069,7 @@ impl Form {
             ctx.fonts_mut(|f| f.layout_no_wrap(text, fid, Color32::WHITE).size().x.ceil() + 1.0)
         };
         layout::layout(&mut d, area, &mut measure);
+        fit_captions(&mut d, ctx, area, body);
     }
 
     /// Keyboard handling of the form (before drawing).
@@ -1149,7 +1217,8 @@ impl Form {
                 if matches!(d.controls[i].state, State::Custom) {
                     Some((d.controls[i].name.clone(), d.controls[i].rect, d.controls[i].hint.clone(), d.controls[i].popup_menu.clone()))
                 } else {
-                    let mut f = Frame { events: &mut events, deferred: Vec::new(), body, scale, text_height, form: &self.name };
+                    let a11y_label = d.controls[i].label.map(|l| strip_amp(&d.controls[l].caption));
+                    let mut f = Frame { events: &mut events, deferred: Vec::new(), body, scale, text_height, form: &self.name, a11y_label };
                     draw_one(ui, &mut d.controls, i, enabled, &mut f);
                     deferred.append(&mut f.deferred);
                     // context menu of the control
@@ -1159,6 +1228,7 @@ impl Form {
                         let FormData { menus, items, popup_owner, .. } = &mut *d;
                         if let Some(nodes) = menus.get(&menu) {
                             let resp = ui.interact(rect, ui.id().with(("ctx", i)), Sense::click());
+                            a11y_hide(ui, &resp);
                             if resp.secondary_clicked() {
                                 *popup_owner = Some(cname);
                             }
@@ -1180,12 +1250,19 @@ impl Form {
                     }
                 }
                 let resp = ui.interact(rect, ui.id().with(("custom", &name)), Sense::hover());
+                if hint.is_empty() {
+                    a11y_hide(ui, &resp);
+                } else {
+                    let label = strip_amp(&hint);
+                    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, enabled, &label));
+                }
                 tooltip(resp, &hint);
                 if let Some(menu) = menu {
                     let mut d = self.data.borrow_mut();
                     let FormData { menus, items, popup_owner, .. } = &mut *d;
                     if let Some(nodes) = menus.get(&menu) {
                         let resp = ui.interact(rect, ui.id().with(("ctxc", &name)), Sense::click());
+                        a11y_hide(ui, &resp);
                         if resp.secondary_clicked() {
                             *popup_owner = Some(name.clone());
                         }
@@ -1311,6 +1388,186 @@ pub fn window_size(form: &Form, ctx: &egui::Context) -> Vec2 {
         s.y += menu_bar_height(ctx);
     }
     s
+}
+
+/// Width of the caption of a check box, radio button, button or fixed-size
+/// label and the width of the box or padding around it (`None` for other
+/// controls).
+fn caption_need(c: &Control, ctx: &egui::Context, body: f32, sp: &egui::style::Spacing) -> Option<(f32, f32)> {
+    let extra = match &c.state {
+        State::Check { .. } | State::Radio { .. } => sp.icon_width + sp.icon_spacing,
+        State::Label { wrap: false, .. } if c.autosize.is_none() => 0.0,
+        State::Button { .. } => 2.0 * sp.button_padding.x,
+        _ => return None,
+    };
+    let text = strip_amp(&c.caption);
+    if text.is_empty() {
+        return None;
+    }
+    let fid = font_id(&c.font, body);
+    let w = ctx.fonts_mut(|f| text.lines().map(|l| f.layout_no_wrap(l.to_string(), fid.clone(), Color32::WHITE).size().x).fold(0.0, f32::max));
+    Some((w, extra))
+}
+
+/// Long captions (translations) of check boxes, radio buttons, buttons and
+/// fixed-size labels: take the free space next to the control (to the
+/// right; to the left for right-aligned labels; not for buttons) inside the
+/// parent, then shrink the font down to 80 %, then cut the text (full text
+/// as a tooltip).
+fn fit_captions(d: &mut FormData, ctx: &egui::Context, area: Rect, body: f32) {
+    let sp = ctx.global_style().spacing.clone();
+    let gap = 4.0 * d.scale;
+    for i in 0..d.controls.len() {
+        d.controls[i].fit = 1.0;
+        d.controls[i].cut = false;
+        let c = &d.controls[i];
+        if !c.visible || !c.rect.is_positive() {
+            continue;
+        }
+        // word-wrapped labels: a smaller font until the text fits the height
+        if let State::Label { wrap: true, .. } = c.state {
+            let text = strip_amp(&c.caption);
+            let height = |k: f32| ctx.fonts_mut(|f| f.layout(text.clone(), font_id(&c.font, body * k), Color32::WHITE, c.rect.width()).size().y);
+            if !text.is_empty() && height(1.0) > c.rect.height() + 1.0 {
+                let k = [0.95, 0.9, 0.85, 0.8].into_iter().find(|&k| height(k) <= c.rect.height() + 1.0);
+                let c = &mut d.controls[i];
+                c.fit = k.unwrap_or(0.8);
+                c.cut = k.is_none();
+            }
+            continue;
+        }
+        let Some((text_w, extra)) = caption_need(c, ctx, body, &sp) else { continue };
+        let need = text_w + extra;
+        if need <= c.rect.width() + 0.5 {
+            continue;
+        }
+        let r = c.rect;
+        if matches!(c.state, State::Button { .. }) {
+            let c = &mut d.controls[i];
+            c.fit = ((r.width() - extra) / text_w).clamp(0.8, 1.0);
+            c.cut = text_w * c.fit + extra > r.width() + 0.5;
+            continue;
+        }
+        let right_aligned = matches!(c.state, State::Label { halign, .. } if halign > 0.9);
+        // free space in the parent, up to the nearest sibling on that side
+        let bounds = match c.parent {
+            Some(p) => {
+                let pc = &d.controls[p];
+                match pc.state {
+                    State::Group | State::RadioGroup { .. } | State::Panel { bevel: true } => pc.rect.shrink(6.0 * d.scale),
+                    _ => pc.rect.shrink(gap),
+                }
+            }
+            None => area.shrink(gap),
+        };
+        let (mut lo, mut hi) = (bounds.min.x.min(r.min.x), bounds.max.x.max(r.max.x));
+        let siblings: &[usize] = match c.parent {
+            Some(p) => &d.controls[p].children,
+            None => &d.roots,
+        };
+        for &k in siblings {
+            let s = &d.controls[k];
+            if k == i || !s.visible || !s.rect.is_positive() || matches!(s.state, State::Bevel { .. }) {
+                continue;
+            }
+            if s.rect.max.y <= r.min.y + 1.0 || s.rect.min.y >= r.max.y - 1.0 {
+                continue;
+            }
+            if s.rect.min.x >= r.max.x - 1.0 {
+                hi = hi.min(s.rect.min.x - gap);
+            } else if s.rect.max.x <= r.min.x + 1.0 {
+                lo = lo.max(s.rect.max.x + gap);
+            }
+        }
+        let c = &mut d.controls[i];
+        if right_aligned {
+            c.rect.min.x = (r.max.x - need).max(lo).min(r.min.x);
+        } else {
+            c.rect.max.x = (r.min.x + need).min(hi).max(r.max.x);
+        }
+        let w = c.rect.width();
+        if need > w + 0.5 {
+            c.fit = ((w - extra) / text_w).clamp(0.8, 1.0);
+            c.cut = text_w * c.fit + extra > w + 0.5;
+        }
+    }
+}
+
+/// Captions that do not fit their controls or use characters missing from
+/// the fonts (for checking translations, `--forms DIR --fit`). The form
+/// must have been drawn once (layout). One line per problem:
+/// `Form.Control: text needs W, has W` / `… missing glyphs`.
+pub fn fit_report(form: &Form, ctx: &egui::Context) -> Vec<String> {
+    let style = ctx.global_style();
+    let body = style.text_styles.get(&TextStyle::Body).map_or(12.0, |f| f.size);
+    let sp = &style.spacing;
+    let d = form.data.borrow();
+    let mut out = Vec::new();
+    let width = |text: &str, fid: &FontId| ctx.fonts_mut(|f| f.layout_no_wrap(text.to_string(), fid.clone(), Color32::WHITE).size().x);
+    let shown = |mut i: usize| loop {
+        let c = &d.controls[i];
+        if !c.visible {
+            return false;
+        }
+        match c.parent {
+            Some(p) => i = p,
+            None => return true,
+        }
+    };
+    for (i, c) in d.controls.iter().enumerate() {
+        if !shown(i) || !c.rect.is_positive() {
+            continue;
+        }
+        let fid = font_id(&c.font, body);
+        let text = if c.class == "TLinkLabel" { link_text(&c.caption) } else { strip_amp(&c.caption) };
+        let mut texts: Vec<String> = vec![text.clone()];
+        if let State::RadioGroup { items, .. } | State::ListBox { items, .. } | State::CheckList { items, .. } | State::Combo { items, .. } = &c.state {
+            texts.extend(items.iter().map(|s| strip_amp(s)));
+        }
+        for t in &texts {
+            let miss = super::fonts::missing_chars(t);
+            if !miss.is_empty() {
+                out.push(format!("{}.{}: missing glyphs {miss:?} in {t:?}", form.name, c.name));
+            }
+        }
+        if text.is_empty() {
+            continue;
+        }
+        let avail = c.rect.width();
+        if c.cut {
+            out.push(format!("{}.{}: {text:?} cut", form.name, c.name));
+        } else if c.fit < 1.0 {
+            out.push(format!("{}.{}: {text:?} font {:.0} %", form.name, c.name, c.fit * 100.0));
+        }
+        let need = match &c.state {
+            State::Speed { show_caption: true, icon, .. } => {
+                width(&text, &fid) + 2.0 * sp.button_padding.x + icon.as_ref().map_or(0.0, |i| i.size + sp.icon_spacing)
+            }
+            State::Group | State::RadioGroup { .. } => width(&text, &fid) + 14.0 * d.scale,
+            _ => 0.0,
+        };
+        if need > avail + 1.0 {
+            out.push(format!("{}.{}: {text:?} needs {need:.0}, has {avail:.0}", form.name, c.name));
+        }
+        if let State::Pages { .. } = &c.state {
+            let tabs: f32 = c.children.iter().filter(|&&k| d.controls[k].visible).map(|&k| width(&strip_amp(&d.controls[k].caption), &fid) + 6.0).sum();
+            if tabs > avail - 4.0 {
+                out.push(format!("{}.{}: tabs need {tabs:.0}, have {avail:.0}", form.name, c.name));
+            }
+        }
+    }
+    let mut menu: Vec<String> = d
+        .items
+        .values()
+        .map(|st| strip_amp(&st.caption))
+        .filter_map(|t| {
+            let miss = super::fonts::missing_chars(&t);
+            (!miss.is_empty()).then(|| format!("{}: menu item {t:?}: missing glyphs {miss:?}", form.name))
+        })
+        .collect();
+    menu.sort();
+    out.extend(menu);
+    out
 }
 
 #[cfg(test)]

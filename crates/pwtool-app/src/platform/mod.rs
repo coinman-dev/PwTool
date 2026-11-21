@@ -27,6 +27,10 @@ pub mod clipboard;
 #[cfg_attr(windows, path = "single_instance_win.rs")]
 pub mod single_instance;
 
+#[cfg_attr(unix, path = "session_end_portal.rs")]
+#[cfg_attr(windows, path = "session_end_win.rs")]
+pub mod session_end;
+
 pub mod autostart;
 pub mod notify;
 pub mod sys;

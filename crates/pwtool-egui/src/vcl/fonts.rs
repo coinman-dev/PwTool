@@ -63,6 +63,29 @@ thread_local! {
     static CACHE: std::cell::RefCell<std::collections::HashMap<fontdb::ID, Face>> = std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
+thread_local! {
+    /// Faces of the proportional family and the characters checked so far
+    /// (for [`missing_chars`]).
+    static COVERAGE: std::cell::RefCell<(Vec<Face>, std::collections::HashMap<char, bool>)> = std::cell::RefCell::new((Vec::new(), std::collections::HashMap::new()));
+}
+
+/// Characters of `text` that no face of the installed proportional font
+/// chain has (egui's own `has_glyph` reports characters of the face that
+/// also provides the replacement glyph as missing).
+pub fn missing_chars(text: &str) -> String {
+    COVERAGE.with(|c| {
+        let (faces, known) = &mut *c.borrow_mut();
+        text.chars()
+            .filter(|&ch| !ch.is_whitespace() && !ch.is_control())
+            .filter(|&ch| {
+                !*known.entry(ch).or_insert_with(|| {
+                    faces.iter().any(|f| ttf_parser::Face::parse(&f.font, f.index).is_ok_and(|p| p.glyph_index(ch).is_some()))
+                })
+            })
+            .collect()
+    })
+}
+
 fn face_data(id: fontdb::ID) -> Option<Face> {
     if let Some(f) = CACHE.with(|c| c.borrow().get(&id).cloned()) {
         return Some(f);
@@ -184,6 +207,8 @@ pub fn install(ctx: &egui::Context, user: &UserFont) -> FontSet {
     }
     let preview = preview.and_then(|(p, b, i)| load_near(&p, b, i).map(|f| add(&mut defs, format!("preview:{p}:{b}:{i}"), f)));
     defs.families.insert(FontFamily::Name(PREVIEW.into()), chain(preview.as_ref().or(regular.as_ref()), &egui_prop));
+    let faces: Vec<Face> = defs.families[&FontFamily::Proportional].iter().filter_map(|k| defs.font_data.get(k).cloned()).collect();
+    COVERAGE.with(|c| *c.borrow_mut() = (faces, std::collections::HashMap::new()));
     ctx.set_fonts(defs);
 
     let body = user.size.filter(|s| (6.0..=40.0).contains(s)).unwrap_or(DEFAULT_SIZE);

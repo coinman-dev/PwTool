@@ -2,9 +2,10 @@
 //! `.ai/PLAN-egui.md`). For now: drawing the forms of the original.
 //!
 //!   pwtool-egui [--show FORM] [--lang LANGUAGE] [--dark]
-//!   pwtool-egui --forms DIR [--lang LANGUAGE] [--dark] [--ppp 1.25]
+//!   pwtool-egui --forms DIR [--lang LANGUAGE] [--dark] [--ppp 1.25] [--fit]
 //!
-//! `--forms` writes a picture of every form to DIR without opening a window.
+//! `--forms` writes a picture of every form to DIR without opening a window;
+//! `--fit` also lists captions that do not fit or lack glyphs.
 
 // GUI program on Windows (no console window)
 #![cfg_attr(windows, windows_subsystem = "windows")]
@@ -63,6 +64,7 @@ fn snapshot_forms(args: &[String]) -> std::io::Result<()> {
     // the first frame loads the fonts
     snap.render(egui::vec2(100.0, 100.0), ppp, 1, |_| {});
     let only = arg(args, "--form");
+    let fit = args.iter().any(|a| a == "--fit");
     for name in vcl::FORMS.iter().filter(|n| only.as_deref().is_none_or(|o| o == **n)) {
         let form = vcl::load_form(&ctx, name);
         let size = vcl::window_size(&form, &ctx);
@@ -74,6 +76,11 @@ fn snapshot_forms(args: &[String]) -> std::io::Result<()> {
         let path = dir.join(format!("{name}.png"));
         vcl::snapshot::save_png(&img, &path)?;
         println!("{} {}x{}", path.display(), img.size[0], img.size[1]);
+        if fit {
+            for line in vcl::render::fit_report(&form, &ctx) {
+                println!("fit: {line}");
+            }
+        }
     }
     Ok(())
 }

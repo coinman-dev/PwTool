@@ -3208,6 +3208,7 @@ dependencies = [
  "raw-window-handle",
  "rfd",
  "serde_json",
+ "ttf-parser",
  "ureq",
  "windows-sys 0.61.2",
  "zeroize",
