@@ -988,7 +988,12 @@ impl MainWindow {
                 f.set_text("ProgramLbl", PROGRAM_NAME);
                 f.set_text("VersionLbl", &format!("Version {PORT_VERSION} ({}-bit), based on {ORIGINAL_NAME} {PROGRAM_VERSION}", usize::BITS));
                 let link = |url: &str, text: &str| format!("<a href=\"{url}\">{text}</a>");
-                f.set_control_caption("AuthorLink", &format!("{PROGRAM_COPYRIGHT} {}", link(&format!("mailto:{PROGRAM_AUTHOR_EMAIL}"), PROGRAM_AUTHOR)));
+                // the original author (without his e-mail address) and the port
+                f.set_control_caption("AuthorLink", &format!("{PROGRAM_COPYRIGHT} {PROGRAM_AUTHOR}
+{PORT_COPYRIGHT}"));
+                let (x, y, _, _) = f.bounds("AuthorLink");
+                let (_, www_y, _, _) = f.bounds("WWWLink");
+                f.set_bounds("AuthorLink", x, y, 393, www_y - y - 2);
                 let www = if PORT_REPOSITORY.is_empty() { PROGRAM_URL_ORIGINAL } else { PORT_REPOSITORY };
                 f.set_control_caption("WWWLink", &link(www, www));
                 f.set_control_caption("LicenseLink", &link("license", &trl("View license")));

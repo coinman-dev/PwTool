@@ -16,9 +16,11 @@ pub const PROGRAM_VERSION: &str = "3.6.1";
 pub const PROGRAM_LANGVER_MIN: &str = "3.6.0";
 /// Version of Password Tool.
 pub const PORT_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Author of the original (Password Tech).
 pub const PROGRAM_AUTHOR: &str = "Christian Thöing";
-pub const PROGRAM_AUTHOR_EMAIL: &str = "c.thoeing@web.de";
 pub const PROGRAM_COPYRIGHT: &str = "Copyright © 2002-2026";
+/// Copyright of Password Tool (the port).
+pub const PORT_COPYRIGHT: &str = "Copyright © 2026 CoinMan.dev";
 /// Repository of Password Tool (used for "Visit Website", "Get
 /// Translations" and the update check).
 pub const PORT_REPOSITORY: &str = "https://github.com/coinman-dev/PwTool";

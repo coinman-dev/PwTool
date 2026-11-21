@@ -29,6 +29,10 @@
 - Translations, the list of common passwords, script examples and the PDF manuals are
   built into the program (compressed); own translations can still be placed in the
   settings folder.
+- The colour variants of the program icon (Settings > General > Application icon) are
+  made from the Password Tool icon (tools/make_icon_variants.py) instead of the cube of
+  Password Tech. The About window shows the copyright of the original author without his
+  e-mail address, followed by "Copyright © 2026 CoinMan.dev".
 - All windows share one style: the windows built in code (font dialog, message boxes) use
   the sizes of the controls of the original forms; combo boxes are as tall as the edits and
   buttons, spin buttons have larger arrows. The font dialog is translated.
