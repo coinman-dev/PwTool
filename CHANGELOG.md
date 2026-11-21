@@ -29,6 +29,10 @@
 - Translations, the list of common passwords, script examples and the PDF manuals are
   built into the program (compressed); own translations can still be placed in the
   settings folder.
+- Smaller executables: the release build uses whole-program LTO, one codegen unit, abort on
+  panic and size optimization except for the cryptographic code (the Windows executable
+  went from 21.7 to 13.8 MB, the Linux one from 29.3 to 18.5 MB; the cipher benchmark is
+  as fast as before).
 - The colour variants of the program icon (Settings > General > Application icon) are
   made from the Password Tool icon (tools/make_icon_variants.py) instead of the cube of
   Password Tech. The About window shows the copyright of the original author without his

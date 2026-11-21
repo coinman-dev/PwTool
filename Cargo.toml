@@ -9,8 +9,27 @@ license = "GPL-2.0-or-later"
 rust-version = "1.90"
 
 [profile.release]
-lto = "thin"
-codegen-units = 4
+# small executable: whole-program LTO, one codegen unit, abort on panic
+# (nothing catches panics), optimized for size...
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+opt-level = "s"
+
+# ...except the code where speed matters: encryption, hashing, key
+# derivation (the cipher benchmark is as fast as with opt-level 3)
+[profile.release.package.pwtool-core]
+opt-level = 3
+[profile.release.package.aes]
+opt-level = 3
+[profile.release.package.sha1]
+opt-level = 3
+[profile.release.package.sha2]
+opt-level = 3
+[profile.release.package.blake2]
+opt-level = 3
+[profile.release.package.hmac]
+opt-level = 3
 
 # eframe 0.36.2 with AccessKit for every window, not only the main one
 # (screen readers in PassCube and the dialogs); see vendor/eframe/PWTOOL-PATCH.md.
