@@ -172,9 +172,14 @@ pub fn any_modal() -> bool {
     WINDOWS.with(|ws| ws.borrow().iter().any(|x| x.modal))
 }
 
+/// The windows are Wayland windows (winit prefers Wayland when it is there).
+pub fn is_wayland() -> bool {
+    cfg!(target_os = "linux") && std::env::var_os("WAYLAND_DISPLAY").is_some() && std::env::var("PWTOOL_X11").is_err()
+}
+
 /// Modal dialogs are drawn inside their parent (Wayland).
 pub fn embed_modal() -> bool {
-    cfg!(target_os = "linux") && std::env::var_os("WAYLAND_DISPLAY").is_some() && std::env::var("PWTOOL_X11").is_err()
+    is_wayland()
 }
 
 /// Draw the content of window `id` (or the root), disabled while a modal

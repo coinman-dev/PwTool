@@ -14,6 +14,8 @@
   the `Run` registry key, Always on Top, single instance, file locking of open databases,
   locked memory pages (`VirtualLock`), and dates in the regional format. Settings are
   stored in `%APPDATA%\PwTool`; portable mode works as on Linux.
+- KDE Plasma on Wayland: Always on Top, Reset All Window Positions and the database search
+  by the title of the active window work through KWin scripts (over D-Bus, without GTK).
 - The open database and the settings are saved when the user session ends (Windows shut
   down or log off; on Linux through the session monitor of `xdg-desktop-portal`).
 - Release workflow builds `pwtool_<version>_windows_x64.exe` and runs the tests and the

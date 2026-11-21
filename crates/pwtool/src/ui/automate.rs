@@ -94,6 +94,10 @@ pub fn start(w: Rc<MainWindow>, script: String) {
                     crate::windows::ctx().request_repaint();
                 }
                 "windows" => println!("open={}", crate::windows::open_ids().join(",")),
+                // `menu NAME`: state of a menu item of the main window
+                "menu" => println!("{rest}: checked={} enabled={}", f.menu_checked(rest), f.menu_enabled(rest)),
+                // title of the active window of another program (KWin on Linux)
+                "activetitle" => println!("activetitle={:?}", pwtool_app::platform::active_window::active_window_title().await),
                 // `fit [WIN]`: captions of a window (main window without
                 // WIN) that do not fit or lack glyphs, as drawn last
                 "fit" => {

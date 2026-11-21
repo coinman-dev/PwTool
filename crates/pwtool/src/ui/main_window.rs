@@ -327,8 +327,9 @@ impl MainWindow {
         f.set_menu_checked("MainMenu_Options_SaveSettingsOnExit", ini.read_bool("Main", "SaveSettingsOnExit", true));
         let on_top = ini.read_bool("Main", "AlwaysOnTop", false);
         f.set_menu_checked("MainMenu_Options_AlwaysOnTop", on_top);
-        if on_top {
-            set_always_on_top(true);
+        // on Wayland also when off: finds out whether KWin can do it
+        if on_top || windows::is_wayland() {
+            self.set_always_on_top(on_top, true);
         }
         let editable = ini.read_bool("Main", "PasswEditable", true);
         f.set_menu_checked("PasswBoxMenu_Editable", editable);
@@ -516,7 +517,7 @@ impl MainWindow {
             w.update_entropy_progress(true);
         });
         self.check_menu("MainMenu_Options_SaveSettingsOnExit", |_| {});
-        self.check_menu("MainMenu_Options_AlwaysOnTop", |w| set_always_on_top(w.f().menu_checked("MainMenu_Options_AlwaysOnTop")));
+        self.check_menu("MainMenu_Options_AlwaysOnTop", |w| w.set_always_on_top(w.f().menu_checked("MainMenu_Options_AlwaysOnTop"), false));
         self.check_menu("PasswBoxMenu_Editable", |w| {
             let editable = w.f().menu_checked("PasswBoxMenu_Editable");
             w.f().set_read_only("PasswBox", !editable);
@@ -1811,6 +1812,30 @@ impl MainWindow {
         self.passw_enter().clear_passw_cache();
     }
 
+    /// "Always on Top": the window level (Windows, X11); on Wayland KWin's
+    /// `keepAbove` for the windows of the program. Without KWin there is no
+    /// way on Wayland: the menu item is unchecked and disabled.
+    fn set_always_on_top(self: &Rc<Self>, on: bool, startup: bool) {
+        if !windows::is_wayland() {
+            let level = if on { egui::WindowLevel::AlwaysOnTop } else { egui::WindowLevel::Normal };
+            windows::ctx().send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::WindowLevel(level));
+            return;
+        }
+        let w = self.weak();
+        crate::runtime::spawn(async move {
+            if startup {
+                // the window must be mapped before KWin can change it
+                pwtool_app::rt::sleep(std::time::Duration::from_millis(1500)).await;
+            }
+            if !pwtool_app::platform::active_window::set_keep_above(on).await {
+                if let Some(w) = w.upgrade() {
+                    w.f().set_menu_checked("MainMenu_Options_AlwaysOnTop", false);
+                    w.f().set_menu_enabled("MainMenu_Options_AlwaysOnTop", false);
+                }
+            }
+        });
+    }
+
     /// Profile given on the command line or configured for start-up.
     fn startup_profile(&self) {
         let (name, from_cmd) = {
@@ -1970,10 +1995,4 @@ fn build_format_help() -> String {
         ],
     ));
     s
-}
-
-/// "Always on Top" for the main window.
-fn set_always_on_top(on: bool) {
-    let level = if on { egui::WindowLevel::AlwaysOnTop } else { egui::WindowLevel::Normal };
-    windows::ctx().send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::WindowLevel(level));
 }

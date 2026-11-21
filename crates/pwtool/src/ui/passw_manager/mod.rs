@@ -740,10 +740,7 @@ impl PasswManager {
         let m = self.clone();
         crate::runtime::spawn(async move {
             let Some(main) = m.main.upgrade() else { return };
-            #[cfg(windows)]
             let title = pwtool_app::platform::active_window::active_window_title().await;
-            #[cfg(not(windows))]
-            let title: Option<String> = None;
             let Some(title) = title else {
                 let text = trl("This function is not available on this system.");
                 if autotype {

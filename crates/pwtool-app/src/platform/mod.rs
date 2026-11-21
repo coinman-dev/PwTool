@@ -15,8 +15,8 @@ pub mod hotkeys;
 #[cfg(unix)]
 pub mod portal;
 
-#[cfg(windows)]
-#[path = "active_window_win.rs"]
+#[cfg_attr(unix, path = "active_window_kwin.rs")]
+#[cfg_attr(windows, path = "active_window_win.rs")]
 pub mod active_window;
 
 #[cfg(windows)]

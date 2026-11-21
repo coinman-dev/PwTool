@@ -14,6 +14,8 @@
 //! - `pmsavecfg` — save the configuration and print the INI file
 //! - `pmgen` — right click on the password toggle button (generate)
 //! - `pmdrop I` — drop the selected entry on row I (drag & drop)
+//! - `pmkeyword` — search for the keyword in the title of the active window
+//!   (hot key action)
 
 use std::rc::Rc;
 
@@ -106,6 +108,7 @@ pub fn automate(main: &Rc<MainWindow>, cmd: &str, rest: &str) -> bool {
             pm.search_database(rest, pm.search_flags.get(), false, false);
             println!("pmsearch: {} rows in {} ms", pm.list.len(), t.elapsed().as_millis());
         }
+        "pmkeyword" => pm.search_db_for_keyword(false),
         "pmdrop" => {
             if let Ok(i) = rest.parse::<usize>() {
                 pm.db_view_drag_drop(i);

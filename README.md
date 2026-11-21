@@ -95,6 +95,10 @@ Linux:
   auto-clear timeout.
 - **Session end**: the open database and the settings are saved when you log out (session
   monitor of `xdg-desktop-portal`).
+- **KDE Plasma**: on Wayland, **Always on Top**, **Reset All Window Positions** and the
+  database search by the title of the active window (hot key) work through short KWin
+  scripts; without KWin the first is disabled and the last reports that it is unavailable.
+  On X11 Always on Top and window positions work everywhere.
 
 Windows (Win32 API, as in Password Tech):
 

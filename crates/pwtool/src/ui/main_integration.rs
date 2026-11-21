@@ -99,8 +99,14 @@ impl MainWindow {
         self.menu("TrayMenu_GenAndShowPassw", |w| w.generate_passw(GenDest::MsgBox));
         self.menu("TrayMenu_GenAndAutoTypePassw", |w| w.generate_passw(GenDest::Autotype));
         self.menu("TrayMenu_ResetWindowPos", |_| {
-            let ctx = windows::ctx();
-            ctx.send_viewport_cmd(ViewportCommand::OuterPosition(egui::pos2(40.0, 40.0)));
+            if windows::is_wayland() {
+                // only KWin can move windows on Wayland (all windows of the program)
+                crate::runtime::spawn(async {
+                    pwtool_app::platform::active_window::reset_window_positions().await;
+                });
+            } else {
+                windows::ctx().send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::OuterPosition(egui::pos2(40.0, 40.0)));
+            }
         });
         let keys = self.core.borrow().config.hot_keys.clone();
         self.activate_hot_keys(&keys);
