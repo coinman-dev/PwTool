@@ -1128,7 +1128,9 @@ fn draw_one(ui: &mut Ui, controls: &mut [Control], idx: usize, enabled: bool, f:
         }
         State::Splitter => {
             let vertical = matches!(c.align, Align::Left | Align::Right);
-            let resp = ui.interact(rect, ui.id().with(("split", &name)), Sense::drag());
+            // a few points more to grab than the thin line
+            let grab = if vertical { rect.expand2(egui::vec2(3.0, 0.0)) } else { rect.expand2(egui::vec2(0.0, 3.0)) };
+            let resp = ui.interact(grab, ui.id().with(("split", &name)), Sense::drag());
             a11y_hide(ui, &resp);
             let resp = resp.on_hover_cursor(if vertical { egui::CursorIcon::ResizeHorizontal } else { egui::CursorIcon::ResizeVertical });
             let d = resp.drag_delta();
@@ -1508,7 +1510,28 @@ impl Form {
                                 _ => false,
                             }
                     });
-                    if let Some(t) = target {
+                    // the control filling the rest keeps at least its design
+                    // size (its anchored controls would shrink below it)
+                    let room = d
+                        .controls
+                        .iter()
+                        .filter(|c| c.parent == parent && c.visible && c.align == Align::Client)
+                        .map(|c| match align {
+                            Align::Left | Align::Right => c.rect.width() - c.design_client.x,
+                            _ => c.rect.height() - c.design_client.y,
+                        })
+                        .fold(f32::INFINITY, f32::min);
+                    let grow = match align {
+                        Align::Left | Align::Top => delta,
+                        _ => -delta,
+                    };
+                    let delta = if grow > 0.0 && grow > room.max(0.0) {
+                        let g = room.max(0.0);
+                        if matches!(align, Align::Left | Align::Top) { g } else { -g }
+                    } else {
+                        delta
+                    };
+                    if let Some(t) = target.filter(|_| delta != 0.0) {
                         let c = &mut d.controls[t];
                         let min = 20.0;
                         match align {

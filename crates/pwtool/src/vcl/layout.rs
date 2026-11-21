@@ -31,11 +31,22 @@ fn place(controls: &mut [Control], kids: &[usize], area: Rect, design: egui::Vec
     // client rectangle left after the aligned controls
     let mut client = area;
     for kind in [Align::Top, Align::Bottom, Align::Left, Align::Right, Align::Client] {
-        for &k in kids {
-            let c = &mut controls[k];
-            if c.align != kind || !c.visible {
-                continue;
+        // like the VCL, controls of one alignment in the order of their
+        // positions (a splitter right of the list it resizes)
+        let mut same: Vec<usize> = kids.iter().copied().filter(|&k| controls[k].align == kind && controls[k].visible).collect();
+        let key = |k: usize| {
+            let d = controls[k].design;
+            match kind {
+                Align::Top => d.min.y,
+                Align::Bottom => -d.max.y,
+                Align::Left => d.min.x,
+                Align::Right => -d.max.x,
+                _ => 0.0,
             }
+        };
+        same.sort_by(|&a, &b| key(a).total_cmp(&key(b)));
+        for k in same {
+            let c = &mut controls[k];
             let (w, h) = (c.design.width(), c.design.height());
             c.rect = match kind {
                 Align::Top => {

@@ -263,6 +263,7 @@ fn align_of(o: &FormObj) -> Align {
         None => match o.class.as_str() {
             "TToolBar" => Align::Top,
             "TStatusBar" => Align::Bottom,
+            "TSplitter" => Align::Left,
             _ => Align::None,
         },
     }
@@ -488,7 +489,9 @@ impl Builder<'_> {
         let (dw, dh) = if o.class == "TTabSheet" {
             design_size(o).unwrap_or(self.sheet_size)
         } else {
-            (o.int_or("Width", 0), o.int_or("Height", 0))
+            // `TSplitter` is 3 pixels wide/high unless stored otherwise
+            let d = if o.class == "TSplitter" { 3 } else { 0 };
+            (o.int_or("Width", d), o.int_or("Height", d))
         };
         let (w, h) = (self.sc(dw), self.sc(dh));
         let align = align_of(o);

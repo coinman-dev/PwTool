@@ -106,6 +106,47 @@ mod tests {
         assert_eq!(label_of("PasswEnter", "PasswBox").as_deref(), Some("PasswLbl"));
     }
 
+    /// A splitter (alLeft by default) resizes the control left of it; the
+    /// control filling the rest keeps its design width.
+    #[test]
+    fn splitter_drag() {
+        use egui::{Event, PointerButton, Pos2, RawInput, Rect, pos2, vec2};
+        let ctx = egui::Context::default();
+        fonts::install(&ctx, &fonts::UserFont::default());
+        ctx.run_ui(RawInput::default(), |_| {}).textures_delta.clear();
+        let f = load_form(&ctx, "PasswManager");
+        let size = window_size(&f, &ctx) + vec2(300.0, 0.0);
+        let mut t = 0.0;
+        let mut frame = |events: Vec<Event>| {
+            t += 0.1;
+            let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)), time: Some(t), events, ..Default::default() };
+            ctx.run_ui(raw, |ui| f.show(ui)).textures_delta.clear();
+        };
+        let mut drag = |from: Pos2, to: Pos2| {
+            let button = |pos, pressed| Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers: Default::default() };
+            frame(vec![Event::PointerMoved(from)]);
+            frame(vec![button(from, true)]);
+            for i in 1..=5 {
+                frame(vec![Event::PointerMoved(from + (to - from) * i as f32 / 5.0)]);
+            }
+            frame(vec![button(to, false)]);
+            frame(vec![]);
+        };
+        drag(Pos2::ZERO, Pos2::ZERO);
+        let width = |n: &str| f.rect(n).width();
+        let list = width("DbView");
+        let s = f.rect("Splitter2");
+        assert!(s.width() > 1.0, "splitter {s:?}");
+        let y = s.center().y;
+        drag(pos2(s.center().x, y), pos2(s.center().x - 100.0, y));
+        assert!((width("DbView") - (list - 100.0)).abs() < 2.0, "{list} -> {}", width("DbView"));
+        let s = f.rect("Splitter2");
+        drag(pos2(s.center().x, y), pos2(s.center().x + 2000.0, y));
+        let panel = f.data.borrow().by_name.get("EditPanel").map(|&i| f.data.borrow().controls[i].design_client.x).unwrap();
+        assert!(width("EditPanel") >= panel - 1.0, "{} < {panel}", width("EditPanel"));
+        assert!(width("DbView") > list, "the list grows up to the room left");
+    }
+
     #[test]
     fn form_api() {
         let ctx = egui::Context::default();

@@ -463,11 +463,6 @@ impl PasswManager {
 
     fn load_config(self: &Rc<Self>, ini: &IniFile) {
         let f = self.f();
-        let list_width = ini.read_int(CONFIG_ID, "ListWidth", -1);
-        if list_width > 10 {
-            let (x, y, _, h) = f.bounds("DbView");
-            f.set_bounds("DbView", x, y, list_width as i64, h);
-        }
         let tag_h = ini.read_int(CONFIG_ID, "TagListHeight", -1);
         if tag_h > 1 {
             let (x, y, w, _) = f.bounds("TagView");
@@ -510,6 +505,20 @@ impl PasswManager {
             }
             *self.list_col_widths.borrow_mut() = v;
         }
+        // the list ends with its last column (the splitter right of it);
+        // a wider list would only show empty space
+        let cols = {
+            let w = self.list_col_widths.borrow();
+            if w.is_empty() { self.list.column_widths() } else { w.clone() }
+        };
+        let bar = windows::ctx().global_style().spacing.scroll.allocated_width();
+        let cols_width = ((cols.iter().sum::<f32>() + 2.0 + bar) / f.scale()).ceil() as i64;
+        let saved = ini.read_int(CONFIG_ID, "ListWidth", -1);
+        let list_width = if saved > 10 { (saved as i64).min(cols_width) } else { cols_width };
+        if list_width > 10 {
+            let (x, y, _, h) = f.bounds("DbView");
+            f.set_bounds("DbView", x, y, list_width, h);
+        }
         f.set_checked("ToggleNotesBtn", ini.read_bool(CONFIG_ID, "HideNotes", false));
         self.toggle_notes_btn_click();
         f.set_checked("PasswQualityBtn", ini.read_bool(CONFIG_ID, "EstimatePasswQuality", true));
@@ -527,6 +536,13 @@ impl PasswManager {
         let w = ini.read_int(CONFIG_ID, "WindowWidth", -1);
         if w > 0 && h > 0 {
             self.size.set(egui::vec2(w as f32, h as f32).max(self.f().min_size()));
+        }
+        // room for the list, the splitter and the edit panel at its design
+        // width (narrower, its edit boxes would shrink)
+        let need = f.sc(f.bounds("DbView").2 + f.bounds("Splitter2").2 + f.bounds("EditPanel").2);
+        let size = self.size.get();
+        if size.x < need {
+            self.size.set(egui::vec2(need.ceil(), size.y));
         }
         self.update_view_checks();
         self.dialogs.load_config(ini);
