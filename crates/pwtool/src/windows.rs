@@ -58,9 +58,8 @@ pub struct Window {
     pub parent: ViewportId,
     pub size: Cell<Vec2>,
     pub min_size: Vec2,
-    /// Largest height of a resizable window (one that only gets wider).
-    pub max_height: Cell<Option<f32>>,
-    pub resizable: bool,
+    /// The user can resize the window (`Cell`: set after it is made).
+    pub resizable: Cell<bool>,
     pub decorated: bool,
     /// Asked when the user closes the window; `false` keeps it open
     /// (`OnCloseQuery`).
@@ -82,8 +81,7 @@ impl Window {
             parent,
             size: Cell::new(size),
             min_size: Vec2::ZERO,
-            max_height: Cell::new(None),
-            resizable: false,
+            resizable: Cell::new(false),
             decorated: true,
             on_close: RefCell::new(None),
             shown: Cell::new(false),
@@ -105,7 +103,7 @@ impl Window {
     }
 
     pub fn resizable(mut self, on: bool, min: Vec2) -> Self {
-        self.resizable = on;
+        self.resizable.set(on);
         self.min_size = min;
         self
     }
@@ -300,12 +298,9 @@ fn measure_embed_frame(ctx: &Context, id: ViewportId) {
 fn show_window(ctx: &Context, w: &Rc<Window>) {
     let embed = w.modal && embed_modal();
     let mut size = w.size.get();
-    let mut min = if w.resizable { w.min_size } else { size };
-    // (a finite width: winit takes no infinite maximum)
-    let mut max = if w.resizable { w.max_height.get().map(|h| egui::vec2(100_000.0, h)) } else { Some(size) };
-    if let Some(m) = max {
-        size = size.min(m);
-    }
+    let resizable = w.resizable.get();
+    let mut min = if resizable { w.min_size } else { size };
+    let mut max = (!resizable).then_some(size);
     if embed {
         // a dialog drawn inside its parent is no larger than the parent:
         // its controls follow their anchors to the smaller size
@@ -317,8 +312,8 @@ fn show_window(ctx: &Context, w: &Rc<Window>) {
     let mut b = ViewportBuilder::default()
         .with_title(w.title.borrow().clone())
         .with_inner_size(size)
-        .with_resizable(w.resizable)
-        .with_maximize_button(w.resizable && !w.modal)
+        .with_resizable(resizable)
+        .with_maximize_button(resizable && !w.modal)
         .with_minimize_button(!w.modal)
         .with_decorations(w.decorated);
     if min != Vec2::ZERO {

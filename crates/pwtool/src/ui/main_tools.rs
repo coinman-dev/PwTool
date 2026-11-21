@@ -299,9 +299,13 @@ impl MainWindow {
         let mut core = self.core.borrow_mut();
         let ini = &mut core.ini;
         for (id, s) in sizes {
+            // a window of a fixed size (`mp_passw_gen`)
+            if id == "MPPasswGen" {
+                continue;
+            }
             ini.write_integer(id, "WindowWidth", s.x as i64);
             // windows of a fixed height
-            if !["CreateRandDataFile", "CreateTrigramFile", "MPPasswGen"].contains(&id) {
+            if id != "CreateRandDataFile" && id != "CreateTrigramFile" {
                 ini.write_integer(id, "WindowHeight", s.y as i64);
             }
         }
