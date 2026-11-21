@@ -31,6 +31,15 @@ impl Content for crate::vcl::Form {
 
 thread_local! {
     static INPUT_HOOK: RefCell<Option<Rc<dyn Fn(&Context)>>> = const { RefCell::new(None) };
+    static INJECTED: RefCell<Vec<(ViewportId, egui::Event)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Automation: input events for window `id`, handled in its next frame as
+/// if typed (the operating system delivers no keys to a window in the
+/// background).
+pub fn inject_input(id: ViewportId, events: Vec<egui::Event>) {
+    INJECTED.with(|q| q.borrow_mut().extend(events.into_iter().map(|e| (id, e))));
+    ctx().request_repaint_of(id);
 }
 
 /// Function called for the input of every window in every frame (the
@@ -189,6 +198,17 @@ pub fn show(ui: &mut Ui, id: ViewportId, content: &dyn Content) {
     let ctx = ui.ctx().clone();
     if let Some(h) = INPUT_HOOK.with(|h| h.borrow().clone()) {
         h(&ctx);
+    }
+    if ctx.viewport_id() == id {
+        let mine: Vec<egui::Event> = INJECTED.with(|q| {
+            let mut q = q.borrow_mut();
+            let (mine, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut *q).into_iter().partition(|(v, _)| *v == id);
+            *q = rest;
+            mine.into_iter().map(|(_, e)| e).collect()
+        });
+        if !mine.is_empty() {
+            ctx.input_mut(|i| i.events.extend(mine));
+        }
     }
     // screen readers: the window is named by its title (not for a dialog
     // drawn inside its parent, which would rename the parent)

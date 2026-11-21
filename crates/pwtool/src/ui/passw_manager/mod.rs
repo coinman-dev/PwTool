@@ -8,8 +8,7 @@
 //! - the password font is saved under the key it is read from
 //!   (`PasswBoxFont`; the original writes `PasswFont`);
 //! - window positions are not saved, only sizes;
-//! - no auto-completion of user names; the contents of the edit boxes
-//!   cannot be dragged from their labels;
+//! - the contents of the edit boxes cannot be dragged from their labels;
 //! - "search database for keyword" uses the title of the foreground window
 //!   on Windows only.
 

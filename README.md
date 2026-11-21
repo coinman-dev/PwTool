@@ -113,8 +113,8 @@ Windows (Win32 API, as in Password Tech):
   settings are saved when Windows shuts down.
 
 Not available compared with Password Tech: dragging text out of the program with the mouse
-(copy and paste works), and user name autocompletion in PassCube. Screen readers (Narrator,
-NVDA, Orca) can read all windows, including the PassCube entry list.
+(copy and paste works). Screen readers (Narrator, NVDA, Orca) can read all windows,
+including the PassCube entry list.
 
 ## Settings and data
 
@@ -181,6 +181,7 @@ Headless GUI automation and form checks:
 ```bash
 tools/headless.sh env PWTOOL_AUTOMATE="click GenerateBtn;wait 400;print PasswBox;quit" ./target/debug/pwtool
 ./target/debug/pwtool --forms /tmp/forms --lang Russian --fit   # pictures of all windows, captions that do not fit
+PWTOOL_DEBUG=1 ./target/debug/pwtool   # also print why the tray icon, portals etc. are not available
 ```
 
 ## Automated releases

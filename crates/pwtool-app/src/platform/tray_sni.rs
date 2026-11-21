@@ -160,7 +160,7 @@ impl TrayIcon {
         match tray.spawn() {
             Ok(handle) => Some(TrayIcon { handle, online }),
             Err(e) => {
-                eprintln!("pwtool: tray icon not available: {e}");
+                crate::diag(format_args!("tray icon not available: {e}"));
                 None
             }
         }

@@ -841,8 +841,14 @@ impl PasswManager {
         let dbb = self.db.borrow();
         let db = dbb.as_ref().unwrap();
         let tag_filter = self.tag_filter.borrow().clone();
+        // `InitAutoComplete()`: user names of all entries, once each (ignoring case)
+        let mut user_names: BTreeMap<String, String> = BTreeMap::new();
         for i in 0..db.len() {
             let e = db.entry(i);
+            let un = e.string(FieldType::UserName);
+            if !un.is_empty() {
+                user_names.entry(lower(un)).or_insert_with(|| un.to_string());
+            }
             if (filter == FilterType::Expired && e.user_flags & DB_FLAG_EXPIRED == 0)
                 || (filter == FilterType::ExpireSoon && e.user_flags & DB_FLAG_EXPIRES_SOON == 0)
                 || (search_mode != SEARCH_MODE_OFF && e.user_flags & DB_FLAG_FOUND == 0)
@@ -882,6 +888,7 @@ impl PasswManager {
         }
         drop(dbb);
         self.list.set_rows(rows);
+        self.f().set_completion("UserNameBox", user_names.into_values().collect());
         if prev_sel_idx.is_some() {
             if let Some(i) = prev_sel.and_then(|id| self.list.index_of(&RowKey::Entry(id))) {
                 self.list.select_only(i);
@@ -2357,6 +2364,7 @@ impl PasswManager {
         self.global_casei_tags.borrow_mut().clear();
         self.tag_filter.borrow_mut().clear();
         self.clear_list_view();
+        self.f().set_completion("UserNameBox", Vec::new());
         self.apply_fonts();
         self.tag_view.clear();
         self.reset_db_open_controls();

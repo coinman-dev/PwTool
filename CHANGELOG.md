@@ -34,13 +34,17 @@
 - Screen readers get the text of labels, the names of icon buttons and the captions of
   input fields in all windows; the PassCube entry list is a list with its entries and the
   selected one (eframe is patched to expose windows other than the main one).
+- PassCube suggests the user names of the other entries while a user name is typed (a
+  list below the field; arrow keys and Enter or a click choose one), as in Password Tech.
+- Messages about things that are normal on many systems (no tray host, no session monitor
+  of the portal) are printed only when `PWTOOL_DEBUG` is set.
 - Hungarian translation: the "At least" check boxes of the Character Set Builder showed a
   wrong text taken over from the original translation.
 
 ### Known limitations
 
 - Text cannot be dragged with the mouse from the program into other programs (copy and
-  paste works); PassCube has no user name autocompletion.
+  paste works).
 
 ## 0.1.0-beta — 2026-11-20
 

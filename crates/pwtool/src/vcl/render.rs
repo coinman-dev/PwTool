@@ -577,6 +577,35 @@ fn draw_edit(ui: &mut Ui, c: &mut Control, enabled: bool, f: &mut Frame) {
                 h if h > 0.3 => egui::Align::Center,
                 _ => egui::Align::Min,
             };
+            // suggestions: keys of an open list before the edit sees them
+            let use_sug = !c.completion.is_empty() && !secret && !*readonly;
+            let sug_id = id.with("suggest");
+            let mut sug: Suggest = if use_sug { ctx.data(|d| d.get_temp(sug_id)).unwrap_or_default() } else { Suggest::default() };
+            let mut chosen: Option<String> = None;
+            if use_sug && c.has_focus {
+                let list = suggestions(&c.completion, text.as_str());
+                let open = sug.open && !list.is_empty() && sug.closed_for.as_deref() != Some(text.as_str());
+                ui.input_mut(|i| {
+                    if !open {
+                        if !list.is_empty() && i.consume_key(Modifiers::NONE, Key::ArrowDown) {
+                            sug = Suggest { open: true, hi: Some(0), ..Default::default() };
+                        }
+                        return;
+                    }
+                    if i.consume_key(Modifiers::NONE, Key::ArrowDown) {
+                        sug.hi = Some(sug.hi.map_or(0, |h| (h + 1).min(list.len() - 1)));
+                    }
+                    if i.consume_key(Modifiers::NONE, Key::ArrowUp) {
+                        sug.hi = sug.hi.and_then(|h| h.checked_sub(1));
+                    }
+                    if i.consume_key(Modifiers::NONE, Key::Escape) {
+                        sug.closed_for = Some(text.as_str().to_string());
+                    }
+                    if let Some(h) = sug.hi.filter(|_| i.consume_key(Modifiers::NONE, Key::Enter)) {
+                        chosen = list.get(h).cloned();
+                    }
+                });
+            }
             let resp = at(ui, rect, enabled, |ui| {
                 let mut ro: &str = text.as_str();
                 let te = if *readonly {
@@ -594,6 +623,55 @@ fn draw_edit(ui: &mut Ui, c: &mut Control, enabled: bool, f: &mut Frame) {
                     .char_limit(if *max_len > 0 { *max_len } else { usize::MAX });
                 ui.add_sized(rect.size(), te)
             });
+            if use_sug {
+                if resp.changed() {
+                    sug = Suggest { open: true, ..Default::default() };
+                }
+                let list = suggestions(&c.completion, text.as_str());
+                // (the list is on a layer above: not `rect_contains_pointer`)
+                let over_list = sug.rect.zip(ctx.pointer_hover_pos()).is_some_and(|(r, p)| r.contains(p));
+                let show = chosen.is_none()
+                    && sug.open
+                    && (resp.has_focus() || over_list)
+                    && !list.is_empty()
+                    && sug.closed_for.as_deref() != Some(text.as_str());
+                if show {
+                    let row_h = ui.fonts_mut(|fo| fo.row_height(&fid)) + 4.0;
+                    let area = egui::Area::new(sug_id).order(egui::Order::Foreground).fixed_pos(rect.left_bottom()).show(&ctx, |ui| {
+                        egui::Frame::popup(ui.style()).inner_margin(2.0).show(ui, |ui| {
+                            ui.set_width(rect.width() - 6.0);
+                            egui::ScrollArea::vertical().max_height(row_h * 8.0).show(ui, |ui| {
+                                ui.with_layout(egui::Layout::top_down_justified(egui::Align::Min), |ui| {
+                                    for (k, v) in list.iter().enumerate() {
+                                        let r = ui.add(egui::Button::selectable(sug.hi == Some(k), RichText::new(v).font(fid.clone())));
+                                        if sug.hi == Some(k) {
+                                            r.scroll_to_me(None);
+                                        }
+                                        // on press: the edit loses the focus before the release
+                                        if r.is_pointer_button_down_on() || r.clicked() {
+                                            chosen = Some(v.clone());
+                                        }
+                                    }
+                                });
+                            });
+                        });
+                    });
+                    sug.rect = Some(area.response.rect);
+                } else {
+                    sug.rect = None;
+                    if !resp.has_focus() {
+                        sug.open = false;
+                    }
+                }
+                if let Some(v) = chosen {
+                    text.set(&v);
+                    sug = Suggest { closed_for: Some(v), ..Default::default() };
+                    c.edit_ops.push(super::model::EditOp::Cursor(usize::MAX));
+                    resp.request_focus();
+                    f.events.push(Event::Change(name.clone()));
+                }
+                ctx.data_mut(|d| d.insert_temp(sug_id, sug));
+            }
             (resp, secret)
         }
         State::Memo { text, readonly, wrap } => {
@@ -678,6 +756,28 @@ fn draw_edit(ui: &mut Ui, c: &mut Control, enabled: bool, f: &mut Frame) {
     }
     let resp = label_field(ui, resp, f);
     tooltip(resp, &c.hint);
+}
+
+/// Suggestion list of an edit (see [`Control::completion`]).
+#[derive(Clone, Default)]
+struct Suggest {
+    open: bool,
+    /// Highlighted suggestion (arrow keys).
+    hi: Option<usize>,
+    /// Text the list was closed for (Esc, a choice): it opens again when
+    /// the text changes.
+    closed_for: Option<String>,
+    /// Screen rectangle of the list in the last frame.
+    rect: Option<Rect>,
+}
+
+/// Values starting with `typed` (ignoring case), except `typed` itself.
+fn suggestions(values: &[String], typed: &str) -> Vec<String> {
+    if typed.is_empty() {
+        return Vec::new();
+    }
+    let key = typed.to_lowercase();
+    values.iter().filter(|v| v.as_str() != typed && v.to_lowercase().starts_with(&key)).cloned().collect()
 }
 
 fn draw_list(ui: &mut Ui, c: &mut Control, enabled: bool, f: &mut Frame) {
@@ -1581,6 +1681,14 @@ mod tests {
         assert_eq!(mnemonic_of("&File"), Some('f'));
         assert_eq!(mnemonic_of("A && B"), None);
         assert_eq!(mnemonic_of("Save &As"), Some('a'));
+    }
+
+    #[test]
+    fn suggestion_list() {
+        let v: Vec<String> = ["alice", "Albert", "bob", "al"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(suggestions(&v, "AL"), ["alice", "Albert", "al"]);
+        assert_eq!(suggestions(&v, "al"), ["alice", "Albert"]);
+        assert!(suggestions(&v, "").is_empty());
     }
 
     #[test]

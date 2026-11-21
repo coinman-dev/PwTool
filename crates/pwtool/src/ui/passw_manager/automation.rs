@@ -5,6 +5,9 @@
 //! - `pmshow` — create/show the manager window
 //! - `pmact NAME` — activate a menu item (`MainMenu_File_New` …)
 //! - `pmclick NAME` / `pmtoggle NAME` — click / toggle a button
+//! - `pmfocus NAME` — give a control the keyboard focus
+//! - `pmtype TEXT` — type into the focused control (`{DOWN}`, `{UP}`,
+//!   `{ENTER}`, `{ESC}`: that key)
 //! - `pmtext NAME VALUE` — set the text of an edit, combo box or memo
 //!   (as typed: a change event follows)
 //! - `pmsel I` — select row I of the entry list (`pmsel -` = clear)
@@ -37,6 +40,22 @@ pub fn automate(main: &Rc<MainWindow>, cmd: &str, rest: &str) -> bool {
             }
         }
         "pmclick" => f.push_event(Event::Click(rest.to_string())),
+        "pmfocus" => f.focus(rest),
+        "pmtype" => {
+            let id = egui::ViewportId::from_hash_of(super::WINDOW_ID);
+            let key = |k| {
+                let ev = |pressed| egui::Event::Key { key: k, physical_key: None, pressed, repeat: false, modifiers: egui::Modifiers::NONE };
+                [ev(true), ev(false)]
+            };
+            let events: Vec<egui::Event> = match rest {
+                "{DOWN}" => key(egui::Key::ArrowDown).to_vec(),
+                "{UP}" => key(egui::Key::ArrowUp).to_vec(),
+                "{ENTER}" => key(egui::Key::Enter).to_vec(),
+                "{ESC}" => key(egui::Key::Escape).to_vec(),
+                t => vec![egui::Event::Text(t.to_string())],
+            };
+            crate::windows::inject_input(id, events);
+        }
         "pmtoggle" => {
             f.set_checked(rest, !f.checked(rest));
             f.push_event(Event::Click(rest.to_string()));

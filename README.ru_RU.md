@@ -119,9 +119,8 @@ Windows (Win32 API, как в Password Tech):
   база и настройки сохраняются при завершении работы Windows.
 
 По сравнению с Password Tech недоступно: перетаскивание текста мышью из программы в другие
-(копирование и вставка работают) и автодополнение имени пользователя в PassCube. Экранные
-дикторы (Экранный диктор Windows, NVDA, Orca) читают все окна, включая список записей
-PassCube.
+(копирование и вставка работают). Экранные дикторы (Экранный диктор Windows, NVDA, Orca)
+читают все окна, включая список записей PassCube.
 
 ## Настройки и данные
 
@@ -188,6 +187,7 @@ packaging/windows/build.sh --tests    # плюс target/windows/tests/*.exe дл
 ```bash
 tools/headless.sh env PWTOOL_AUTOMATE="click GenerateBtn;wait 400;print PasswBox;quit" ./target/debug/pwtool
 ./target/debug/pwtool --forms /tmp/forms --lang Russian --fit   # снимки всех окон, подписи, которые не помещаются
+PWTOOL_DEBUG=1 ./target/debug/pwtool   # плюс причины, по которым недоступны значок в трее, порталы и т. п.
 ```
 
 ## Автоматические релизы

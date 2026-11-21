@@ -19,3 +19,14 @@ pub mod quality;
 pub mod resources;
 pub mod rt;
 pub mod shortcut;
+
+/// Diagnostic message on stderr, shown only when `PWTOOL_DEBUG` is set:
+/// for things that are normal on many systems (no tray host, no portal)
+/// and should not clutter the console at every start.
+pub fn diag(msg: std::fmt::Arguments) {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    if *ON.get_or_init(|| std::env::var_os("PWTOOL_DEBUG").is_some()) {
+        eprintln!("pwtool: {msg}");
+    }
+}

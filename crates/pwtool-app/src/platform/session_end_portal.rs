@@ -8,7 +8,7 @@
 pub fn watch(on_end: impl Fn() + 'static) {
     crate::rt::spawn_local(async move {
         if let Err(e) = monitor(&on_end).await {
-            eprintln!("pwtool: session monitor: {e}");
+            crate::diag(format_args!("session monitor: {e}"));
         }
     });
 }

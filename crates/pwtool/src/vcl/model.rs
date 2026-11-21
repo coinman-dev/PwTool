@@ -153,6 +153,9 @@ pub struct Control {
     pub selection: Option<(usize, usize)>,
     /// Changes of the cursor/selection to apply at the next frame.
     pub edit_ops: Vec<EditOp>,
+    /// Suggestions of an edit (`IAutoComplete` of the original): a list of
+    /// the values starting with the typed text drops down below it.
+    pub completion: Vec<String>,
 }
 
 /// Operation on the selection of an edit control.
@@ -503,6 +506,7 @@ impl Builder<'_> {
             cut: false,
             label: None,
             focus_request: false,
+            completion: Vec::new(),
             has_focus: false,
             selection: None,
             edit_ops: Vec::new(),
@@ -881,6 +885,11 @@ impl Form {
             State::Status { text } => *text = s.to_string(),
             _ => c.caption = s.to_string(),
         });
+    }
+
+    /// Suggestions shown below an edit while typing (empty: none).
+    pub fn set_completion(&self, name: &str, values: Vec<String>) {
+        self.with(name, |c| c.completion = values);
     }
 
     /// Keep the text of an edit in a buffer that is wiped on every change.
