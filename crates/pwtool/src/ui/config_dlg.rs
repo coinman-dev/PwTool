@@ -133,6 +133,10 @@ impl ConfigDlg {
         // the original shows only the split button "Select font ▾" (its menu
         // has "Restore Default"); the old separate button stays hidden
         f.set_visible("DefaultFontBtn", false);
+        // the language list ends where the "Remove" button below it ends
+        let (lx, ly, _, lh) = f.bounds("LanguageList");
+        let (bx, _, bw, _) = f.bounds("RemoveLanguageBtn");
+        f.set_bounds("LanguageList", lx, ly, bx + bw - lx, lh);
         let d = Rc::new(ConfigDlg {
             form,
             hot_keys: RefCell::new(HotKeyList::new()),
