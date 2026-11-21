@@ -36,7 +36,8 @@
 | Вариант | Скачать | Как использовать |
 |---|---|---|
 | Пакет для Linux | [pwtool_0.1.0.beta_amd64.deb](https://github.com/coinman-dev/PwTool/releases/download/v0.1.0-beta/pwtool_0.1.0.beta_amd64.deb) | `sudo apt install ./pwtool_0.1.0.beta_amd64.deb` ставит Password Tool с пунктом меню и значками. |
-| Windows | `pwtool_<версия>_windows_x64.exe` на [странице релизов](https://github.com/coinman-dev/PwTool/releases) (начиная со следующего релиза) | Один файл: сохраните в любую папку и запустите. Ничего не устанавливается. |
+| Установщик для Windows | `pwtool_<версия>_windows_x64_setup.exe` на [странице релизов](https://github.com/coinman-dev/PwTool/releases) (начиная со следующего релиза) | Устанавливает для всех пользователей или только для вас (без прав администратора), с ярлыком в «Пуске» и программой удаления. |
+| Переносная версия для Windows | `pwtool_<версия>_windows_x64.exe` на [странице релизов](https://github.com/coinman-dev/PwTool/releases) (начиная со следующего релиза) | Один файл: сохраните в любую папку и запустите. Ничего не устанавливается. |
 
 Переводы, примеры скриптов и руководства в PDF встроены в программу.
 Linux: Ubuntu 24.04 и новее, Debian 13 и новее, amd64, Wayland или X11 с OpenGL.
@@ -49,8 +50,8 @@ Windows: 10 или 11, x64.
 ## Быстрый старт
 
 1. Linux: установите `.deb`-пакет командой `sudo apt install ./pwtool_0.1.0.beta_amd64.deb`.
-   Windows: сохраните `pwtool_<версия>_windows_x64.exe` в любую папку (например,
-   `%LOCALAPPDATA%\Programs\PwTool`), при желании переименовав в `pwtool.exe`.
+   Windows: запустите `pwtool_<версия>_windows_x64_setup.exe` или сохраните переносной
+   `pwtool_<версия>_windows_x64.exe` в любую папку.
 2. Откройте **Password Tool** из меню приложений (**Служебные**) или запустите `pwtool`;
    в Windows запустите `.exe` (его можно закрепить в «Пуске» или на панели задач).
 3. Выберите набор символов, список слов для парольной фразы, шаблон формата или скрипт Lua
@@ -180,7 +181,18 @@ rustup target add x86_64-pc-windows-gnullvm
 packaging/manuals.sh                  # необязательно: руководства для встраивания
 packaging/windows/build.sh            # target/pwtool_<версия>_windows_x64.exe
 packaging/windows/build.sh --tests    # плюс target/windows/tests/*.exe для запуска в Windows
+packaging/windows/build-installer.sh  # target/pwtool_<версия>_windows_x64_setup.exe (нужен makensis: apt install nsis)
 ```
+
+Установщик (`packaging/windows/pwtool.nsi`, NSIS) спрашивает язык (русский или английский)
+и устанавливает программу либо для всех пользователей в `C:\Program Files\PwTool` (права
+администратора запрашиваются только в этом случае), либо для текущего пользователя в
+`%LOCALAPPDATA%\Programs\PwTool`. По желанию: ярлык на рабочем столе и запуск при входе в
+систему. Настройки остаются в `%APPDATA%\PwTool`; программа удаления удаляет их только по
+запросу и никогда не трогает базы паролей и другие файлы в этой папке. Перед установкой и
+удалением программу нужно закрыть (её не завершают принудительно: в ней могут быть
+несохранённые изменения). Тихий режим: `setup.exe /S [/AllUsers | /CurrentUser]
+[/D=папка]`, `uninstall.exe /S` (настройки сохраняются).
 
 Автоматизированная проверка интерфейса в виртуальной сессии и проверка форм:
 

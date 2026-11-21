@@ -20,6 +20,14 @@
   down or log off; on Linux through the session monitor of `xdg-desktop-portal`).
 - Release workflow builds `pwtool_<version>_windows_x64.exe` and runs the tests and the
   console mode on a Windows runner before publishing.
+- **Windows installer** `pwtool_<version>_windows_x64_setup.exe` (NSIS, Russian and
+  English): installs for all users into `C:\Program Files\PwTool` (administrator rights
+  are requested only for this choice) or for the current user into
+  `%LOCALAPPDATA%\Programs\PwTool`, with a Start menu entry, an optional desktop shortcut
+  and starting at logon, and an uninstaller in **Apps & features**. Updating keeps the
+  chosen directory and autostart setting. The uninstaller deletes the settings only when
+  asked and never touches databases. The release workflow installs and uninstalls it
+  silently in both modes on a Windows runner.
 
 ### Changed
 

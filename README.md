@@ -34,7 +34,8 @@ profiles, word lists, Lua scripts, and translations are compatible with the orig
 | Edition | Download | Usage |
 |---|---|---|
 | Linux package | [pwtool_0.1.0.beta_amd64.deb](https://github.com/coinman-dev/PwTool/releases/download/v0.1.0-beta/pwtool_0.1.0.beta_amd64.deb) | `sudo apt install ./pwtool_0.1.0.beta_amd64.deb` installs Password Tool with its menu entry and icons. |
-| Windows | `pwtool_<version>_windows_x64.exe` on the [releases page](https://github.com/coinman-dev/PwTool/releases) (from the next release on) | One file: save it to any folder and run it. Nothing is installed. |
+| Windows installer | `pwtool_<version>_windows_x64_setup.exe` on the [releases page](https://github.com/coinman-dev/PwTool/releases) (from the next release on) | Installs for all users or only for you (no administrator rights needed), with a Start menu entry and an uninstaller. |
+| Windows portable | `pwtool_<version>_windows_x64.exe` on the [releases page](https://github.com/coinman-dev/PwTool/releases) (from the next release on) | One file: save it to any folder and run it. Nothing is installed. |
 
 Translations, script examples, and the PDF manuals are built into the program.
 Linux: Ubuntu 24.04 or newer, Debian 13 or newer, amd64, Wayland or X11 with OpenGL.
@@ -47,8 +48,8 @@ Update checks contact only GitHub and can be disabled in **Options → Configura
 ## Quick start
 
 1. Linux: install the `.deb` package with `sudo apt install ./pwtool_0.1.0.beta_amd64.deb`.
-   Windows: save `pwtool_<version>_windows_x64.exe` to any folder (for example
-   `%LOCALAPPDATA%\Programs\PwTool`), renaming it to `pwtool.exe` if you like.
+   Windows: run `pwtool_<version>_windows_x64_setup.exe`, or save the portable
+   `pwtool_<version>_windows_x64.exe` to any folder.
 2. Open **Password Tool** from your application menu (**Utilities**) or run `pwtool`;
    on Windows start the `.exe` (pin it to Start or the taskbar if you like).
 3. Choose a character set, passphrase word list, format string, or Lua script and click
@@ -174,7 +175,18 @@ rustup target add x86_64-pc-windows-gnullvm
 packaging/manuals.sh                  # optional: manuals to embed
 packaging/windows/build.sh            # target/pwtool_<version>_windows_x64.exe
 packaging/windows/build.sh --tests    # also target/windows/tests/*.exe for running on Windows
+packaging/windows/build-installer.sh  # target/pwtool_<version>_windows_x64_setup.exe (needs makensis: apt install nsis)
 ```
+
+The installer (`packaging/windows/pwtool.nsi`, NSIS) asks for the language (Russian or
+English) and installs either for all users into `C:\Program Files\PwTool` (administrator
+rights are requested only then) or for the current user into
+`%LOCALAPPDATA%\Programs\PwTool`. Optional: a desktop shortcut and starting at logon.
+Settings stay in `%APPDATA%\PwTool`; the uninstaller deletes them only when asked and never
+touches databases or other files there. The program must be closed before installing or
+uninstalling (it is not killed: it may hold unsaved changes). Silent use:
+`setup.exe /S [/AllUsers | /CurrentUser] [/D=directory]`, `uninstall.exe /S` (keeps the
+settings).
 
 Headless GUI automation and form checks:
 

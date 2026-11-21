@@ -147,7 +147,11 @@ jobs:
         with:
           name: manuals
           path: target/manuals
-      - name: Build Windows exe and test executables
+      - name: Install NSIS
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends nsis
+      - name: Build Windows exe, installer and test executables
         shell: bash
         run: |
           set -euo pipefail
@@ -156,6 +160,8 @@ jobs:
           exe="$PWD/target/release-files/pwtool_${v//-/.}_windows_x64.exe"
           OUTPUT="$exe" packaging/windows/build.sh --tests
           grep -aq '%PDF-' "$exe" || { echo 'manuals not embedded'; exit 1; }
+          OUTPUT="$PWD/target/release-files/pwtool_${v//-/.}_windows_x64_setup.exe" \
+            packaging/windows/build-installer.sh "$exe"
       - uses: actions/upload-artifact@v7
         with:
           name: windows-release
@@ -175,6 +181,10 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.dry_run && github.sha || inputs.tag || github.sha }}
+          sparse-checkout: packaging/windows
       - uses: actions/download-artifact@v8
         with:
           name: windows-release
@@ -191,10 +201,16 @@ jobs:
             & $_.FullName
             if ($LASTEXITCODE -ne 0) { throw "$($_.Name) failed" }
           }
-          $exe = (Get-ChildItem dist\*.exe).FullName
+          $exe = (Get-ChildItem dist\*_windows_x64.exe).FullName
           $out = & $exe --gen 3 | Out-String
           Write-Output $out
           if (($out -split "`n" | Where-Object { $_ -match '^\S{16}\s*$' }).Count -ne 3) { throw 'console mode did not print 3 passwords' }
+      - name: Installer, current user
+        shell: pwsh
+        run: packaging/windows/test-installer.ps1 -Installer (Get-ChildItem dist\*_setup.exe).FullName -Mode CurrentUser
+      - name: Installer, all users
+        shell: pwsh
+        run: packaging/windows/test-installer.ps1 -Installer (Get-ChildItem dist\*_setup.exe).FullName -Mode AllUsers
 
   publish:
     name: Publish GitHub Release
