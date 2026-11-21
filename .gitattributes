@@ -1,0 +1,6 @@
+# Third-party code, not counted in the language statistics of GitHub:
+# the C/C++ libraries of Password Tech (miniLZO, miniz, zxcvbn-c with its
+# 4 MB dictionary header), compiled for file format compatibility, and the
+# patched copy of eframe.
+crates/pwtool-core/csrc/** linguist-vendored
+vendor/** linguist-vendored
