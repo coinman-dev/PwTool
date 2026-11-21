@@ -37,8 +37,10 @@ deb_v="${version//-/.}"
 cat <<EOF
 $kind for Linux (Ubuntu 24.04+, Debian 13+, amd64) and Windows (10/11, x64).
 
-- **pwtool_${deb_v}_amd64.deb** — Debian/Ubuntu package: \`sudo apt install ./pwtool_${deb_v}_amd64.deb\` installs **Password Tool**, its desktop entry, icons, translations, script examples, and user manuals (\`manual.pdf\`, \`scripting.pdf\`).
-- **pwtool_${deb_v}_windows_x64.zip** — portable Windows build with GTK 4: unpack anywhere and run \`PwTool\bin\pwtool.exe\`.
+- **pwtool_${deb_v}_amd64.deb** — Debian/Ubuntu package: \`sudo apt install ./pwtool_${deb_v}_amd64.deb\` installs **Password Tool** with its desktop entry and icons.
+- **pwtool_${deb_v}_windows_x64.exe** — the Windows program in one file: no installation, run it from any folder.
+
+Translations, script examples and the user manuals are built into the program.
 
 $changes
 

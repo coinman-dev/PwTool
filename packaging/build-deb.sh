@@ -27,15 +27,15 @@ Section: utils
 Priority: optional
 Architecture: $ARCH
 Installed-Size: $SIZE
-Depends: libc6, libgtk-4-1 (>= 4.10), libglib2.0-0t64 | libglib2.0-0, glib-networking
-Recommends: xdg-desktop-portal, xdg-desktop-portal-kde | xdg-desktop-portal-gnome
+Depends: libc6, libgcc-s1, libstdc++6, libegl1 | libgl1, libxkbcommon0
+Recommends: libwayland-client0, libwayland-cursor0, libwayland-egl1, libx11-6, libx11-xcb1, libxcursor1, libxi6, libxrandr2, libxkbcommon-x11-0, xdg-desktop-portal, xdg-desktop-portal-kde | xdg-desktop-portal-gnome
 Maintainer: Password Tool <https://github.com/coinman-dev/PwTool>
 Homepage: https://github.com/coinman-dev/PwTool
-Description: Password generator and password manager (Linux port of Password Tech)
+Description: Password generator and password manager (port of Password Tech)
  Password Tool generates passwords, passphrases, formatted and phonetic
  passwords with a cryptographically secure random generator and manages
- passwords in encrypted databases (PassCube). Linux port of Password Tech
- 3.6.1 by Christian Thoeing.
+ passwords in encrypted databases (PassCube). Port of Password Tech 3.6.1
+ by Christian Thoeing for Linux and Windows.
 CONTROL
 OUT="${OUTPUT:-$ROOT/target/pwtool_${VERSION//-/.}_${ARCH}.deb}"
 mkdir -p "$(dirname "$OUT")"

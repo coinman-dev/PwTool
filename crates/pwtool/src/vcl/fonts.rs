@@ -136,14 +136,8 @@ pub struct UserFont {
     pub size: Option<f32>,
 }
 
-/// Installed font set: the effective body size.
-#[derive(Debug, Clone, Copy)]
-pub struct FontSet {
-    pub body_size: f32,
-}
-
 /// Install the fonts into `ctx`.
-pub fn install(ctx: &egui::Context, user: &UserFont) -> FontSet {
+pub fn install(ctx: &egui::Context, user: &UserFont) {
     let mut defs = FontDefinitions::default();
     let egui_prop = defs.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
     let egui_mono = defs.families.get(&FontFamily::Monospace).cloned().unwrap_or_default();
@@ -222,7 +216,6 @@ pub fn install(ctx: &egui::Context, user: &UserFont) -> FontSet {
         ]
         .into();
     });
-    FontSet { body_size: body }
 }
 
 // ---------------------------------------------------------------------------
@@ -308,11 +301,6 @@ pub fn set_named_font(ctx: &egui::Context, name: &'static str, f: Option<FontSpe
         }
     });
     reinstall(ctx);
-}
-
-/// Size of the password box font in points (`None` = size of the control).
-pub fn passw_size() -> Option<f32> {
-    named_size(PASSW)
 }
 
 /// The password box font (`None` = monospaced default).

@@ -1,6 +1,6 @@
 //! Global hot keys on Windows: `RegisterHotKey()` as in the original
 //! (`ActivateHotKeys()`). The keys are registered in a separate thread with
-//! its own message loop; `WM_HOTKEY` is forwarded to the GTK main loop.
+//! its own message loop; `WM_HOTKEY` is forwarded to the GUI thread.
 
 use std::cell::RefCell;
 use std::rc::Rc;

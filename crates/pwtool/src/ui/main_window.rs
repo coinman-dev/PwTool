@@ -1,22 +1,22 @@
-//! Main window (`TMainForm`, `upstream/src/main/Main.cpp`).
-
-#![allow(deprecated)]
+//! Main window (`TMainForm`): the password generator. Child modules: tray, hot
+//! keys and autotype (`main_integration.rs`), tools (`main_tools.rs`),
+//! configuration, profile editor, character set builder, MP generator.
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::Duration;
 
-use gtk4 as gtk;
-use gtk::prelude::*;
-use gtk::glib::translate::IntoGlib;
-use gtk::{gdk, gio, glib};
+use egui::{Ui, ViewportCommand, ViewportId};
+use pwtool_app::app::AppCore;
+use pwtool_app::program::*;
 use pwtool_core::config::{LISTS_MAX_ENTRIES, WLFNLIST_DEFAULT, remove_comment_and_trim};
 use pwtool_core::generate::{
-    GenDest, GenRequest, GenSummary, PASSWOPTION_EACHCHARONLYONCE, PASSWOPTION_EACHWORDONLYONCE,
-    PASSWOPTIONS_NUM, PASSWOPTIONS_STARRED, PASSW_MAX_CHARS, PASSW_MAX_NUM, PASSW_MAX_WORDS, SinkAction,
-    generate, parse_num_passwords, parse_passphrase_length, passw_list_header, passwoptions_starred_bitfield,
+    GenDest, GenRequest, PASSW_MAX_CHARS, PASSW_MAX_NUM, PASSW_MAX_WORDS, PASSWOPTION_EACHCHARONLYONCE,
+    PASSWOPTION_EACHWORDONLYONCE, PASSWOPTIONS_NUM, PASSWOPTIONS_STARRED, PasswOptions, SinkAction, generate,
+    parse_num_passwords, parse_passphrase_length, passw_list_header, passwoptions_starred_bitfield,
 };
 use pwtool_core::language::{trl, trl_format};
 use pwtool_core::passw::PasswordGenerator;
@@ -28,29 +28,26 @@ use pwtool_core::unicode::w32_to_string;
 use pwtool_core::util::format_float_1;
 use zeroize::Zeroizing;
 
-use super::builder::{Built, attach_context_menu, attach_context_menu_capture, build_form};
-use super::dialogs::{PasswListWindow, PasswOptionsDlg, ProgressWindow, format_quick_help, info_box, quick_help};
-use super::form::load_form;
+use super::clipboard;
+use super::dialogs::{self, PasswListWindow, ProgressWindow, format_quick_help, info_box, msg, quick_help};
 use super::quality_bar::QualityBar;
-use super::util::{MsgButtons, MsgIcon, MsgResult, combo_entry, combo_text, msg, msg_box, open_uri, set_combo_items, set_combo_text};
-use crate::app::AppCore;
-use crate::program::*;
+use crate::runtime::spawn;
+use crate::vcl::Form;
+use crate::vcl::dialogs::{MsgButtons, MsgIcon, MsgResult};
+use crate::windows::{self, Content};
 
+#[path = "main_integration.rs"]
+mod integration;
 #[path = "main_tools.rs"]
 mod tools;
 #[path = "config_dlg.rs"]
-mod config_dlg;
+pub(crate) mod config_dlg;
 #[path = "profile_editor.rs"]
 mod profile_editor;
 #[path = "char_set_builder.rs"]
 mod char_set_builder;
 #[path = "mp_passw_gen.rs"]
 mod mp_passw_gen;
-#[path = "main_integration.rs"]
-mod integration;
-pub use integration::show_tray_info;
-#[path = "main_tray.rs"]
-mod tray_main;
 
 const ENTROPY_SYSTEM: u32 = 24;
 const ENTROPY_MOUSECLICK: u32 = 2;
@@ -62,9 +59,11 @@ const TIMER_MOVEPOOL: u32 = 300;
 const TIMER_WRITESEEDFILE: u32 = 457;
 const PASSWBOX_TAG_PASSW_TEST: u32 = 1;
 const PASSWBOX_TAG_PASSW_GEN: u32 = 2;
+const ROOT: ViewportId = ViewportId::ROOT;
+const PROFILES_MENU_SHORTCUTS: &str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
-/// Random generator used for one generation run: a pool derived from the
-/// main pool, or the deterministic generator.
+/// Random generator of one generation run: a pool derived from the main
+/// pool, or the deterministic generator.
 enum GenRng {
     Pool(RandomPool),
     Det(AesCtrPrng),
@@ -96,15 +95,14 @@ struct GenOutput {
     pg: PasswordGenerator,
     rng: GenRng,
     script: Option<LuaScript>,
-    result: Result<GenSummary, String>,
+    result: Result<pwtool_core::generate::GenSummary, String>,
     single: Zeroizing<String>,
     list: Zeroizing<String>,
     mem_limit_reached: bool,
 }
 
 pub struct MainWindow {
-    pub window: gtk::ApplicationWindow,
-    pub b: Built,
+    pub form: Rc<Form>,
     pub core: RefCell<AppCore>,
     passw_bar: QualityBar,
     char_set_input: RefCell<String>,
@@ -117,83 +115,33 @@ pub struct MainWindow {
     timer_cnt: Cell<[u32; 4]>,
     key_seeded_prng: RefCell<Option<AesCtrPrng>>,
     script: RefCell<Option<LuaScript>>,
-    generating: Cell<bool>,
-    passw_options_dlg: RefCell<Option<Rc<PasswOptionsDlg>>>,
+    pub generating: Cell<bool>,
+    /// The window is disabled during a long generation.
+    busy: Cell<bool>,
     passw_list: RefCell<Option<Rc<PasswListWindow>>>,
     char_set_help: String,
     format_passw_help: String,
-    default_title: String,
+    title: RefCell<String>,
+    title_shown: RefCell<String>,
     mouse_move_cnt: Cell<i32>,
     mouse_wheel_cnt: Cell<i32>,
-    tools: tools::ToolsState,
-    config_dlg: RefCell<Option<Rc<config_dlg::ConfigDlg>>>,
-    hot_keys_active: RefCell<crate::app_config::HotKeyList>,
-    profile_dlg: RefCell<Option<Rc<profile_editor::ProfileEditDlg>>>,
-    profile_list_guard: Cell<bool>,
-    char_set_builder: RefCell<Option<Rc<char_set_builder::CharSetBuilderWin>>>,
-    mp_passw_gen: RefCell<Option<Rc<mp_passw_gen::MpPasswGenWin>>>,
     close_confirmed: Cell<bool>,
-    tray: tray_main::TrayState,
-    passw_mng: RefCell<Option<Rc<crate::ui::passw_manager::PasswManager>>>,
-    close_queried: Cell<bool>,
-    autotype_active: Cell<bool>,
-    autotype_abort: RefCell<Option<Rc<Cell<bool>>>>,
     startup_shown: Cell<bool>,
-    /// Edit box receiving the next single password instead of `PasswBox`
-    /// (`GeneratePassw(gpdGuiSingle, pEditBox)`).
-    pub(super) gen_target: RefCell<Option<gtk::Entry>>,
+    profile_list_guard: Cell<bool>,
+    last_pointer: Cell<Option<egui::Pos2>>,
+    /// Edit receiving the next single password instead of `PasswBox`.
+    pub gen_target: RefCell<Option<Rc<dyn Fn(&str)>>>,
+    integ: integration::Integration,
+    tools: tools::ToolsState,
 }
 
 impl MainWindow {
-    pub fn new(app: &gtk::Application, core: AppCore) -> Rc<Self> {
-        let b = build_form(load_form("Main"), "Main");
-        let window = gtk::ApplicationWindow::new(app);
-        window.set_title(Some(PROGRAM_NAME));
-        if let Some(t) = super::icons::app_icon() {
-            let _ = t;
-        }
-        let vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        let menubar = gtk::PopoverMenuBar::from_model(b.menus.get("MainMenu"));
-        vbox.append(&menubar);
-        b.root.set_vexpand(true);
-        b.root.set_hexpand(true);
-        vbox.append(&b.root);
-        window.set_child(Some(&vbox));
-        // the window has a fixed size and cannot be maximized, see
-        // `dialogs::form_window()`
-        let (_, mh, _, _) = menubar.measure(gtk::Orientation::Vertical, -1);
-        let (cw, ch) = super::dialogs::fixed_client_size(&b);
-        b.root.set_fixed_size(cw, ch);
-        window.set_resizable(false);
-        window.set_default_size(cw, ch + mh);
-        window.insert_action_group("m", Some(&b.actions));
-        // Only register MainMenu accelerators application-wide; popup menu
-        // shortcuts (PasswBoxMenu, ListMenu) must not hijack Ctrl+C/X/V/A/Z
-        // in other widgets and dialogs.
-        for (action, accel) in &b.accels {
-            if action.starts_with("m.MainMenu_") {
-                app.set_accels_for_action(action, &[accel.as_str()]);
-            }
-        }
-        let pb_sc = gtk::ShortcutController::new();
-        pb_sc.set_scope(gtk::ShortcutScope::Local);
-        for (action, accel) in &b.accels {
-            if action.starts_with("m.PasswBoxMenu_") {
-                if let Some(t) = gtk::ShortcutTrigger::parse_string(accel) {
-                    pb_sc.add_shortcut(gtk::Shortcut::new(Some(t), Some(gtk::NamedAction::new(action))));
-                }
-            }
-        }
-        b.get::<gtk::Entry>("PasswBox").add_controller(pb_sc);
-
-        let passw_bar = QualityBar::new(b.get("PasswGauge"), 128);
-        let char_set_help = build_char_set_help();
-        let format_passw_help = build_format_help();
+    pub fn new(core: AppCore) -> Rc<Self> {
+        let form = dialogs::load("Main");
         let w = Rc::new(MainWindow {
-            window,
-            b,
+            form,
             core: RefCell::new(core),
-            passw_bar,
+            passw_bar: QualityBar::new(128),
             char_set_input: RefCell::new(String::new()),
             wl_file_name: RefCell::new(String::new()),
             wl_file_name_err: RefCell::new(String::new()),
@@ -205,100 +153,87 @@ impl MainWindow {
             key_seeded_prng: RefCell::new(None),
             script: RefCell::new(None),
             generating: Cell::new(false),
-            passw_options_dlg: RefCell::new(None),
+            busy: Cell::new(false),
             passw_list: RefCell::new(None),
-            char_set_help,
-            format_passw_help,
-            default_title: PROGRAM_NAME.to_string(),
+            char_set_help: build_char_set_help(),
+            format_passw_help: build_format_help(),
+            title: RefCell::new(PROGRAM_NAME.to_string()),
+            title_shown: RefCell::new(String::new()),
             mouse_move_cnt: Cell::new(60),
             mouse_wheel_cnt: Cell::new(5),
-            tools: tools::ToolsState::new(),
-            config_dlg: RefCell::new(None),
-            hot_keys_active: RefCell::new(Default::default()),
-            profile_dlg: RefCell::new(None),
-            profile_list_guard: Cell::new(false),
-            char_set_builder: RefCell::new(None),
-            mp_passw_gen: RefCell::new(None),
             close_confirmed: Cell::new(false),
-            tray: tray_main::TrayState::new(),
-            passw_mng: RefCell::new(None),
-            close_queried: Cell::new(false),
-            autotype_active: Cell::new(false),
-            autotype_abort: RefCell::new(None),
             startup_shown: Cell::new(false),
+            profile_list_guard: Cell::new(false),
+            last_pointer: Cell::new(None),
             gen_target: RefCell::new(None),
+            integ: integration::Integration::new(),
+            tools: tools::ToolsState::new(),
         });
         w.setup();
         w
     }
 
-    fn win(&self) -> gtk::Window {
-        self.window.clone().upcast()
+    fn f(&self) -> &Form {
+        &self.form
     }
 
-    fn entry(&self, name: &str) -> gtk::Entry {
-        self.b.get(name)
+    fn weak(self: &Rc<Self>) -> Weak<Self> {
+        Rc::downgrade(self)
     }
 
-    fn check(&self, name: &str) -> gtk::CheckButton {
-        self.b.get(name)
-    }
-
-    fn combo(&self, name: &str) -> gtk::ComboBoxText {
-        self.b.get(name)
-    }
-
-    fn label(&self, name: &str) -> gtk::Label {
-        self.b.get(name)
-    }
-
-    fn button(&self, name: &str) -> gtk::Button {
-        self.b.get(name)
-    }
-
-    fn act(self: &Rc<Self>, name: &str, f: impl Fn(&Rc<Self>) + 'static) {
-        if !self.b.has_action(name) {
+    fn menu(self: &Rc<Self>, name: &str, f: impl Fn(&Rc<Self>) + 'static) {
+        if !self.form.has_menu_item(name) {
             eprintln!("pwtool: menu item {name} not found");
             return;
         }
-        let w = Rc::downgrade(self);
-        self.b.action(name).connect_activate(move |a, _| {
-            if let Some(s) = a.state() {
-                if let Some(v) = s.get::<bool>() {
-                    a.set_state(&(!v).to_variant());
-                }
-            }
+        let w = self.weak();
+        self.form.on_menu(name, move |_| {
             if let Some(w) = w.upgrade() {
+                f(&w);
+            }
+        });
+    }
+
+    /// Menu item with a check mark that toggles when chosen.
+    fn check_menu(self: &Rc<Self>, name: &str, f: impl Fn(&Rc<Self>) + 'static) {
+        let w = self.weak();
+        let n = name.to_string();
+        self.form.on_menu(name, move |_| {
+            if let Some(w) = w.upgrade() {
+                let on = !w.form.menu_checked(&n);
+                w.form.set_menu_checked(&n, on);
                 f(&w);
             }
         });
     }
 
     fn click(self: &Rc<Self>, name: &str, f: impl Fn(&Rc<Self>) + 'static) {
-        let w = Rc::downgrade(self);
-        self.button(name).connect_clicked(move |_| {
+        let w = self.weak();
+        self.form.on_click(name, move |_| {
             if let Some(w) = w.upgrade() {
                 f(&w);
             }
         });
     }
 
-    fn action_checked(&self, name: &str) -> bool {
-        self.b.action(name).state().and_then(|s| s.get::<bool>()).unwrap_or(false)
+    fn on_event(self: &Rc<Self>, f: impl Fn(&Rc<Self>, &crate::vcl::Event) + 'static) {
+        let w = self.weak();
+        self.form.on_any(move |e| {
+            if let Some(w) = w.upgrade() {
+                f(&w, e);
+            }
+        });
     }
 
-    fn set_action_checked(&self, name: &str, v: bool) {
-        let a = self.b.action(name);
-        if a.state().is_some() {
-            a.set_state(&v.to_variant());
-        }
+    pub fn set_title(&self, t: &str) {
+        *self.title.borrow_mut() = t.to_string();
     }
 
     // ----------------------------------------------------------------------
     // set-up
 
     fn setup(self: &Rc<Self>) {
-        let b = &self.b;
+        let f = self.f();
         for n in [
             "MainMenu_Options_HideEntProgress",
             "MainMenu_Options_AlwaysOnTop",
@@ -307,105 +242,42 @@ impl MainWindow {
             "PasswBoxMenu_EnablePasswTest",
             "GenerateMenu_IncludeHeader",
         ] {
-            b.make_checkable(n, false);
+            f.set_menu_checked(n, false);
         }
-        {
-            let core = self.core.borrow();
-            EntropyManager::global().set_system_entropy_bits(ENTROPY_SYSTEM);
-            b.updowns["CharsLengthSpinBtn"].set_max(PASSW_MAX_CHARS as i64);
-            b.updowns["WordsNumSpinBtn"].set_max(PASSW_MAX_WORDS as i64);
-            let _ = &core;
+        EntropyManager::global().set_system_entropy_bits(ENTROPY_SYSTEM);
+        f.set_range("CharsLengthSpinBtn", 1, PASSW_MAX_CHARS as i64);
+        f.set_range("WordsNumSpinBtn", 1, PASSW_MAX_WORDS as i64);
+        f.set_text("LogoLbl", "PW GEN");
+        f.set_label_align("LogoLbl", 0.5, true);
+        if f.has("LogoImg") {
+            f.set_image("LogoImg", Some(include_bytes!("../../../../assets/about_logo.png").to_vec()));
         }
-        let logo_lbl = self.label("LogoLbl");
-        logo_lbl.set_text("PW GEN");
-        logo_lbl.set_justify(gtk::Justification::Center);
-        logo_lbl.set_xalign(0.5);
-        logo_lbl.set_yalign(0.5);
-        logo_lbl.set_ellipsize(gtk::pango::EllipsizeMode::None);
-        if let Some(p) = self.b.try_get::<gtk::Picture>("LogoImg") {
-            p.set_can_shrink(true);
-            p.set_content_fit(gtk::ContentFit::Contain);
-            let bytes = glib::Bytes::from_static(include_bytes!("../../../../assets/about_logo.png"));
-            if let Ok(t) = gdk::Texture::from_bytes(&bytes) {
-                p.set_paintable(Some(&t));
-            }
-        }
-        super::builder::add_css(&logo_lbl, "font-family: serif; font-weight: bold;");
-        self.label("PasswInfoLbl").set_text(&trl("Click on \"Generate\""));
-        self.entry("PasswBox").add_css_class("monospace");
-        super::builder::add_css(&self.entry("PasswBox"), "font-family: monospace;");
-        let status: gtk::Label = b.get("StatusBar.label");
-        status.set_text(&format!("{PROGRAM_NAME} {}", version_string()));
-        b.get::<gtk::Button>("TogglePasswBtn").add_css_class("flat");
+        f.set_text("PasswInfoLbl", &trl("Click on \"Generate\""));
+        f.set_mono("PasswBox", true);
+        f.set_secret("PasswBox");
+        f.set_popup_menu("PasswBox", "PasswBoxMenu");
+        f.set_popup_menu("GenerateBtn2", "GenerateMenu");
+        f.set_popup_menu("AdvancedBtn", "AdvancedOptionsMenu");
+        f.set_text("StatusBar", &format!("{PROGRAM_NAME} {}", version_string()));
+        let bar = self.passw_bar.clone();
+        f.set_painter("PasswGauge", move |ui, rect| bar.paint(ui, rect));
 
-        {
-            let core = self.core.borrow();
-            super::util::set_gui_font(&core.config.gui_font_string);
-            super::util::set_ui_style(&core.config.ui_style_name);
-            let keys = core.config.hot_keys.clone();
-            drop(core);
-            self.activate_hot_keys(&keys);
-        }
         self.load_config_to_controls();
         self.startup_profile();
         self.connect_events();
-        self.connect_tools();
-        self.connect_profile_editor();
-        self.setup_tray();
         self.setup_timer();
-        self.setup_entropy_events();
+        self.setup_integration();
+        self.connect_tools();
         self.update_entropy_progress(true);
         self.set_advanced_btn_caption();
-
-        let w = Rc::downgrade(self);
-        self.window.connect_close_request(move |win| {
+        let w = self.weak();
+        windows::set_input_hook(move |ctx| {
             if let Some(w) = w.upgrade() {
-                // `FormCloseQuery()`
-                if !w.close_confirmed.get() && w.core.borrow().config.confirm_exit && !crate::app::restart_requested() {
-                    let (w2, win2) = (w.clone(), win.clone());
-                    glib::spawn_future_local(async move {
-                        if msg_box(
-                            Some(win2.upcast_ref()),
-                            &trl_format("Are you sure you want to exit\n%1?", &[PROGRAM_NAME]),
-                            MsgIcon::Question,
-                            MsgButtons::YesNo,
-                            true,
-                        )
-                        .await
-                            == MsgResult::Yes
-                        {
-                            w2.close_confirmed.set(true);
-                            win2.close();
-                        }
-                    });
-                    return glib::Propagation::Stop;
-                }
-                // `PasswMngForm->CloseQuery()`: unsaved database
-                let mng = w.passw_mng.borrow().clone();
-                if let Some(m) = mng.filter(|_| !w.close_queried.get()) {
-                    let (w2, win2) = (w.clone(), win.clone());
-                    glib::spawn_future_local(async move {
-                        if m.close_query().await {
-                            w2.close_queried.set(true);
-                            w2.close_confirmed.set(true);
-                            win2.close();
-                        } else {
-                            w2.close_confirmed.set(false);
-                        }
-                    });
-                    return glib::Propagation::Stop;
-                }
-                w.on_close();
-                // closing the main window terminates the program, also
-                // when other windows are open
-                if let Some(app) = w.window.application() {
-                    glib::idle_add_local_once(move || app.quit());
-                }
+                w.collect_entropy(ctx);
             }
-            glib::Propagation::Proceed
         });
-        let w = Rc::downgrade(self);
-        super::clipboard::on_set_data(move || {
+        let w = self.weak();
+        clipboard::on_set_data(move || {
             if let Some(w) = w.upgrade() {
                 let core = w.core.borrow();
                 if core.config.auto_clear_clip {
@@ -417,51 +289,52 @@ impl MainWindow {
 
     /// Generator controls from the settings (`LoadConfig`).
     fn load_config_to_controls(self: &Rc<Self>) {
-        super::dialogs::load_quick_help_config(&self.core.borrow().ini);
+        let f = self.f();
         let core = self.core.borrow();
         let s = &core.settings;
-        self.check("IncludeCharsCheck").set_active(s.include_chars);
-        self.b.updowns["CharsLengthSpinBtn"].set_position(s.chars_length as i64);
-        set_combo_items(&self.combo("CharSetList"), &s.char_set_list);
-        set_combo_text(&self.combo("CharSetList"), &s.char_set_text);
+        f.set_checked("IncludeCharsCheck", s.include_chars);
+        f.set_position("CharsLengthSpinBtn", s.chars_length as i64);
+        f.set_items("CharSetList", s.char_set_list.clone());
+        f.set_text("CharSetList", &s.char_set_text);
         *self.char_set_input.borrow_mut() = s.char_set_text.clone();
-        self.check("IncludeWordsCheck").set_active(s.include_words);
-        self.b.updowns["WordsNumSpinBtn"].set_position(s.words_num as i64);
-        set_combo_items(&self.combo("WLFNList"), &s.wlfn_list);
-        set_combo_text(&self.combo("WLFNList"), &s.wlfn_text);
+        f.set_checked("IncludeWordsCheck", s.include_words);
+        f.set_position("WordsNumSpinBtn", s.words_num as i64);
+        f.set_items("WLFNList", s.wlfn_list.clone());
+        f.set_text("WLFNList", &s.wlfn_text);
         if core.word_list_error.is_none() {
             *self.wl_file_name.borrow_mut() = remove_comment_and_trim(&s.wlfn_text);
             self.wl_file_name_err.borrow_mut().clear();
         } else {
             *self.wl_file_name_err.borrow_mut() = remove_comment_and_trim(&s.wlfn_text);
         }
-        self.check("CombineWordsCharsCheck").set_active(s.combine_words_chars);
-        self.check("SpecifyLengthCheck").set_active(s.passphr_spec_len);
-        self.entry("SpecifyLengthBox").set_text(&s.passphr_spec_len_string);
-        self.check("FormatPasswCheck").set_active(s.format_passw);
-        set_combo_items(&self.combo("FormatList"), &s.format_list);
-        set_combo_text(&self.combo("FormatList"), &s.format_text);
-        self.check("RunScriptCheck").set_active(s.run_script);
-        set_combo_items(&self.combo("ScriptList"), &s.script_list);
-        set_combo_text(&self.combo("ScriptList"), &s.script_text);
-        self.entry("NumPasswBox").set_text(&s.num_passw);
-        self.set_action_checked("GenerateMenu_IncludeHeader", s.include_header);
+        f.set_checked("CombineWordsCharsCheck", s.combine_words_chars);
+        f.set_checked("SpecifyLengthCheck", s.passphr_spec_len);
+        f.set_text("SpecifyLengthBox", &s.passphr_spec_len_string);
+        f.set_checked("FormatPasswCheck", s.format_passw);
+        f.set_items("FormatList", s.format_list.clone());
+        f.set_text("FormatList", &s.format_text);
+        f.set_checked("RunScriptCheck", s.run_script);
+        f.set_items("ScriptList", s.script_list.clone());
+        f.set_text("ScriptList", &s.script_text);
+        f.set_text("NumPasswBox", &s.num_passw);
+        f.set_menu_checked("GenerateMenu_IncludeHeader", s.include_header);
         let ini = &core.ini;
         let hide = ini.read_bool("Main", "HidePassw", false);
-        self.b.get::<gtk::ToggleButton>("TogglePasswBtn").set_active(hide);
-        self.entry("PasswBox").set_visibility(!hide);
+        f.set_checked("TogglePasswBtn", hide);
+        f.set_password_char("PasswBox", hide);
         self.show_ent_progress.set(!ini.read_bool("Main", "HideEntropyProgress", false));
-        self.set_action_checked("MainMenu_Options_HideEntProgress", !self.show_ent_progress.get());
-        self.set_action_checked("MainMenu_Options_SaveSettingsOnExit", ini.read_bool("Main", "SaveSettingsOnExit", true));
-        self.set_action_checked("MainMenu_Options_AlwaysOnTop", ini.read_bool("Main", "AlwaysOnTop", false));
+        f.set_menu_checked("MainMenu_Options_HideEntProgress", !self.show_ent_progress.get());
+        f.set_menu_checked("MainMenu_Options_SaveSettingsOnExit", ini.read_bool("Main", "SaveSettingsOnExit", true));
+        let on_top = ini.read_bool("Main", "AlwaysOnTop", false);
+        f.set_menu_checked("MainMenu_Options_AlwaysOnTop", on_top);
+        if on_top {
+            set_always_on_top(true);
+        }
         let editable = ini.read_bool("Main", "PasswEditable", true);
-        self.set_action_checked("PasswBoxMenu_Editable", editable);
-        self.set_action_checked("PasswBoxMenu_EnablePasswTest", ini.read_bool("Main", "EnablePasswTest", true));
-        self.b.action("PasswBoxMenu_EnablePasswTest").set_enabled(editable);
-        let pb = self.entry("PasswBox");
-        pb.set_editable(editable);
-        pb.set_enable_undo(true);
-        let tag = if self.action_checked("PasswBoxMenu_EnablePasswTest") { PASSWBOX_TAG_PASSW_TEST } else { 0 };
+        f.set_menu_checked("PasswBoxMenu_Editable", editable);
+        f.set_menu_checked("PasswBoxMenu_EnablePasswTest", ini.read_bool("Main", "EnablePasswTest", true));
+        f.set_read_only("PasswBox", !editable);
+        let tag = if f.menu_checked("PasswBoxMenu_EnablePasswTest") { PASSWBOX_TAG_PASSW_TEST } else { 0 };
         self.passw_box_tag.set(tag);
         drop(core);
         self.update_char_set_info();
@@ -472,62 +345,72 @@ impl MainWindow {
 
     fn update_char_set_info(&self) {
         let core = self.core.borrow();
-        let l = self.label("CharSetInfoLbl");
-        l.set_text(&core.char_set_info);
-        if core.char_set_error {
-            l.add_css_class("error");
-        } else {
-            l.remove_css_class("error");
-        }
+        self.f().set_text("CharSetInfoLbl", &core.char_set_info);
+        self.f().set_font_color("CharSetInfoLbl", core.char_set_error.then_some(egui::Color32::from_rgb(0xe0, 0x20, 0x20)));
     }
 
     fn update_word_list_info(&self) {
         let core = self.core.borrow();
-        let l = self.label("WordListInfoLbl");
+        let red = egui::Color32::from_rgb(0xe0, 0x20, 0x20);
         match &core.word_list_error {
             Some(e) => {
-                l.set_text(e);
-                l.add_css_class("error");
+                self.f().set_text("WordListInfoLbl", e);
+                self.f().set_font_color("WordListInfoLbl", Some(red));
             }
             None => {
-                l.set_text(&core.word_list_info);
-                l.remove_css_class("error");
+                self.f().set_text("WordListInfoLbl", &core.word_list_info);
+                self.f().set_font_color("WordListInfoLbl", None);
             }
         }
     }
 
     /// `UpdateProfileControls()`.
     fn update_profile_controls(&self) {
-        let core = self.core.borrow();
-        let names: Vec<String> = core.profiles.iter().map(|p| p.profile_name.clone()).collect();
-        set_combo_items(&self.combo("ProfileList"), &names);
-        drop(core);
-        // File | Profile menu: profiles with Alt+Shift+0..Z, then editor
-        self.update_profile_menu();
+        let names: Vec<String> = self.core.borrow().profiles.iter().map(|p| p.profile_name.clone()).collect();
+        self.profile_list_guard.set(true);
+        self.f().set_items("ProfileList", names.clone());
+        self.profile_list_guard.set(false);
+        // File | Profile menu: profiles with Alt+Shift+0..Z
+        let shortcuts: Vec<char> = PROFILES_MENU_SHORTCUTS.chars().collect();
+        let items: Vec<(String, String, Option<u16>)> = names
+            .iter()
+            .enumerate()
+            .map(|(i, n)| {
+                let (caption, sc) = match shortcuts.get(i) {
+                    Some(&c) => (format!("&{c} {}", n.replace('&', "&&")), Some(0x8000 | 0x2000 | c.to_ascii_uppercase() as u16)),
+                    None => (n.replace('&', "&&"), None),
+                };
+                (format!("profile{i}"), caption, sc)
+            })
+            .collect();
+        if self.f().has_menu_item("MainMenu_File_Profile") {
+            self.f().set_dynamic_items("MainMenu_File_Profile", &items);
+        }
     }
 
     /// `IncludeCharsCheckClick()`: enable dependent controls.
     fn include_chars_check_click(&self) {
-        let c1 = self.check("IncludeCharsCheck").is_active();
-        let c2 = self.check("IncludeWordsCheck").is_active();
-        let c3 = self.check("FormatPasswCheck").is_active();
-        let c4 = self.check("RunScriptCheck").is_active();
+        let f = self.f();
+        let c1 = f.checked("IncludeCharsCheck");
+        let c2 = f.checked("IncludeWordsCheck");
+        let c3 = f.checked("FormatPasswCheck");
+        let c4 = f.checked("RunScriptCheck");
         for n in ["CharsLengthLbl", "CharsLengthBox", "CharsLengthSpinBtn"] {
-            self.b.w(n).set_sensitive(c1);
+            f.set_enabled(n, c1);
         }
-        self.b.w("CombineWordsCharsCheck").set_sensitive(c1 && c2);
+        f.set_enabled("CombineWordsCharsCheck", c1 && c2);
         for n in ["WordsNumLbl", "WordsNumBox", "WordsNumSpinBtn", "SpecifyLengthCheck"] {
-            self.b.w(n).set_sensitive(c2);
+            f.set_enabled(n, c2);
         }
-        self.b.w("SpecifyLengthBox").set_sensitive(c2 && self.check("SpecifyLengthCheck").is_active());
-        self.b.w("FormatList").set_sensitive(c3);
-        self.b.w("FormatPasswInfoLbl").set_sensitive(c3);
+        f.set_enabled("SpecifyLengthBox", c2 && f.checked("SpecifyLengthCheck"));
+        f.set_enabled("FormatList", c3);
+        f.set_enabled("FormatPasswInfoLbl", c3);
         for n in ["ScriptList", "ReloadScriptBtn", "BrowseBtn2"] {
-            self.b.w(n).set_sensitive(c4);
+            f.set_enabled(n, c4);
         }
         let en = c1 || c2 || c3 || c4;
         for n in ["NumPasswBox", "GenerateBtn", "GenerateBtn2"] {
-            self.b.w(n).set_sensitive(en);
+            f.set_enabled(n, en);
         }
     }
 
@@ -536,269 +419,156 @@ impl MainWindow {
 
     fn connect_events(self: &Rc<Self>) {
         for n in ["IncludeCharsCheck", "IncludeWordsCheck", "FormatPasswCheck", "RunScriptCheck", "SpecifyLengthCheck"] {
-            let w = Rc::downgrade(self);
             let is_spec = n == "SpecifyLengthCheck";
-            self.check(n).connect_toggled(move |c| {
-                if let Some(w) = w.upgrade() {
-                    w.include_chars_check_click();
-                    if is_spec && c.is_active() {
-                        w.entry("SpecifyLengthBox").grab_focus();
-                    }
+            let name = n.to_string();
+            self.click(n, move |w| {
+                w.include_chars_check_click();
+                if is_spec && w.f().checked(&name) {
+                    w.f().focus("SpecifyLengthBox");
                 }
             });
         }
-        // combo boxes with history
-        self.on_combo_leave("CharSetList", |w| w.char_set_list_exit());
-        self.on_combo_activate("CharSetList", |w| w.char_set_info_btn_click());
-        self.on_combo_leave("WLFNList", |w| w.wlfn_list_exit());
-        self.on_combo_activate("WLFNList", |w| w.word_list_info_btn_click());
-        self.on_combo_leave("FormatList", |w| w.format_list_exit());
-        for n in ["CharSetList", "WLFNList", "FormatList", "ScriptList"] {
-            let w = Rc::downgrade(self);
-            let name = n.to_string();
-            self.combo(n).connect_changed(move |cb| {
-                if cb.active().is_some() {
-                    if let Some(w) = w.upgrade() {
-                        match name.as_str() {
-                            "CharSetList" => w.char_set_list_exit(),
-                            "WLFNList" => w.wlfn_list_exit(),
-                            _ => {}
+        self.on_event(|w, e| {
+            use crate::vcl::Event::*;
+            match e {
+                Exit(n) => match n.as_str() {
+                    "CharSetList" => w.char_set_list_exit(),
+                    "WLFNList" => w.wlfn_list_exit(),
+                    "FormatList" => w.format_list_exit(),
+                    "CharsLengthBox" => w.f().set_position("CharsLengthSpinBtn", w.f().position("CharsLengthSpinBtn")),
+                    "WordsNumBox" => w.f().set_position("WordsNumSpinBtn", w.f().position("WordsNumSpinBtn")),
+                    _ => {}
+                },
+                Enter(n) => match n.as_str() {
+                    "CharSetList" => w.char_set_info_btn_click(),
+                    "WLFNList" => w.word_list_info_btn_click(),
+                    "NumPasswBox" => w.generate_passw(GenDest::GuiList),
+                    "PasswBox" => w.generate_passw(GenDest::GuiSingle),
+                    _ => {}
+                },
+                Change(n) => match n.as_str() {
+                    // an entry chosen from the list
+                    "CharSetList" if w.f().item_index(n).is_some() => w.char_set_list_exit(),
+                    "WLFNList" if w.f().item_index(n).is_some() => w.wlfn_list_exit(),
+                    "PasswBox" => w.passw_box_change(),
+                    "ProfileList" => {
+                        if let (false, Some(i)) = (w.profile_list_guard.get(), w.f().item_index(n)) {
+                            w.load_profile(i);
                         }
                     }
+                    _ => {}
+                },
+                Menu(n) => {
+                    if let Some(i) = n.strip_prefix("dyn:profile").and_then(|i| i.parse::<usize>().ok()) {
+                        w.profile_menu_click(i);
+                    }
                 }
-            });
-        }
-        if let Some(m) = self.b.menus.get("ListMenu") {
-            for n in ["CharSetList", "WLFNList", "FormatList", "ScriptList"] {
-                if let Some(e) = combo_entry(&self.combo(n)) {
-                    let _ = m;
-                    let _ = e;
-                }
-            }
-        }
-        // number boxes
-        for (box_name, ud) in [("CharsLengthBox", "CharsLengthSpinBtn"), ("WordsNumBox", "WordsNumSpinBtn")] {
-            let w = Rc::downgrade(self);
-            let ud = ud.to_string();
-            let fc = gtk::EventControllerFocus::new();
-            fc.connect_leave(move |_| {
-                if let Some(w) = w.upgrade() {
-                    let u = &w.b.updowns[&ud];
-                    u.set_position(u.position());
-                }
-            });
-            self.entry(box_name).add_controller(fc);
-        }
-        let w = Rc::downgrade(self);
-        self.entry("NumPasswBox").connect_activate(move |_| {
-            if let Some(w) = w.upgrade() {
-                w.generate_passw(GenDest::GuiList);
+                _ => {}
             }
         });
-        let w = Rc::downgrade(self);
-        self.entry("PasswBox").connect_activate(move |_| {
-            if let Some(w) = w.upgrade() {
-                w.generate_passw(GenDest::GuiSingle);
-            }
-        });
-        let w = Rc::downgrade(self);
-        self.entry("PasswBox").connect_changed(move |_| {
-            if let Some(w) = w.upgrade() {
-                w.passw_box_change();
-            }
-        });
-        if let Some(m) = self.b.menus.get("PasswBoxMenu") {
-            let e = self.entry("PasswBox");
-            let pop = attach_context_menu_capture(&e, m);
-            let w = Rc::downgrade(self);
-            pop.connect_show(move |_| {
-                if let Some(w) = w.upgrade() {
-                    w.update_passw_box_menu();
-                }
-            });
-        }
-        let w = Rc::downgrade(self);
-        self.b.get::<gtk::ToggleButton>("TogglePasswBtn").connect_toggled(move |t| {
-            if let Some(w) = w.upgrade() {
-                w.entry("PasswBox").set_visibility(!t.is_active());
-            }
-        });
-
+        self.click("TogglePasswBtn", |w| w.f().set_password_char("PasswBox", w.f().checked("TogglePasswBtn")));
         self.click("GenerateBtn", |w| w.generate_passw(GenDest::GuiSingle));
         self.click("GenerateBtn2", |w| w.generate_passw(GenDest::GuiList));
-        if let Some(m) = self.b.menus.get("GenerateMenu") {
-            attach_context_menu(&self.button("GenerateBtn2"), m);
-        }
-        self.act("GenerateMenu_Clipboard", |w| w.generate_passw(GenDest::ClipboardList));
-        self.act("GenerateMenu_File", |w| w.generate_passw(GenDest::FileList));
-        self.act("GenerateMenu_IncludeHeader", |_| {});
+        self.menu("GenerateMenu_Clipboard", |w| w.generate_passw(GenDest::ClipboardList));
+        self.menu("GenerateMenu_File", |w| w.generate_passw(GenDest::FileList));
+        self.check_menu("GenerateMenu_IncludeHeader", |_| {});
         self.click("AdvancedBtn", |w| w.advanced_btn_click());
-        if let Some(m) = self.b.menus.get("AdvancedOptionsMenu") {
-            attach_context_menu(&self.button("AdvancedBtn"), m);
-        }
-        self.act("AdvancedOptionsMenu_DeactivateAll", |w| w.deactivate_options(u32::MAX));
-        self.act("AdvancedOptionsMenu_DeactivateAllStarred", |w| {
-            w.check("SpecifyLengthCheck").set_active(false);
+        self.menu("AdvancedOptionsMenu_DeactivateAll", |w| w.deactivate_options(u32::MAX));
+        self.menu("AdvancedOptionsMenu_DeactivateAllStarred", |w| {
+            w.f().set_checked("SpecifyLengthCheck", false);
+            w.include_chars_check_click();
             w.deactivate_options(passwoptions_starred_bitfield());
             w.set_advanced_btn_caption();
         });
         self.click("CharSetInfoBtn", |w| w.char_set_info_btn_click());
         self.click("WordListInfoBtn", |w| w.word_list_info_btn_click());
-        self.click("CharSetHelpBtn", |w| quick_help(&w.win(), &w.char_set_help));
-        self.click("FormatPasswHelpBtn", |w| quick_help(&w.win(), &w.format_passw_help));
+        self.click("CharSetHelpBtn", |w| quick_help(ROOT, &w.char_set_help));
+        self.click("FormatPasswHelpBtn", |w| quick_help(ROOT, &w.format_passw_help));
         self.click("BrowseBtn", |w| w.browse_file("WLFNList", &trl("Select word list file"), true));
         self.click("BrowseBtn2", |w| w.browse_file("ScriptList", &trl("Select Lua script file"), false));
         self.click("ReloadScriptBtn", |w| {
             *w.script.borrow_mut() = None;
         });
         self.click("HelpBtn", |w| w.help_btn_click());
-        self.click("BuildBtn", |w| w.char_set_builder());
         self.click("ClearClipBtn", |w| w.clear_clip_btn_click());
         self.click("ReloadProfileBtn", |w| {
-            if let Some(i) = w.combo("ProfileList").active() {
-                w.load_profile(i as usize);
-            }
-        });
-        let w = Rc::downgrade(self);
-        self.combo("ProfileList").connect_changed(move |cb| {
-            if let (Some(w), Some(i)) = (w.upgrade(), cb.active()) {
-                if !w.profile_list_guard.get() {
-                    w.load_profile(i as usize);
-                }
+            if let Some(i) = w.f().item_index("ProfileList") {
+                w.load_profile(i);
             }
         });
 
-        // menu actions
-        self.act("MainMenu_File_Exit", |w| w.window.close());
-        self.act("TrayMenu_Exit", |w| w.window.close());
-        self.act("MainMenu_Tools_ClearClipboard", |w| w.clear_clip_btn_click());
-        self.act("TrayMenu_ClearClip", |w| w.clear_clip_btn_click());
-        self.act("MainMenu_Help_OpenManual", |w| w.help_btn_click());
-        self.act("MainMenu_Help_CmdLineArgs", |w| msg(Some(&w.win()), &AppCore::cmd_line_info(), MsgIcon::Info));
-        self.act("MainMenu_Help_Donate", |w| open_uri(Some(&w.win()), PROGRAM_URL_DONATE));
-        self.act("MainMenu_Help_VisitWebsite", |w| {
-            let url = if PORT_REPOSITORY.is_empty() { PROGRAM_URL_ORIGINAL } else { PORT_REPOSITORY };
-            open_uri(Some(&w.win()), url);
-        });
-        self.act("MainMenu_Help_GetTranslations", |w| {
-            let url = if PORT_REPOSITORY.is_empty() { PROGRAM_URL_ORIGINAL } else { PORT_REPOSITORY };
-            open_uri(Some(&w.win()), url);
-        });
-        self.act("MainMenu_Help_TimerInfo", |w| w.timer_info());
-        self.act("MainMenu_Options_SaveSettingsNow", |w| {
+        self.menu("MainMenu_File_Exit", |_| windows::ctx().send_viewport_cmd(ViewportCommand::Close));
+        self.menu("MainMenu_Tools_ClearClipboard", |w| w.clear_clip_btn_click());
+        self.menu("MainMenu_Help_OpenManual", |w| w.help_btn_click());
+        self.menu("MainMenu_Help_CmdLineArgs", |_| msg(ROOT, &AppCore::cmd_line_info(), MsgIcon::Info));
+        self.menu("MainMenu_Help_Donate", |_| open_uri(PROGRAM_URL_DONATE));
+        for n in ["MainMenu_Help_VisitWebsite", "MainMenu_Help_GetTranslations"] {
+            self.menu(n, |_| open_uri(if PORT_REPOSITORY.is_empty() { PROGRAM_URL_ORIGINAL } else { PORT_REPOSITORY }));
+        }
+        self.menu("MainMenu_Help_TimerInfo", |_| timer_info());
+        self.menu("MainMenu_Options_SaveSettingsNow", |w| {
             if w.save_config() {
-                info_box(&w.win(), &trl("Settings saved."));
+                info_box(ROOT, &trl("Settings saved."));
             }
         });
-        self.act("MainMenu_Options_HideEntProgress", |w| {
-            w.show_ent_progress.set(!w.action_checked("MainMenu_Options_HideEntProgress"));
+        self.check_menu("MainMenu_Options_HideEntProgress", |w| {
+            w.show_ent_progress.set(!w.f().menu_checked("MainMenu_Options_HideEntProgress"));
             w.update_entropy_progress(true);
         });
-        self.act("MainMenu_Options_SaveSettingsOnExit", |_| {});
-        self.act("PasswBoxMenu_Editable", |w| {
-            let editable = w.action_checked("PasswBoxMenu_Editable");
-            w.entry("PasswBox").set_editable(editable);
-            w.b.action("PasswBoxMenu_EnablePasswTest").set_enabled(editable);
+        self.check_menu("MainMenu_Options_SaveSettingsOnExit", |_| {});
+        self.check_menu("MainMenu_Options_AlwaysOnTop", |w| set_always_on_top(w.f().menu_checked("MainMenu_Options_AlwaysOnTop")));
+        self.check_menu("PasswBoxMenu_Editable", |w| {
+            let editable = w.f().menu_checked("PasswBoxMenu_Editable");
+            w.f().set_read_only("PasswBox", !editable);
         });
-        self.act("PasswBoxMenu_EnablePasswTest", |w| {
-            let on = w.action_checked("PasswBoxMenu_EnablePasswTest");
+        self.check_menu("PasswBoxMenu_EnablePasswTest", |w| {
+            let on = w.f().menu_checked("PasswBoxMenu_EnablePasswTest");
             let t = w.passw_box_tag.get();
             w.passw_box_tag.set(if on { t | PASSWBOX_TAG_PASSW_TEST } else { t & !PASSWBOX_TAG_PASSW_TEST });
         });
-        self.act("PasswBoxMenu_Copy", |w| w.passw_box_copy());
-        self.act("PasswBoxMenu_SelectAll", |w| w.entry("PasswBox").select_region(0, -1));
-        self.act("PasswBoxMenu_Cut", |w| {
-            let e = w.entry("PasswBox");
-            if !e.is_editable() {
-                return;
-            }
-            if e.selection_bounds().is_some() {
+        self.menu("PasswBoxMenu_Copy", |w| w.passw_box_copy());
+        self.menu("PasswBoxMenu_SelectAll", |w| w.f().select_all("PasswBox"));
+        self.menu("PasswBoxMenu_Cut", |w| {
+            if w.passw_box_editable() && w.f().selection("PasswBox").is_some() {
                 w.passw_box_copy();
-                e.delete_selection();
+                w.f().delete_selection("PasswBox");
             }
         });
-        self.act("PasswBoxMenu_Delete", |w| {
-            let e = w.entry("PasswBox");
-            if e.is_editable() {
-                e.delete_selection();
+        self.menu("PasswBoxMenu_Delete", |w| {
+            if w.passw_box_editable() {
+                w.f().delete_selection("PasswBox");
             }
         });
-        self.act("PasswBoxMenu_Paste", |w| {
-            let e = w.entry("PasswBox");
-            if !e.is_editable() {
-                return;
-            }
-            super::clipboard::read_text(move |t| {
-                if let Some(t) = t {
-                    if !e.is_editable() {
-                        return;
-                    }
-                    e.delete_selection();
-                    let mut pos = e.position();
-                    e.insert_text(&t, &mut pos);
+        self.menu("PasswBoxMenu_Paste", |w| {
+            if w.passw_box_editable() {
+                if let Some(t) = clipboard::read_text() {
+                    w.f().insert_text("PasswBox", &t);
                 }
-            });
-        });
-        self.act("PasswBoxMenu_Undo", |w| {
-            let e = w.entry("PasswBox");
-            if e.is_editable() {
-                let _ = e.activate_action("text.undo", None);
             }
         });
-        self.act("PasswBoxMenu_SaveAsFile", |w| w.passw_box_save_as_file());
-        self.act("MainMenu_Tools_ProvideAddEntropy_FromFile", |w| w.add_entropy_from_file());
-        self.act("MainMenu_Tools_DetermRandGen_Reset", |w| {
+        self.menu("PasswBoxMenu_Undo", |w| {
+            if w.passw_box_editable() {
+                w.f().undo("PasswBox");
+            }
+        });
+        self.menu("PasswBoxMenu_SaveAsFile", |w| w.passw_box_save_as_file());
+        self.menu("MainMenu_Tools_ProvideAddEntropy_FromFile", |w| w.add_entropy_from_file());
+        self.menu("MainMenu_Tools_DetermRandGen_Reset", |w| {
             if let Some(g) = w.key_seeded_prng.borrow_mut().as_mut() {
                 g.reset();
             }
-            info_box(&w.win(), &trl("Deterministic random generator has been RESET."));
+            info_box(ROOT, &trl("Deterministic random generator has been RESET."));
         });
-        self.act("MainMenu_Tools_DetermRandGen_Deactivate", |w| w.deactivate_det_rand_gen());
-        self.act("TrayMenu_GenPassw", |w| w.generate_passw(GenDest::Clipboard));
-        self.act("TrayMenu_GenAndShowPassw", |w| w.generate_passw(GenDest::MsgBox));
-        self.act("TrayMenu_GenAndAutoTypePassw", |w| w.generate_passw(GenDest::Autotype));
+        self.menu("MainMenu_Tools_DetermRandGen_Deactivate", |w| w.deactivate_det_rand_gen());
     }
 
-    fn on_combo_leave(self: &Rc<Self>, name: &str, f: impl Fn(&Rc<Self>) + 'static) {
-        if let Some(e) = combo_entry(&self.combo(name)) {
-            let w = Rc::downgrade(self);
-            let fc = gtk::EventControllerFocus::new();
-            fc.connect_leave(move |_| {
-                if let Some(w) = w.upgrade() {
-                    f(&w);
-                }
-            });
-            e.add_controller(fc);
-        }
-    }
-
-    fn on_combo_activate(self: &Rc<Self>, name: &str, f: impl Fn(&Rc<Self>) + 'static) {
-        if let Some(e) = combo_entry(&self.combo(name)) {
-            let w = Rc::downgrade(self);
-            e.connect_activate(move |_| {
-                if let Some(w) = w.upgrade() {
-                    f(&w);
-                }
-            });
-        }
+    fn passw_box_editable(&self) -> bool {
+        self.f().menu_checked("PasswBoxMenu_Editable")
     }
 
     /// `AddEntryToList()`.
     fn add_entry_to_list(&self, combo: &str, entry: &str, case_sensitive: bool) {
-        let cb = self.combo(combo);
-        let mut items: Vec<String> = Vec::new();
-        let model = cb.model();
-        if let Some(m) = model {
-            if let Some(mut iter) = m.iter_first() {
-                loop {
-                    let v: String = m.get(&iter, 0);
-                    items.push(v);
-                    if !m.iter_next(&mut iter) {
-                        break;
-                    }
-                }
-            }
-        }
+        let mut items = self.f().items(combo);
         let pos = items.iter().position(|s| if case_sensitive { s == entry } else { s.to_lowercase() == entry.to_lowercase() });
         match pos {
             Some(p) => {
@@ -812,29 +582,14 @@ impl MainWindow {
                 items.insert(0, entry.to_string());
             }
         }
-        let text = combo_text(&cb);
-        set_combo_items(&cb, &items);
-        set_combo_text(&cb, &text);
-    }
-
-    fn combo_items(&self, combo: &str) -> Vec<String> {
-        let mut items = Vec::new();
-        if let Some(m) = self.combo(combo).model() {
-            if let Some(mut iter) = m.iter_first() {
-                loop {
-                    items.push(m.get::<String>(&iter, 0));
-                    if !m.iter_next(&mut iter) {
-                        break;
-                    }
-                }
-            }
-        }
-        items
+        let text = self.f().text(combo);
+        self.f().set_items(combo, items);
+        self.f().set_text(combo, &text);
     }
 
     /// `CharSetListExit()` → `LoadCharSet()`.
     fn char_set_list_exit(&self) {
-        let text = combo_text(&self.combo("CharSetList"));
+        let text = self.f().text("CharSetList");
         if text != *self.char_set_input.borrow() {
             self.load_char_set(&text);
         }
@@ -852,8 +607,8 @@ impl MainWindow {
 
     /// `WLFNListExit()`.
     fn wlfn_list_exit(&self) {
-        let text = combo_text(&self.combo("WLFNList"));
-        let input = if text.is_empty() { WLFNLIST_DEFAULT.to_string() } else { text.clone() };
+        let text = self.f().text("WLFNList");
+        let input = if text.is_empty() { WLFNLIST_DEFAULT.to_string() } else { text };
         if remove_comment_and_trim(&input) == *self.wl_file_name.borrow() && self.wl_file_name_err.borrow().is_empty() {
             return;
         }
@@ -876,7 +631,7 @@ impl MainWindow {
 
     /// `FormatListExit()`.
     fn format_list_exit(&self) {
-        let text = combo_text(&self.combo("FormatList"));
+        let text = self.f().text("FormatList");
         if !text.is_empty() {
             self.add_entry_to_list("FormatList", &text, true);
         }
@@ -904,10 +659,7 @@ impl MainWindow {
                     trl_format("File \"%1\"", &[&core.settings.passw_options.trigram_file_name])
                 };
                 s.push_str("\n\n");
-                s.push_str(&trl_format(
-                    "(phonetic, based on trigram frequencies\nfrom the following source:\n<%1>)",
-                    &[&src],
-                ));
+                s.push_str(&trl_format("(phonetic, based on trigram frequencies\nfrom the following source:\n<%1>)", &[&src]));
             }
             _ => {}
         }
@@ -919,7 +671,7 @@ impl MainWindow {
             "%1\n\n%2\n\n%3.",
             &[&trl("Currently loaded character set:"), &s, &core.char_set_info],
         ));
-        msg(Some(&self.win()), &m, MsgIcon::Info);
+        msg(ROOT, &m, MsgIcon::Info);
     }
 
     /// `WordListInfoBtnClick()`.
@@ -930,15 +682,11 @@ impl MainWindow {
         if !self.wl_file_name_err.borrow().is_empty() {
             m = trl_format(
                 "Error while loading the file\n\"%1\":\n%2",
-                &[&self.wl_file_name_err.borrow(), &self.label("WordListInfoLbl").text()],
+                &[&self.wl_file_name_err.borrow(), &self.f().text("WordListInfoLbl")],
             ) + "\n\n";
         }
         let name = self.wl_file_name.borrow().clone();
-        let wl = if name.is_empty() || name == WLFNLIST_DEFAULT {
-            format!("<{}>", trl("default (English) word list"))
-        } else {
-            format!("\"{name}\"")
-        };
+        let wl = if name.is_empty() || name == WLFNLIST_DEFAULT { format!("<{}>", trl("default (English) word list")) } else { format!("\"{name}\"") };
         let g = &core.passw_gen;
         let n = g.word_list_size();
         m.push_str(&pwtool_core::unicode::format_w(
@@ -955,112 +703,85 @@ impl MainWindow {
                 &g.get_word(n - 1),
             ],
         ));
-        msg(Some(&self.win()), &m, MsgIcon::Info);
+        msg(ROOT, &m, MsgIcon::Info);
     }
 
     fn browse_file(self: &Rc<Self>, combo: &str, title: &str, word_list: bool) {
-        let dlg = gtk::FileDialog::new();
-        dlg.set_title(title);
-        let w = self.clone();
-        let combo = combo.to_string();
-        dlg.open(Some(&self.window), gio::Cancellable::NONE, move |r| {
-            if let Ok(f) = r {
-                if let Some(p) = f.path() {
-                    let cb = w.combo(&combo);
-                    set_combo_text(&cb, &p.to_string_lossy());
-                    if word_list {
-                        w.wlfn_list_exit();
-                    }
-                    if let Some(e) = combo_entry(&cb) {
-                        e.grab_focus();
-                    }
-                }
+        let (w, combo, title) = (self.weak(), combo.to_string(), title.to_string());
+        spawn(async move {
+            let Some(p) = crate::vcl::dialogs::open_file(&title, None, &[]).await else { return };
+            let Some(w) = w.upgrade() else { return };
+            w.f().set_text(&combo, &p.to_string_lossy());
+            if word_list {
+                w.wlfn_list_exit();
             }
+            w.f().focus(&combo);
         });
     }
 
     fn help_btn_click(&self) {
         let p = self.core.borrow().help_file_name.clone();
-        if p.exists() {
-            open_uri(Some(&self.win()), &p.to_string_lossy());
-        } else {
-            let alt = self.core.borrow().paths.resources.join("manual").join("manual.pdf");
-            open_uri(Some(&self.win()), &if alt.exists() { alt } else { p }.to_string_lossy());
-        }
+        let alt = self.core.borrow().paths.resources.join("manual").join("manual.pdf");
+        let file = if p.exists() { p } else if alt.exists() { alt } else { p };
+        open_uri(&file.to_string_lossy());
     }
 
     /// `ClearClipBtnClick()`.
-    fn clear_clip_btn_click(self: &Rc<Self>) {
-        let w = self.clone();
-        super::clipboard::clear_data(true, move |ok| {
-            let m = trl(if ok { "Clipboard cleared." } else { "Could not open clipboard." });
-            if w.tray.hidden.get() {
-                show_tray_info(&w, &m, !ok);
-            } else if ok {
-                info_box(&w.win(), &m);
-            } else {
-                msg(Some(&w.win()), &m, MsgIcon::Error);
-            }
-        });
+    fn clear_clip_btn_click(&self) {
+        let ok = clipboard::clear_data(true);
+        let m = trl(if ok { "Clipboard cleared." } else { "Could not open clipboard." });
+        if self.is_hidden() {
+            self.show_tray_info(&m, !ok);
+        } else if ok {
+            info_box(ROOT, &m);
+        } else {
+            msg(ROOT, &m, MsgIcon::Error);
+        }
     }
 
-    /// `PasswBoxMenuPopup()`: update enabled state of PasswBoxMenu items.
+    /// `PasswBoxMenuPopup()`: enabled state of the PasswBoxMenu items
+    /// (updated every frame).
     fn update_passw_box_menu(&self) {
-        let e = self.entry("PasswBox");
-        let editable = e.is_editable();
-        let selected = e.selection_bounds().is_some();
-        let has_text = e.text_length() > 0;
-        let db_open = self.passw_mng.borrow().as_ref().is_some_and(|m| m.is_db_open());
-        let has_clip_text = gdk::Display::default()
-            .map(|d| d.clipboard().formats().contains_type(glib::types::Type::STRING))
-            .unwrap_or(true);
-        self.b.action("PasswBoxMenu_Undo").set_enabled(editable);
-        self.b.action("PasswBoxMenu_Cut").set_enabled(editable && selected);
-        self.b.action("PasswBoxMenu_Copy").set_enabled(selected);
-        self.b.action("PasswBoxMenu_EncryptCopy").set_enabled(selected);
-        self.b.action("PasswBoxMenu_Paste").set_enabled(editable && has_clip_text);
-        self.b.action("PasswBoxMenu_PerformAutotype").set_enabled(has_text);
-        self.b.action("PasswBoxMenu_Delete").set_enabled(editable && selected);
-        self.b.action("PasswBoxMenu_AddToDb").set_enabled(selected && db_open);
-        self.b.action("PasswBoxMenu_SelectAll").set_enabled(has_text);
-        self.b.action("PasswBoxMenu_SaveAsFile").set_enabled(has_text);
-        self.b.action("PasswBoxMenu_EnablePasswTest").set_enabled(editable);
+        let f = self.f();
+        let editable = self.passw_box_editable();
+        let selected = f.selection("PasswBox").is_some();
+        let has_text = !f.secret_text("PasswBox").is_empty();
+        let set = |n: &str, on: bool| {
+            if f.has_menu_item(n) {
+                f.set_menu_enabled(n, on);
+            }
+        };
+        set("PasswBoxMenu_Undo", editable);
+        set("PasswBoxMenu_Cut", editable && selected);
+        set("PasswBoxMenu_Copy", selected);
+        set("PasswBoxMenu_EncryptCopy", false);
+        set("PasswBoxMenu_Paste", editable);
+        set("PasswBoxMenu_PerformAutotype", false);
+        set("PasswBoxMenu_Delete", editable && selected);
+        set("PasswBoxMenu_AddToDb", selected && self.db_open());
+        set("PasswBoxMenu_SelectAll", has_text);
+        set("PasswBoxMenu_SaveAsFile", has_text);
+        set("PasswBoxMenu_EnablePasswTest", editable);
     }
 
     fn passw_box_copy(&self) {
-        let e = self.entry("PasswBox");
-        if let Some((s, end)) = e.selection_bounds() {
-            let text = Zeroizing::new(e.chars(s, end).to_string());
-            super::clipboard::set_data(&text);
+        let text = self.f().selected_text("PasswBox");
+        if !text.is_empty() {
+            clipboard::set_data(&text);
         }
     }
 
     fn passw_box_save_as_file(self: &Rc<Self>) {
-        let dlg = gtk::FileDialog::new();
-        dlg.set_title(&trl("Save password"));
-        let w = self.clone();
-        dlg.save(Some(&self.window), gio::Cancellable::NONE, move |r| {
-            if let Ok(f) = r {
-                if let Some(p) = f.path() {
-                    let core = w.core.borrow();
-                    let text = Zeroizing::new(w.entry("PasswBox").text().to_string());
-                    let res = pwtool_core::text_file::TextFileWriter::create(&p, core.file_encoding, true)
-                        .and_then(|mut f| f.write_str(&text));
-                    drop(core);
-                    let name = p.file_name().unwrap_or_default().to_string_lossy().to_string();
-                    match res {
-                        Ok(()) => msg(
-                            Some(&w.win()),
-                            &trl_format("File \"%1\" successfully created.", &[&name]),
-                            MsgIcon::Info,
-                        ),
-                        Err(e) => msg(
-                            Some(&w.win()),
-                            &trl_format("Error while creating file\n\"%1\":\n%2.", &[&p.to_string_lossy(), &e.to_string()]),
-                            MsgIcon::Error,
-                        ),
-                    }
-                }
+        let w = self.weak();
+        spawn(async move {
+            let Some(p) = crate::vcl::dialogs::save_file(&trl("Save password"), None, None, &[]).await else { return };
+            let Some(w) = w.upgrade() else { return };
+            let text = w.f().secret_text("PasswBox");
+            let enc = w.core.borrow().file_encoding;
+            let res = pwtool_core::text_file::TextFileWriter::create(&p, enc, true).and_then(|mut f| f.write_str(&text));
+            match res {
+                Ok(()) => msg(ROOT, &trl_format("File \"%1\" successfully created.", &[&p.file_name().unwrap_or_default().to_string_lossy()]), MsgIcon::Info),
+                Err(e) => msg(ROOT, &trl_format("Error while creating file\n\"%1\":\n%2.", &[&p.to_string_lossy(), &e.to_string()]), MsgIcon::Error),
             }
         });
     }
@@ -1075,7 +796,7 @@ impl MainWindow {
         if tag & PASSWBOX_TAG_PASSW_TEST == 0 {
             return;
         }
-        let text = Zeroizing::new(self.entry("PasswBox").text().to_string());
+        let text = self.f().secret_text("PasswBox");
         let len = text.chars().count();
         let core = self.core.borrow();
         let mut bits = 0.0;
@@ -1090,11 +811,7 @@ impl MainWindow {
                 }
             }
             if !common {
-                bits = if core.use_advanced_passw_est {
-                    pwtool_core::zxcvbn::zxcvbn_match(&text)
-                } else {
-                    PasswordGenerator::estimate_passw_security(&text)
-                };
+                bits = if core.use_advanced_passw_est { pwtool_core::zxcvbn::zxcvbn_match(&text) } else { PasswordGenerator::estimate_passw_security(&text) };
             }
         }
         drop(core);
@@ -1104,19 +821,18 @@ impl MainWindow {
     /// `ShowPasswInfo()`.
     fn show_passw_info(&self, len: usize, bits: f64, common: bool, estimated: bool) {
         self.passw_bar.set_quality(bits);
-        let l = self.label("PasswInfoLbl");
         let mut caption = String::new();
         if common {
             caption.push_str("**");
-            l.set_tooltip_text(Some(&trl("Matches common password!")));
+            self.f().set_hint("PasswInfoLbl", &trl("Matches common password!"));
         } else {
             if estimated {
                 caption.push('*');
             }
-            l.set_tooltip_text(Some(&trl("Hold left mouse button to drag & drop password")));
+            self.f().set_hint("PasswInfoLbl", "");
         }
         caption.push_str(&trl_format("%1 bits / %2 characters", &[&format_float_1(bits), &len.to_string()]));
-        l.set_text(&caption);
+        self.f().set_text("PasswInfoLbl", &caption);
     }
 
     /// `SetAdvancedBtnCaption()`.
@@ -1124,7 +840,6 @@ impl MainWindow {
         let flags = self.core.borrow().settings.passw_options.flags;
         let num = flags.count_ones();
         let mut hint = String::new();
-        let dlg = self.passw_options_dlg.borrow().clone();
         if num > 0 {
             for i in 0..PASSWOPTIONS_NUM {
                 if flags & (1 << i) != 0 {
@@ -1132,7 +847,7 @@ impl MainWindow {
                     if PASSWOPTIONS_STARRED[i] {
                         opt.push('*');
                     }
-                    opt.push_str(&dlg.as_ref().map(|d| d.bit_to_string(i)).unwrap_or_else(|| PasswOptionsDlg::bit_name(i)));
+                    opt.push_str(&dialogs::option_name(i));
                     if num > 5 && opt.chars().count() > 40 {
                         opt = opt.chars().take(37).collect::<String>() + "...";
                     }
@@ -1142,61 +857,48 @@ impl MainWindow {
             }
         }
         let mut caption = trl("Advanced");
-        let hint = format!(
-            "{} - {}{hint}",
-            trl("Advanced password options"),
-            trl_format("%1 option(s) active", &[&num.to_string()])
-        );
+        let hint = format!("{} - {}{hint}", trl("Advanced password options"), trl_format("%1 option(s) active", &[&num.to_string()]));
         if num > 0 {
             caption.push_str(&format!("|{num}"));
             if flags & passwoptions_starred_bitfield() != 0 {
                 caption.push('*');
             }
         }
-        let b = self.button("AdvancedBtn");
-        b.set_label(&caption);
-        b.set_tooltip_text(Some(&hint));
-    }
-
-    fn options_dlg(&self) -> Rc<PasswOptionsDlg> {
-        if self.passw_options_dlg.borrow().is_none() {
-            *self.passw_options_dlg.borrow_mut() = Some(PasswOptionsDlg::new(&self.win()));
-        }
-        self.passw_options_dlg.borrow().clone().unwrap()
+        self.f().set_control_caption("AdvancedBtn", &caption);
+        self.f().set_hint("AdvancedBtn", &hint);
     }
 
     /// `AdvancedBtnClick()`.
     fn advanced_btn_click(self: &Rc<Self>) {
-        let dlg = self.options_dlg();
         let w = self.clone();
-        glib::spawn_future_local(async move {
+        spawn(async move {
             let old = w.core.borrow().settings.passw_options.clone();
-            if let Some(new) = dlg.run(&old).await {
+            if let Some(new) = dialogs::passw_options(ROOT, &old).await {
                 w.apply_passw_options(old, new);
             }
         });
     }
 
-    fn apply_passw_options(&self, old: pwtool_core::generate::PasswOptions, new: pwtool_core::generate::PasswOptions) {
+    fn apply_passw_options(&self, old: PasswOptions, new: PasswOptions) {
         self.core.borrow_mut().settings.passw_options = new.clone();
         if new.min_word_len != old.min_word_len
             || new.max_word_len != old.max_word_len
             || (new.flags ^ old.flags) & pwtool_core::generate::PASSWOPTION_LOWERCASEWORDS != 0
         {
-            let wl = combo_text(&self.combo("WLFNList"));
+            let wl = self.f().text("WLFNList");
             self.load_word_list_file(&wl);
         }
         if new.trigram_file_name != old.trigram_file_name {
             let ok = self.core.borrow_mut().load_trigram_file(&new.trigram_file_name) > 0;
             let errs: Vec<String> = self.core.borrow_mut().startup_errors.drain(..).collect();
             for e in errs {
-                msg(Some(&self.win()), &e, MsgIcon::Error);
+                msg(ROOT, &e, MsgIcon::Error);
             }
             if !ok {
                 self.core.borrow_mut().settings.passw_options.trigram_file_name = old.trigram_file_name.clone();
             }
         }
-        let cs = combo_text(&self.combo("CharSetList"));
+        let cs = self.f().text("CharSetList");
         self.load_char_set(&cs);
         {
             let mut core = self.core.borrow_mut();
@@ -1215,8 +917,15 @@ impl MainWindow {
         }
     }
 
+    /// `MainMenu_File_ProfileClick()`.
+    fn profile_menu_click(&self, i: usize) {
+        let Some(name) = self.core.borrow().profiles.get(i).map(|p| p.profile_name.clone()) else { return };
+        self.load_profile(i);
+        info_box(ROOT, &trl_format("Profile \"%1\" activated.", &[&name]));
+    }
+
     /// `LoadProfile(index)`.
-    pub(super) fn load_profile(&self, i: usize) {
+    pub fn load_profile(&self, i: usize) {
         self.load_profile_inner(i, false);
     }
 
@@ -1229,87 +938,83 @@ impl MainWindow {
         if !is_startup {
             let errs: Vec<String> = self.core.borrow_mut().startup_errors.drain(err_start..).collect();
             for e in errs {
-                msg(Some(&self.win()), &e, MsgIcon::Error);
+                msg(ROOT, &e, MsgIcon::Error);
             }
         }
-        // reflect settings in the controls without mutating combo history lists
         let (s, wl_err) = {
             let core = self.core.borrow();
             (core.settings.clone(), core.word_list_error.is_some())
         };
-        self.check("IncludeCharsCheck").set_active(s.include_chars);
-        self.b.updowns["CharsLengthSpinBtn"].set_position(s.chars_length as i64);
-        set_combo_text(&self.combo("CharSetList"), &s.char_set_text);
+        let f = self.f();
+        f.set_checked("IncludeCharsCheck", s.include_chars);
+        f.set_position("CharsLengthSpinBtn", s.chars_length as i64);
+        f.set_text("CharSetList", &s.char_set_text);
         *self.char_set_input.borrow_mut() = s.char_set_text.clone();
-        self.check("IncludeWordsCheck").set_active(s.include_words);
-        self.b.updowns["WordsNumSpinBtn"].set_position(s.words_num as i64);
-        set_combo_text(&self.combo("WLFNList"), &s.wlfn_text);
+        f.set_checked("IncludeWordsCheck", s.include_words);
+        f.set_position("WordsNumSpinBtn", s.words_num as i64);
+        f.set_text("WLFNList", &s.wlfn_text);
         if !wl_err {
             *self.wl_file_name.borrow_mut() = remove_comment_and_trim(&s.wlfn_text);
             self.wl_file_name_err.borrow_mut().clear();
         } else {
             *self.wl_file_name_err.borrow_mut() = remove_comment_and_trim(&s.wlfn_text);
         }
-        self.check("CombineWordsCharsCheck").set_active(s.combine_words_chars);
-        self.check("SpecifyLengthCheck").set_active(s.passphr_spec_len);
-        self.entry("SpecifyLengthBox").set_text(&s.passphr_spec_len_string);
-        self.check("FormatPasswCheck").set_active(s.format_passw);
-        set_combo_text(&self.combo("FormatList"), &s.format_text);
-        self.label("FormatPasswInfoLbl").set_text("");
-        self.check("RunScriptCheck").set_active(s.run_script);
-        set_combo_text(&self.combo("ScriptList"), &s.script_text);
-        self.entry("NumPasswBox").set_text(&s.num_passw);
-        self.set_action_checked("GenerateMenu_IncludeHeader", s.include_header);
+        f.set_checked("CombineWordsCharsCheck", s.combine_words_chars);
+        f.set_checked("SpecifyLengthCheck", s.passphr_spec_len);
+        f.set_text("SpecifyLengthBox", &s.passphr_spec_len_string);
+        f.set_checked("FormatPasswCheck", s.format_passw);
+        f.set_text("FormatList", &s.format_text);
+        f.set_text("FormatPasswInfoLbl", "");
+        f.set_checked("RunScriptCheck", s.run_script);
+        f.set_text("ScriptList", &s.script_text);
+        f.set_text("NumPasswBox", &s.num_passw);
+        f.set_menu_checked("GenerateMenu_IncludeHeader", s.include_header);
         self.update_char_set_info();
         self.update_word_list_info();
         self.set_advanced_btn_caption();
         self.include_chars_check_click();
-        self.select_profile_in_list(i);
-    }
-
-    /// `ProfileList->ItemIndex = i` without loading the profile again.
-    fn select_profile_in_list(&self, i: usize) {
         self.profile_list_guard.set(true);
-        self.combo("ProfileList").set_active(Some(i as u32));
+        f.set_item_index("ProfileList", Some(i));
         self.profile_list_guard.set(false);
     }
 
     /// Copy the controls into the generator settings.
     fn sync_settings(&self) {
+        let f = self.f();
         let mut core = self.core.borrow_mut();
         let s = &mut core.settings;
-        s.include_chars = self.check("IncludeCharsCheck").is_active();
-        s.chars_length = self.b.updowns["CharsLengthSpinBtn"].position() as i32;
-        s.char_set_text = combo_text(&self.combo("CharSetList"));
-        s.char_set_list = self.combo_items("CharSetList");
+        s.include_chars = f.checked("IncludeCharsCheck");
+        s.chars_length = f.position("CharsLengthSpinBtn") as i32;
+        s.char_set_text = f.text("CharSetList");
+        s.char_set_list = f.items("CharSetList");
         if s.char_set_list.is_empty() {
             s.char_set_list.push(pwtool_core::config::CHARSETLIST_DEFAULTENTRIES[0].into());
         }
-        s.include_words = self.check("IncludeWordsCheck").is_active();
-        s.words_num = self.b.updowns["WordsNumSpinBtn"].position() as i32;
-        s.wlfn_text = combo_text(&self.combo("WLFNList"));
-        s.wlfn_list = self.combo_items("WLFNList");
+        s.include_words = f.checked("IncludeWordsCheck");
+        s.words_num = f.position("WordsNumSpinBtn") as i32;
+        s.wlfn_text = f.text("WLFNList");
+        s.wlfn_list = f.items("WLFNList");
         if s.wlfn_list.is_empty() {
             s.wlfn_list.push(WLFNLIST_DEFAULT.into());
         }
-        s.combine_words_chars = self.check("CombineWordsCharsCheck").is_active();
-        s.passphr_spec_len = self.check("SpecifyLengthCheck").is_active();
-        s.passphr_spec_len_string = self.entry("SpecifyLengthBox").text().to_string();
-        s.format_passw = self.check("FormatPasswCheck").is_active();
-        s.format_text = combo_text(&self.combo("FormatList"));
-        s.format_list = self.combo_items("FormatList");
-        s.run_script = self.check("RunScriptCheck").is_active();
-        s.script_text = combo_text(&self.combo("ScriptList"));
-        s.script_list = self.combo_items("ScriptList");
-        s.num_passw = self.entry("NumPasswBox").text().to_string();
-        s.include_header = self.action_checked("GenerateMenu_IncludeHeader");
+        s.combine_words_chars = f.checked("CombineWordsCharsCheck");
+        s.passphr_spec_len = f.checked("SpecifyLengthCheck");
+        s.passphr_spec_len_string = f.text("SpecifyLengthBox");
+        s.format_passw = f.checked("FormatPasswCheck");
+        s.format_text = f.text("FormatList");
+        s.format_list = f.items("FormatList");
+        s.run_script = f.checked("RunScriptCheck");
+        s.script_text = f.text("ScriptList");
+        s.script_list = f.items("ScriptList");
+        s.num_passw = f.text("NumPasswBox");
+        s.include_header = f.menu_checked("GenerateMenu_IncludeHeader");
     }
 
     // ----------------------------------------------------------------------
     // generation
 
     /// `GeneratePassw()`.
-    pub(super) fn generate_passw(self: &Rc<Self>, dest: GenDest) {
+    pub fn generate_passw(self: &Rc<Self>, dest: GenDest) {
         if self.generating.get() {
             self.gen_target.borrow_mut().take();
             return;
@@ -1319,26 +1024,7 @@ impl MainWindow {
         self.wlfn_list_exit();
         self.sync_settings();
         let w = self.clone();
-        glib::spawn_future_local(async move { w.generate_passw_async(dest).await });
-    }
-
-    /// Generate a password from a hot key when the main window was hidden, and
-    /// re-minimize/hide once done (matches `Main.cpp:OnHotKey`).
-    pub(super) fn generate_passw_and_rehide(self: &Rc<Self>, dest: GenDest) {
-        if self.generating.get() {
-            self.gen_target.borrow_mut().take();
-            return;
-        }
-        self.generating.set(true);
-        self.char_set_list_exit();
-        self.wlfn_list_exit();
-        self.sync_settings();
-        let w = self.clone();
-        glib::spawn_future_local(async move {
-            let w2 = w.clone();
-            w.generate_passw_async(dest).await;
-            w2.window.minimize();
-        });
+        spawn(async move { w.generate_passw_async(dest).await });
     }
 
     async fn generate_passw_async(self: Rc<Self>, dest: GenDest) {
@@ -1346,37 +1032,35 @@ impl MainWindow {
         impl Drop for GenGuard {
             fn drop(&mut self) {
                 self.0.generating.set(false);
+                self.0.busy.set(false);
             }
         }
         let gen_guard = GenGuard(self.clone());
         let gen_target = self.gen_target.borrow_mut().take();
-        let win = self.win();
         let mut num: u64 = 1;
         let mut file: Option<(PathBuf, bool)> = None;
         if dest.is_list() {
-            match parse_num_passwords(&self.entry("NumPasswBox").text()) {
+            match parse_num_passwords(&self.f().text("NumPasswBox")) {
                 Some(n) => num = n,
                 None => {
-                    msg_box(
-                        Some(&win),
+                    dialogs::ask(
+                        ROOT,
                         &trl_format("Invalid number of passwords.\nAllowed range is %1-%2.", &["2", &PASSW_MAX_NUM.to_string()]),
                         MsgIcon::Error,
                         MsgButtons::Ok,
                         false,
                     )
                     .await;
-                    self.entry("NumPasswBox").grab_focus();
+                    self.f().focus("NumPasswBox");
                     return;
                 }
             }
             if dest == GenDest::FileList {
-                let dlg = gtk::FileDialog::new();
-                let Ok(f) = dlg.save_future(Some(&self.window)).await else { return };
-                let Some(path) = f.path() else { return };
+                let Some(path) = crate::vcl::dialogs::save_file(&trl("Save password list"), None, None, &[]).await else { return };
                 let mut append = false;
                 if path.exists() {
-                    match msg_box(
-                        Some(&win),
+                    match dialogs::ask(
+                        ROOT,
                         &trl("The selected file already exists. Do you\nwant to append passwords to this file\n(existing passwords will be preserved),\nor do you want to completely overwrite it?\n\nYes -> append passwords,\nNo -> overwrite file,\nCancel -> cancel process."),
                         MsgIcon::Question,
                         MsgButtons::YesNoCancel,
@@ -1395,74 +1079,60 @@ impl MainWindow {
 
         if dest == GenDest::GuiList {
             if let Some(pl) = self.passw_list.borrow().as_ref() {
-                pl.win.close();
+                pl.close();
             }
         }
 
-        // limits, passphrase length, script
-        let mut req: GenRequest;
         {
             let core = self.core.borrow();
             let s = &core.settings;
-            if s.include_chars
-                && s.passw_options.flags & PASSWOPTION_EACHCHARONLYONCE != 0
-                && s.chars_length > core.passw_gen.custom_char_set_unique_size()
-            {
+            if s.include_chars && s.passw_options.flags & PASSWOPTION_EACHCHARONLYONCE != 0 && s.chars_length > core.passw_gen.custom_char_set_unique_size() {
                 let n = core.passw_gen.custom_char_set_unique_size();
                 drop(core);
-                msg_box(
-                    Some(&win),
-                    &trl_format(
-                        "If the option \"Each character must occur\nonly once\" is activated, the password length\nis limited to %1 unique characters.",
-                        &[&n.to_string()],
-                    ),
+                dialogs::ask(
+                    ROOT,
+                    &trl_format("If the option \"Each character must occur\nonly once\" is activated, the password length\nis limited to %1 unique characters.", &[&n.to_string()]),
                     MsgIcon::Warning,
                     MsgButtons::Ok,
                     false,
                 )
                 .await;
-                self.b.updowns["CharsLengthSpinBtn"].set_position(n as i64);
+                self.f().set_position("CharsLengthSpinBtn", n as i64);
                 self.core.borrow_mut().settings.chars_length = n;
             }
         }
         if self.core.borrow().settings.include_words && self.core.borrow().settings.passphr_spec_len {
             let t = self.core.borrow().settings.passphr_spec_len_string.clone();
             if let Err(e) = parse_passphrase_length(&t) {
-                msg_box(Some(&win), &e, MsgIcon::Error, MsgButtons::Ok, false).await;
+                dialogs::ask(ROOT, &e, MsgIcon::Error, MsgButtons::Ok, false).await;
                 return;
             }
         }
         {
             let core = self.core.borrow();
             let s = &core.settings;
-            if s.include_words
-                && s.passw_options.flags & PASSWOPTION_EACHWORDONLYONCE != 0
-                && s.words_num > core.passw_gen.word_list_size()
-            {
+            if s.include_words && s.passw_options.flags & PASSWOPTION_EACHWORDONLYONCE != 0 && s.words_num > core.passw_gen.word_list_size() {
                 let n = core.passw_gen.word_list_size();
                 drop(core);
-                msg_box(
-                    Some(&win),
-                    &trl_format(
-                        "If the option \"Each word must occur only\nonce\" is activated, the number of words\nis limited to the size of the word list (%1).",
-                        &[&n.to_string()],
-                    ),
+                dialogs::ask(
+                    ROOT,
+                    &trl_format("If the option \"Each word must occur only\nonce\" is activated, the number of words\nis limited to the size of the word list (%1).", &[&n.to_string()]),
                     MsgIcon::Warning,
                     MsgButtons::Ok,
                     false,
                 )
                 .await;
-                self.b.updowns["WordsNumSpinBtn"].set_position(n as i64);
+                self.f().set_position("WordsNumSpinBtn", n as i64);
                 self.core.borrow_mut().settings.words_num = n;
             }
         }
-        match self.core.borrow().gen_request(dest, num) {
-            Ok(r) => req = r,
+        let mut req: GenRequest = match self.core.borrow().gen_request(dest, num) {
+            Ok(r) => r,
             Err(e) => {
-                msg(Some(&win), &e, MsgIcon::Error);
+                msg(ROOT, &e, MsgIcon::Error);
                 return;
             }
-        }
+        };
 
         // script
         let script_file = self.core.borrow().script_file();
@@ -1480,13 +1150,13 @@ impl MainWindow {
                     let r = s.load_file(&path, Some(&core.passw_gen), &mut *RandomPool::global());
                     drop(core);
                     if let Err(e) = r {
-                        msg(Some(&win), &trl_format("Error while loading script:\n%1.", &[&e.to_string()]), MsgIcon::Error);
+                        msg(ROOT, &trl_format("Error while loading script:\n%1.", &[&e.to_string()]), MsgIcon::Error);
                         return;
                     }
                     s
                 }
             };
-            let text = combo_text(&self.combo("ScriptList"));
+            let text = self.f().text("ScriptList");
             self.add_entry_to_list("ScriptList", &text, true);
             script = Some(s);
         }
@@ -1497,7 +1167,6 @@ impl MainWindow {
             req.file_newline = self.core.borrow().newline.clone();
         }
 
-        // random generator: deterministic, or a pool derived from the main pool
         let det = self.key_seeded_prng.borrow_mut().take();
         let is_pool = det.is_none();
         let rng = match det {
@@ -1557,8 +1226,7 @@ impl MainWindow {
                     }
                     s.call_generate(g, r, n, p, sec).map_err(|e| e.to_string())
                 };
-                let hook_arg: Option<(&mut pwtool_core::generate::ScriptHook<'_>, bool)> =
-                    if has_script { Some((&mut hook, standalone)) } else { None };
+                let hook_arg: Option<(&mut pwtool_core::generate::ScriptHook<'_>, bool)> = if has_script { Some((&mut hook, standalone)) } else { None };
                 let r = generate(&pg, &mut rng, &req, common.as_ref(), hook_arg, &c2, &p2, &mut |p, s| {
                     match dest {
                         GenDest::GuiList | GenDest::ClipboardList => {
@@ -1574,17 +1242,12 @@ impl MainWindow {
                                     list.push_str(&h);
                                     list_utf16_units = hdr_u16;
                                 }
-                                let est_bytes = hdr_u16
-                                    .saturating_add(item_u16.saturating_mul(req.num_passw))
-                                    .saturating_add(1)
-                                    .saturating_mul(2);
+                                let est_bytes = hdr_u16.saturating_add(item_u16.saturating_mul(req.num_passw)).saturating_add(1).saturating_mul(2);
                                 if est_bytes > pwtool_core::generate::PASSWLIST_MAX_BYTES {
                                     return Err(trl("The estimated list size will probably exceed\nthe internal memory limit.\nPlease reduce the number of passwords"));
                                 }
                             }
-                            if list_utf16_units.saturating_add(item_u16).saturating_add(1).saturating_mul(2)
-                                > pwtool_core::generate::PASSWLIST_MAX_BYTES
-                            {
+                            if list_utf16_units.saturating_add(item_u16).saturating_add(1).saturating_mul(2) > pwtool_core::generate::PASSWLIST_MAX_BYTES {
                                 mem_limit_reached = true;
                                 return Ok(SinkAction::Stop);
                             }
@@ -1596,8 +1259,7 @@ impl MainWindow {
                             if file_writer.is_none() {
                                 if let Some((path, append)) = &file {
                                     let opened = if *append {
-                                        let enc = pwtool_core::text_file::detect_file_encoding(path, file_encoding)
-                                            .unwrap_or(file_encoding);
+                                        let enc = pwtool_core::text_file::detect_file_encoding(path, file_encoding).unwrap_or(file_encoding);
                                         std::fs::OpenOptions::new().append(true).open(path).map(|f| (f, enc))
                                     } else {
                                         std::fs::File::create(path).and_then(|mut f| {
@@ -1627,9 +1289,7 @@ impl MainWindow {
                 });
                 if let Ok(s) = &r {
                     if matches!(dest, GenDest::GuiList | GenDest::ClipboardList) && s.count != 0 {
-                        if req.include_header
-                            && (s.count < req.num_passw || (check_each && s.total_security < MAX_ENTROPY as f64))
-                        {
+                        if req.include_header && (s.count < req.num_passw || (check_each && s.total_security < MAX_ENTROPY as f64)) {
                             let h = passw_list_header(s.count, s.first_security, s.total_security);
                             if h.len() <= header_len {
                                 let mut n = Zeroizing::new(h);
@@ -1649,49 +1309,32 @@ impl MainWindow {
                 }
                 r
             };
-            let _ = tx.send_blocking((
-                GenOutput { pg, rng, script, result, single, list, mem_limit_reached },
-                common,
-            ));
+            let _ = tx.send_blocking((GenOutput { pg, rng, script, result, single, list, mem_limit_reached }, common));
         });
 
-        // Wait for the worker directly (`rx.recv()`): fast generations (< 1 ms)
-        // finish immediately without sleeping or toggling `window.set_sensitive`,
-        // which on GTK4/Wayland resets pointer-crossing state on hovered buttons
-        // and can swallow the next click.
         let mut progress_win: Option<Rc<ProgressWindow>> = None;
-        let mut win_disabled = false;
         let start = std::time::Instant::now();
         let mut last_prog = 0u64;
         let mut last_prog_change = std::time::Instant::now();
         let mut recv_fut = std::pin::pin!(rx.recv());
         let out = loop {
-            let tick = std::pin::pin!(glib::timeout_future(std::time::Duration::from_millis(25)));
+            let tick = std::pin::pin!(pwtool_app::rt::sleep(Duration::from_millis(25)));
             match futures_util::future::select(recv_fut, tick).await {
-                futures_util::future::Either::Left((res, _)) => {
-                    break res.expect("generator thread exited unexpectedly");
-                }
-                futures_util::future::Either::Right((_, pending)) => {
-                    recv_fut = pending;
-                }
+                futures_util::future::Either::Left((res, _)) => break res.expect("generator thread exited unexpectedly"),
+                futures_util::future::Either::Right((_, pending)) => recv_fut = pending,
             }
             let elapsed = start.elapsed().as_millis();
-            if !win_disabled && ((dest == GenDest::GuiList && num >= 100_000) || elapsed >= 200) {
-                self.window.set_sensitive(false);
-                win_disabled = true;
+            if !self.busy.get() && ((dest == GenDest::GuiList && num >= 100_000) || elapsed >= 200) {
+                self.busy.set(true);
             }
             let cur_prog = progress.load(Ordering::Relaxed);
             if cur_prog != last_prog {
                 last_prog = cur_prog;
                 last_prog_change = std::time::Instant::now();
             }
-            if progress_win.is_none()
-                && ((dest == GenDest::GuiList && num >= 100_000) || elapsed >= 1000)
-            {
+            if progress_win.is_none() && ((dest == GenDest::GuiList && num >= 100_000) || elapsed >= 1000) {
                 let title = trl(if num == 1 { "Generating password" } else { "Generating password list" });
-                let pw = ProgressWindow::new(&win, &title, "");
-                pw.win.present();
-                progress_win = Some(pw);
+                progress_win = Some(ProgressWindow::new(ROOT, &title, ""));
             }
             if let Some(pw) = &progress_win {
                 if pw.cancel.get() {
@@ -1708,11 +1351,9 @@ impl MainWindow {
             }
         };
         if let Some(pw) = progress_win {
-            pw.win.destroy();
+            pw.close();
         }
-        if win_disabled {
-            self.window.set_sensitive(true);
-        }
+        self.busy.set(false);
         let (out, common) = out;
         {
             let mut core = self.core.borrow_mut();
@@ -1723,7 +1364,6 @@ impl MainWindow {
         let cancelled = cancel.load(Ordering::Relaxed);
         *self.script.borrow_mut() = if cancelled && out.result.is_err() { None } else { out.script };
         if let GenRng::Det(g) = out.rng {
-            // keep the state of the deterministic generator
             *self.key_seeded_prng.borrow_mut() = Some(g);
         }
         let summary = match out.result {
@@ -1734,14 +1374,7 @@ impl MainWindow {
                     self.update_entropy_progress(false);
                 }
                 if cancelled && script_cancel.is_some() {
-                    msg_box(
-                        Some(&win),
-                        &trl("Process was cancelled by the user"),
-                        MsgIcon::Warning,
-                        MsgButtons::Ok,
-                        false,
-                    )
-                    .await;
+                    dialogs::ask(ROOT, &trl("Process was cancelled by the user"), MsgIcon::Warning, MsgButtons::Ok, false).await;
                     return;
                 }
                 let mut m = trl_format("An error has occurred during password generation:\n%1.", &[&e]);
@@ -1752,19 +1385,16 @@ impl MainWindow {
                         &[&progress.load(Ordering::Relaxed).to_string(), &p.file_name().unwrap_or_default().to_string_lossy()],
                     ));
                 }
-                msg(Some(&win), &m, MsgIcon::Error);
+                msg(ROOT, &m, MsgIcon::Error);
                 return;
             }
         };
         if out.mem_limit_reached {
             let count_str = summary.count.to_string();
-            self.entry("NumPasswBox").set_text(&count_str);
-            msg_box(
-                Some(&win),
-                &trl_format(
-                    "The memory limit of the password list has been reached. The number of passwords has been reduced to %1.",
-                    &[&count_str],
-                ),
+            self.f().set_text("NumPasswBox", &count_str);
+            dialogs::ask(
+                ROOT,
+                &trl_format("The memory limit of the password list has been reached. The number of passwords has been reduced to %1.", &[&count_str]),
                 MsgIcon::Warning,
                 MsgButtons::Ok,
                 false,
@@ -1772,13 +1402,9 @@ impl MainWindow {
             .await;
         }
         if cancelled && num > 1 {
-            msg_box(
-                Some(&win),
-                &format!(
-                    "{}.\n\n{}",
-                    trl("Process was cancelled by the user"),
-                    trl_format("%1 passwords generated.", &[&summary.count.to_string()])
-                ),
+            dialogs::ask(
+                ROOT,
+                &format!("{}.\n\n{}", trl("Process was cancelled by the user"), trl_format("%1 passwords generated.", &[&summary.count.to_string()])),
                 MsgIcon::Warning,
                 MsgButtons::Ok,
                 false,
@@ -1786,23 +1412,22 @@ impl MainWindow {
             .await;
         }
         if dest == GenDest::GuiSingle || summary.count > 0 {
-            self.label("FormatPasswInfoLbl").set_text(&summary.format_info);
+            self.f().set_text("FormatPasswInfoLbl", &summary.format_info);
         }
         if summary.count != 0 {
             match dest {
                 GenDest::GuiSingle if gen_target.is_some() => {
-                    if let Some(e) = &gen_target {
-                        e.set_text(&out.single);
+                    if let Some(f) = &gen_target {
+                        f(&out.single);
                     }
                 }
                 GenDest::GuiSingle => {
-                    let e = self.entry("PasswBox");
                     let tag = self.passw_box_tag.get();
                     self.passw_box_tag.set(0);
-                    e.set_text(&out.single);
+                    self.f().set_text("PasswBox", &out.single);
                     self.passw_box_tag.set(tag | PASSWBOX_TAG_PASSW_GEN);
                     self.show_passw_info(summary.last_len, summary.last_security, summary.last_common_match, false);
-                    e.grab_focus();
+                    self.f().focus("PasswBox");
                     let core = self.core.borrow();
                     if core.config.auto_clear_passw {
                         self.auto_clear_passw_cnt.set(core.config.auto_clear_passw_time);
@@ -1810,11 +1435,10 @@ impl MainWindow {
                 }
                 GenDest::GuiList => {
                     if self.passw_list.borrow().is_none() {
-                        let w_enc = Rc::downgrade(&self);
-                        let w_db = Rc::downgrade(&self);
+                        let w_enc = self.weak();
                         let pl = PasswListWindow::new(
-                            &win,
-                            Box::new(move || {
+                            ROOT,
+                            Rc::new(move || {
                                 w_enc
                                     .upgrade()
                                     .map(|w| {
@@ -1823,82 +1447,60 @@ impl MainWindow {
                                     })
                                     .unwrap_or((pwtool_core::text_file::CharEncoding::Utf8, "\n".to_string()))
                             }),
-                            Box::new(move || {
-                                w_db.upgrade()
-                                    .and_then(|w| w.passw_mng.borrow().as_ref().map(|m| m.is_db_open()))
-                                    .unwrap_or(false)
-                            }),
                         );
                         pl.load_config(&self.core.borrow().ini);
-                        self.attach_entropy_events(&pl.win);
-                        let w = Rc::downgrade(&self);
-                        let pl2 = Rc::downgrade(&pl);
-                        pl.b.action("PasswListMenu_EncryptCopy").connect_activate(move |_, _| {
-                            if let (Some(w), Some(pl)) = (w.upgrade(), pl2.upgrade()) {
-                                let text = pl.selected_text();
-                                let parent = pl.win.clone();
-                                glib::spawn_future_local(async move { w.crypt_text(true, Some(text), Some(parent)).await });
-                            }
-                        });
-                        let w = Rc::downgrade(&self);
-                        let pl2 = Rc::downgrade(&pl);
-                        pl.b.action("PasswListMenu_AddToDb").connect_activate(move |_, _| {
-                            if let (Some(w), Some(pl)) = (w.upgrade(), pl2.upgrade()) {
-                                w.add_passw_to_db(&pl.selected_text(), true, None);
+                        let w_db = self.weak();
+                        let plf = Rc::downgrade(&pl.form);
+                        pl.form.on_menu("PasswListMenu_AddToDb", move |_| {
+                            if let (Some(w), Some(f)) = (w_db.upgrade(), plf.upgrade()) {
+                                let t = f.selected_text("PasswList");
+                                if !t.is_empty() {
+                                    w.add_passw_to_db(&t, true, None);
+                                }
                             }
                         });
                         *self.passw_list.borrow_mut() = Some(pl);
                     }
-                    self.passw_list.borrow().as_ref().unwrap().show_list(&out.list);
+                    self.passw_list.borrow().as_ref().unwrap().show_list(ROOT, &out.list);
                 }
                 GenDest::ClipboardList => {
-                    super::clipboard::set_data(&out.list);
-                    info_box(&win, &trl("Password list copied to clipboard."));
+                    clipboard::set_data(&out.list);
+                    info_box(ROOT, &trl("Password list copied to clipboard."));
                 }
                 GenDest::FileList => {
                     let name = file.as_ref().map(|(p, _)| p.file_name().unwrap_or_default().to_string_lossy().to_string()).unwrap_or_default();
-                    msg(
-                        Some(&win),
-                        &trl_format("File \"%1\" successfully created.\n\n%2 passwords written.", &[&name, &summary.count.to_string()]),
-                        MsgIcon::Info,
-                    );
+                    msg(ROOT, &trl_format("File \"%1\" successfully created.\n\n%2 passwords written.", &[&name, &summary.count.to_string()]), MsgIcon::Info);
                 }
                 GenDest::Clipboard => {
-                    super::clipboard::set_data(&out.single);
-                    show_tray_info(&self, &trl("Password copied to clipboard."), false);
+                    clipboard::set_data(&out.single);
+                    self.show_tray_info(&trl("Password copied to clipboard."), false);
                 }
                 GenDest::Autotype => {
                     let delay = self.core.borrow().config.autotype_delay.clamp(0, 10000) as u32;
                     let mut strokes = Vec::new();
-                    super::autotype::string_sequence(&out.single, delay, &mut strokes);
-                    self.send_keys(&win, strokes, false);
+                    pwtool_app::autotype::string_sequence(&out.single, delay, &mut strokes);
+                    self.send_keys(strokes, false);
                 }
                 GenDest::MsgBox => {
                     let len = out.single.chars().count();
                     if len > 1000 {
-                        msg_box(
-                            Some(&win),
+                        dialogs::ask(
+                            ROOT,
                             &trl("Password is too long to show it in a\nmessage box like this.\n\nIt will be copied to the clipboard."),
                             MsgIcon::Warning,
                             MsgButtons::Ok,
                             false,
                         )
                         .await;
-                        super::clipboard::set_data(&out.single);
-                        show_tray_info(&self, &trl("Password copied to clipboard."), false);
+                        clipboard::set_data(&out.single);
                     } else {
                         let text = pwtool_core::unicode::format_w(
                             &trl("The generated password is:\n\n%1\n\nThe estimated security is %2 bits.\n\nYes -> copy password to clipboard,\nNo -> generate new password,\nCancel -> cancel process."),
                             &[&out.single, &format_float_1(summary.last_security)],
                         );
-                        match msg_box(Some(&win), &text, MsgIcon::Info, MsgButtons::YesNoCancel, false).await {
-                            MsgResult::Yes => {
-                                super::clipboard::set_data(&out.single);
-                                show_tray_info(&self, &trl("Password copied to clipboard."), false);
-                            }
-                            MsgResult::No => {
-                                self.generate_passw(GenDest::MsgBox);
-                            }
+                        match dialogs::ask(ROOT, &text, MsgIcon::Info, MsgButtons::YesNoCancel, false).await {
+                            MsgResult::Yes => clipboard::set_data(&out.single),
+                            MsgResult::No => self.generate_passw(GenDest::MsgBox),
                             _ => {}
                         }
                     }
@@ -1917,201 +1519,144 @@ impl MainWindow {
     // entropy, timer
 
     /// `UpdateEntropyProgress()`.
-    fn update_entropy_progress(&self, force: bool) {
-        let _ = force;
-        let status: gtk::Label = self.b.get("StatusBar.label");
+    fn update_entropy_progress(&self, _force: bool) {
         if !self.show_ent_progress.get() {
-            status.set_text(&format!("{PROGRAM_NAME} {}", version_string()));
+            self.f().set_text("StatusBar", &format!("{PROGRAM_NAME} {}", version_string()));
             return;
         }
-        let em = EntropyManager::global();
-        let bits = em.entropy_bits();
+        let bits = EntropyManager::global().entropy_bits();
         let max = bits == pwtool_core::random::entropy::MAX_ENTROPYBITS;
         let pct = (100.0 * bits as f64 / MAX_ENTROPY as f64).round().min(100.0) as i32;
-        let text = format!(
-            "{}{}{} ({}%)",
-            if max { ">" } else { "" },
-            bits,
-            if bits > MAX_ENTROPY { "+" } else { "" },
-            pct
-        );
-        status.set_text(&format!("{PROGRAM_NAME} {}        E  {text}", version_string()));
+        let text = format!("{}{}{} ({}%)", if max { ">" } else { "" }, bits, if bits > MAX_ENTROPY { "+" } else { "" }, pct);
+        self.f().set_text("StatusBar", &format!("{PROGRAM_NAME} {}        E  {text}", version_string()));
     }
 
-    fn setup_entropy_events(self: &Rc<Self>) {
-        let win = self.window.clone();
-        self.attach_entropy_events(&win);
-    }
-
-    /// Collect entropy from keyboard and mouse events of a window (the
-    /// original does this application-wide in `AppMessage()`).
-    pub fn attach_entropy_events(self: &Rc<Self>, window: &impl IsA<gtk::Widget>) {
-        let key = gtk::EventControllerKey::new();
-        key.set_propagation_phase(gtk::PropagationPhase::Capture);
-        let w = Rc::downgrade(self);
-        key.connect_key_pressed(move |_, k, code, _| {
-            if let Some(w) = w.upgrade() {
-                w.notify_user_action();
-                let mut em = EntropyManager::global();
-                let bits = em.add_event(&mut RandomPool::global(), EntropyEventType::Keyboard, k.into_glib() as u64, code as u64, &[], ENTROPY_KEYBOARD);
-                drop(em);
-                if bits != 0 {
-                    w.update_entropy_progress(false);
+    /// Entropy from the keyboard and mouse events of a window (the original
+    /// does this application-wide in `AppMessage()`).
+    fn collect_entropy(&self, ctx: &egui::Context) {
+        let events = ctx.input(|i| i.events.clone());
+        let mut changed = false;
+        for e in events {
+            let mut em = EntropyManager::global();
+            let bits = match e {
+                egui::Event::Key { key, pressed: true, physical_key, .. } => em.add_event(
+                    &mut RandomPool::global(),
+                    EntropyEventType::Keyboard,
+                    key as u64,
+                    physical_key.map_or(0, |k| k as u64),
+                    &[],
+                    ENTROPY_KEYBOARD,
+                ),
+                egui::Event::PointerButton { pos, button, pressed: true, .. } => {
+                    let p = ((pos.x as u64) << 32) | (pos.y as u64 & 0xffff_ffff);
+                    em.add_event(&mut RandomPool::global(), EntropyEventType::MouseClick, button as u64, p, &[], ENTROPY_MOUSECLICK)
                 }
-            }
-            glib::Propagation::Proceed
-        });
-        window.add_controller(key);
-        let click = gtk::EventControllerLegacy::new();
-        click.set_propagation_phase(gtk::PropagationPhase::Capture);
-        let w = Rc::downgrade(self);
-        click.connect_event(move |_, ev| {
-            if let Some(btn) = ev.downcast_ref::<gdk::ButtonEvent>() {
-                if btn.event_type() == gdk::EventType::ButtonPress {
-                    if let Some(w) = w.upgrade() {
-                        w.notify_user_action();
-                        let (x, y) = ev.position().unwrap_or((0.0, 0.0));
-                        let pos = ((x as u64) << 32) | (y as u64 & 0xffff_ffff);
-                        let bits = EntropyManager::global().add_event(
-                            &mut RandomPool::global(),
-                            EntropyEventType::MouseClick,
-                            btn.button() as u64,
-                            pos,
-                            &[],
-                            ENTROPY_MOUSECLICK,
-                        );
-                        if bits != 0 {
-                            w.update_entropy_progress(false);
+                egui::Event::PointerMoved(pos) => {
+                    if self.last_pointer.replace(Some(pos)) == Some(pos) {
+                        0
+                    } else {
+                        let c = self.mouse_move_cnt.get();
+                        if c == 0 {
+                            self.mouse_move_cnt.set(50 + pwtool_core::random::fprng_rand_range(50) as i32);
+                            let p = ((pos.x as u64) << 32) | (pos.y as u64 & 0xffff_ffff);
+                            em.add_event(&mut RandomPool::global(), EntropyEventType::MouseMove, 0, p, &[], ENTROPY_MOUSEMOVE)
+                        } else {
+                            self.mouse_move_cnt.set(c - 1);
+                            0
                         }
                     }
                 }
-            }
-            glib::Propagation::Proceed
-        });
-        window.add_controller(click);
-        let motion = gtk::EventControllerMotion::new();
-        let w = Rc::downgrade(self);
-        motion.connect_motion(move |_, x, y| {
-            if let Some(w) = w.upgrade() {
-                let c = w.mouse_move_cnt.get();
-                if c == 0 {
-                    let pos = ((x as u64) << 32) | (y as u64 & 0xffff_ffff);
-                    let bits = EntropyManager::global().add_event(&mut RandomPool::global(), EntropyEventType::MouseMove, 0, pos, &[], ENTROPY_MOUSEMOVE);
-                    w.mouse_move_cnt.set(50 + pwtool_core::random::fprng_rand_range(50) as i32);
-                    if bits != 0 {
-                        w.update_entropy_progress(false);
+                egui::Event::MouseWheel { delta, .. } => {
+                    let c = self.mouse_wheel_cnt.get();
+                    if c <= 0 {
+                        self.mouse_wheel_cnt.set(pwtool_core::random::fprng_rand_range(10) as i32);
+                        em.add_event(
+                            &mut RandomPool::global(),
+                            EntropyEventType::MouseWheel,
+                            delta.x.to_bits() as u64,
+                            delta.y.to_bits() as u64,
+                            &[],
+                            ENTROPY_MOUSECLICK,
+                        )
+                    } else {
+                        self.mouse_wheel_cnt.set(c - 1);
+                        0
                     }
-                } else {
-                    w.mouse_move_cnt.set(c - 1);
                 }
-            }
-        });
-        window.add_controller(motion);
-        let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::BOTH_AXES);
-        scroll.set_propagation_phase(gtk::PropagationPhase::Capture);
-        let w = Rc::downgrade(self);
-        scroll.connect_scroll(move |_, dx, dy| {
-            if let Some(w) = w.upgrade() {
-                w.notify_user_action();
-                let c = w.mouse_wheel_cnt.get();
-                if c <= 0 {
-                    let bits = EntropyManager::global().add_event(
-                        &mut RandomPool::global(),
-                        EntropyEventType::MouseWheel,
-                        dx.to_bits(),
-                        dy.to_bits(),
-                        &[],
-                        ENTROPY_MOUSECLICK,
-                    );
-                    w.mouse_wheel_cnt.set(pwtool_core::random::fprng_rand_range(10) as i32);
-                    if bits != 0 {
-                        w.update_entropy_progress(false);
-                    }
-                } else {
-                    w.mouse_wheel_cnt.set(c - 1);
-                }
-            }
-            glib::Propagation::Proceed
-        });
-        window.add_controller(scroll);
+                _ => 0,
+            };
+            changed |= bits != 0;
+        }
+        if changed {
+            self.update_entropy_progress(false);
+        }
     }
 
     /// `TimerTick()` (every second).
     fn setup_timer(self: &Rc<Self>) {
-        let w = Rc::downgrade(self);
-        glib::timeout_add_seconds_local(1, move || {
-            let Some(w) = w.upgrade() else { return glib::ControlFlow::Break };
-            let mut c = w.timer_cnt.get();
-            c[0] += 1;
-            if c[0] == TIMER_TOUCHPOOL {
-                RandomPool::global().touch_pool();
-                c[0] = 0;
+        let w = self.weak();
+        spawn(async move {
+            loop {
+                pwtool_app::rt::sleep(Duration::from_secs(1)).await;
+                let Some(w) = w.upgrade() else { return };
+                w.timer_tick();
             }
-            c[1] += 1;
-            if c[1] == TIMER_RANDOMIZE {
-                EntropyManager::global().add_system_entropy(&mut RandomPool::global());
-                w.update_entropy_progress(false);
-                c[1] = 0;
-            }
-            c[2] += 1;
-            if c[2] == TIMER_MOVEPOOL {
-                RandomPool::global().move_pool();
-                c[2] = 0;
-            }
-            c[3] += 1;
-            if c[3] == TIMER_WRITESEEDFILE {
-                w.core.borrow().write_rand_seed_file();
-                c[3] = 0;
-            }
-            w.timer_cnt.set(c);
-            w.tools_timer();
-            w.tray_timer();
-            let n = w.auto_clear_clip_cnt.get();
-            if n > 0 {
-                w.auto_clear_clip_cnt.set(n - 1);
-                if n == 1 {
-                    super::clipboard::clear_data(false, |_| {});
-                }
-            }
-            let n = w.auto_clear_passw_cnt.get();
-            if n > 0 {
-                w.auto_clear_passw_cnt.set(n - 1);
-                if n == 1 {
-                    let tag = w.passw_box_tag.get();
-                    w.passw_box_tag.set(0);
-                    w.entry("PasswBox").set_text("");
-                    w.passw_box_tag.set(tag);
-                    w.label("PasswInfoLbl").set_text(&trl("Click on \"Generate\""));
-                    w.label("PasswInfoLbl").set_tooltip_text(None);
-                    w.passw_bar.clear();
-                }
-            }
-            glib::ControlFlow::Continue
         });
     }
 
-    fn timer_info(&self) {
-        let kind = pwtool_core::random::hrtimer::timer_kind();
-        let name = match kind {
-            pwtool_core::random::hrtimer::TimerKind::Rdtsc => "Time stamp counter (RDTSC instruction)",
-            pwtool_core::random::hrtimer::TimerKind::Qpc => "CLOCK_MONOTONIC_RAW",
-            pwtool_core::random::hrtimer::TimerKind::None => "N/A",
-        };
-        let val = pwtool_core::random::hrtimer::high_res_timer().to_string();
-        msg(
-            Some(&self.win()),
-            &trl_format("High-resolution timer used:\n%1.\n\nCurrent value: %2.", &[name, &val]),
-            MsgIcon::Info,
-        );
+    fn timer_tick(&self) {
+        let mut c = self.timer_cnt.get();
+        c[0] += 1;
+        if c[0] == TIMER_TOUCHPOOL {
+            RandomPool::global().touch_pool();
+            c[0] = 0;
+        }
+        c[1] += 1;
+        if c[1] == TIMER_RANDOMIZE {
+            EntropyManager::global().add_system_entropy(&mut RandomPool::global());
+            self.update_entropy_progress(false);
+            c[1] = 0;
+        }
+        c[2] += 1;
+        if c[2] == TIMER_MOVEPOOL {
+            RandomPool::global().move_pool();
+            c[2] = 0;
+        }
+        c[3] += 1;
+        if c[3] == TIMER_WRITESEEDFILE {
+            self.core.borrow().write_rand_seed_file();
+            c[3] = 0;
+        }
+        self.timer_cnt.set(c);
+        self.tray_timer();
+        self.tools_timer();
+        let n = self.auto_clear_clip_cnt.get();
+        if n > 0 {
+            self.auto_clear_clip_cnt.set(n - 1);
+            if n == 1 {
+                clipboard::clear_data(false);
+            }
+        }
+        let n = self.auto_clear_passw_cnt.get();
+        if n > 0 {
+            self.auto_clear_passw_cnt.set(n - 1);
+            if n == 1 {
+                let tag = self.passw_box_tag.get();
+                self.passw_box_tag.set(0);
+                self.f().set_text("PasswBox", "");
+                self.passw_box_tag.set(tag);
+                self.f().set_text("PasswInfoLbl", &trl("Click on \"Generate\""));
+                self.f().set_hint("PasswInfoLbl", "");
+                self.passw_bar.clear();
+            }
+        }
     }
 
     fn add_entropy_from_file(self: &Rc<Self>) {
-        let dlg = gtk::FileDialog::new();
-        dlg.set_title(&trl("Select high-entropy file"));
-        let w = self.clone();
-        dlg.open(Some(&self.window), gio::Cancellable::NONE, move |r| {
-            let Ok(f) = r else { return };
-            let Some(p) = f.path() else { return };
+        let w = self.weak();
+        spawn(async move {
+            let Some(p) = crate::vcl::dialogs::open_file(&trl("Select high-entropy file"), None, &[]).await else { return };
+            let Some(w) = w.upgrade() else { return };
             use std::io::Read;
             match std::fs::File::open(&p) {
                 Ok(mut f) => {
@@ -2119,150 +1664,154 @@ impl MainWindow {
                     let mut buf = Zeroizing::new(vec![0u8; 65_536]);
                     let mut total: u64 = 0;
                     let mut bits: u32 = 0;
-                    let mut em = EntropyManager::global();
-                    let mut pool = RandomPool::global();
-                    while total < MAX_BYTES {
-                        let to_read = (MAX_BYTES - total).min(buf.len() as u64) as usize;
-                        match f.read(&mut buf[..to_read]) {
-                            Ok(0) => break,
-                            Ok(n) => {
-                                bits = bits.saturating_add(em.add_data(&mut pool, &buf[..n], 4.0, 4.0));
-                                total += n as u64;
+                    {
+                        let mut em = EntropyManager::global();
+                        let mut pool = RandomPool::global();
+                        while total < MAX_BYTES {
+                            let to_read = (MAX_BYTES - total).min(buf.len() as u64) as usize;
+                            match f.read(&mut buf[..to_read]) {
+                                Ok(0) | Err(_) => break,
+                                Ok(n) => {
+                                    bits = bits.saturating_add(em.add_data(&mut pool, &buf[..n], 4.0, 4.0));
+                                    total += n as u64;
+                                }
                             }
-                            Err(_) => break,
                         }
+                        pool.flush();
                     }
-                    pool.flush();
-                    drop(pool);
-                    drop(em);
                     w.update_entropy_progress(true);
-                    msg(
-                        Some(&w.win()),
-                        &trl_format("%1 bits of entropy have been added to the random pool.", &[&bits.to_string()]),
-                        MsgIcon::Info,
-                    );
+                    msg(ROOT, &trl_format("%1 bits of entropy have been added to the random pool.", &[&bits.to_string()]), MsgIcon::Info);
                 }
-                Err(_) => msg(Some(&w.win()), &trl("Could not open file."), MsgIcon::Error),
+                Err(_) => msg(ROOT, &trl("Could not open file."), MsgIcon::Error),
             }
         });
     }
 
     fn deactivate_det_rand_gen(&self) {
         if self.key_seeded_prng.borrow_mut().take().is_some() {
-            self.window.set_title(Some(&self.default_title));
-            self.b.action("MainMenu_Tools_DetermRandGen_Reset").set_enabled(false);
-            self.b.action("MainMenu_Tools_DetermRandGen_Deactivate").set_enabled(false);
-            info_box(&self.win(), &trl("Deterministic random generator has been DEACTIVATED."));
-        }
-    }
-
-    /// Activate the deterministic generator with a master password
-    /// (`MainMenu_Tools_DetermRandGen_SetupClick` + `UseKeySeededPRNG`).
-    pub fn use_key_seeded_prng(&self, passw: &str) {
-        self.use_key_seeded_prng_with(pwtool_core::mp_passw_gen::deterministic_generator(passw));
-    }
-
-    /// Generate a formatted password using the deterministic PRNG if active,
-    /// otherwise the global random pool (used by PassCube's FormatPW menu).
-    pub fn format_passw_with_active_rng(&self, format: &str) -> Option<Zeroizing<String>> {
-        let pg = PasswordGenerator::new();
-        let f = pwtool_core::unicode::str_to_w32(format);
-        let r = if let Some(det) = self.key_seeded_prng.borrow_mut().as_mut() {
-            pg.get_format_passw(det, &f, 0, None, 16000, None)
-        } else {
-            pg.get_format_passw(&mut *RandomPool::global(), &f, 0, None, 16000, None)
-        };
-        if r.passw.is_empty() {
-            None
-        } else {
-            Some(pwtool_core::unicode::w32_to_string_secure(&r.passw))
+            self.set_title(PROGRAM_NAME);
+            self.f().set_menu_enabled("MainMenu_Tools_DetermRandGen_Reset", false);
+            self.f().set_menu_enabled("MainMenu_Tools_DetermRandGen_Deactivate", false);
+            info_box(ROOT, &trl("Deterministic random generator has been DEACTIVATED."));
         }
     }
 
     /// `UseKeySeededPRNG()` with an already seeded generator.
     pub fn use_key_seeded_prng_with(&self, prng: AesCtrPrng) {
         *self.key_seeded_prng.borrow_mut() = Some(prng);
-        let title = pwtool_core::unicode::format_w(
+        self.set_title(&pwtool_core::unicode::format_w(
             "%1 (%2)",
             &[PROGRAM_NAME, &trl("WARNING: Random generator is deterministic (press F7 to deactivate)!")],
-        );
-        self.window.set_title(Some(&title));
-        self.b.action("MainMenu_Tools_DetermRandGen_Reset").set_enabled(true);
-        self.b.action("MainMenu_Tools_DetermRandGen_Deactivate").set_enabled(true);
-        info_box(&self.win(), &trl("Deterministic random generator has been ACTIVATED."));
+        ));
+        self.f().set_menu_enabled("MainMenu_Tools_DetermRandGen_Reset", true);
+        self.f().set_menu_enabled("MainMenu_Tools_DetermRandGen_Deactivate", true);
+        info_box(ROOT, &trl("Deterministic random generator has been ACTIVATED."));
     }
 
     // ----------------------------------------------------------------------
-    // configuration
+    // configuration, closing
 
     /// `SaveConfig()`.
     pub fn save_config(&self) -> bool {
         self.save_config_to(None)
     }
 
-    /// `SaveConfig(sFileName)`: `path` = backup file.
     pub fn save_config_to(&self, path: Option<&std::path::Path>) -> bool {
         self.sync_settings();
+        let f = self.f();
+        {
+            let mut core = self.core.borrow_mut();
+            if let Some(pl) = self.passw_list.borrow().as_ref() {
+                pl.save_config(&mut core.ini);
+            }
+            let ini = &mut core.ini;
+            // the window has the fixed size of its form; written for the
+            // original (PLAN.md, section 7)
+            let size = crate::vcl::window_size(&f, &crate::windows::ctx());
+            ini.write_integer("Main", "WindowWidth", size.x.round() as i64);
+            ini.write_integer("Main", "WindowHeight", size.y.round() as i64);
+            ini.write_bool("Main", "AlwaysOnTop", f.menu_checked("MainMenu_Options_AlwaysOnTop"));
+            ini.write_bool("Main", "HidePassw", f.checked("TogglePasswBtn"));
+            ini.write_bool("Main", "HideEntropyProgress", f.menu_checked("MainMenu_Options_HideEntProgress"));
+            ini.write_bool("Main", "SaveSettingsOnExit", f.menu_checked("MainMenu_Options_SaveSettingsOnExit"));
+            ini.write_bool("Main", "PasswEditable", f.menu_checked("PasswBoxMenu_Editable"));
+            ini.write_bool("Main", "EnablePasswTest", f.menu_checked("PasswBoxMenu_EnablePasswTest"));
+        }
         self.save_tools_config();
-        let mut core = self.core.borrow_mut();
-        let ini = &mut core.ini;
-        ini.write_integer("Main", "WindowWidth", self.window.width() as i64);
-        ini.write_integer("Main", "WindowHeight", self.window.height() as i64);
-        ini.write_bool("Main", "AlwaysOnTop", self.action_checked("MainMenu_Options_AlwaysOnTop"));
-        ini.write_bool("Main", "HidePassw", self.b.get::<gtk::ToggleButton>("TogglePasswBtn").is_active());
-        ini.write_bool("Main", "HideEntropyProgress", self.action_checked("MainMenu_Options_HideEntProgress"));
-        ini.write_bool("Main", "SaveSettingsOnExit", self.action_checked("MainMenu_Options_SaveSettingsOnExit"));
-        ini.write_bool("Main", "PasswEditable", self.action_checked("PasswBoxMenu_Editable"));
-        ini.write_bool("Main", "EnablePasswTest", self.action_checked("PasswBoxMenu_EnablePasswTest"));
-        match core.save_config_to(path) {
+        let r = self.core.borrow_mut().save_config_to(path);
+        match r {
             Ok(()) => true,
             Err(e) => {
-                drop(core);
-                msg(
-                    Some(&self.win()),
-                    &trl_format("Error while writing to configuration file:\n%1.", &[&e.to_string()]),
-                    MsgIcon::Error,
-                );
+                msg(ROOT, &trl_format("Error while writing to configuration file:\n%1.", &[&e.to_string()]), MsgIcon::Error);
                 false
             }
         }
     }
 
-    fn on_close(&self) {
+    /// `FormCloseQuery()`: whether the window may close now; asks if needed
+    /// and closes it again afterwards.
+    pub fn close_query(self: &Rc<Self>) -> bool {
+        // the password manager closes its database first (`CloseQuery()`)
+        if !self.close_confirmed.get() && !pwtool_app::app::restart_requested() {
+            if let Some(pm) = self.tools.passw_mng.borrow().clone().filter(|pm| pm.is_db_open()) {
+                spawn(async move {
+                    if pm.close_query().await {
+                        windows::ctx().send_viewport_cmd(ViewportCommand::Close);
+                    }
+                });
+                return false;
+            }
+        }
+        if self.close_confirmed.get() || !self.core.borrow().config.confirm_exit || pwtool_app::app::restart_requested() {
+            return true;
+        }
+        let w = self.clone();
+        spawn(async move {
+            if dialogs::ask(ROOT, &trl_format("Are you sure you want to exit\n%1?", &[PROGRAM_NAME]), MsgIcon::Question, MsgButtons::YesNo, true).await
+                == MsgResult::Yes
+            {
+                w.close_confirmed.set(true);
+                windows::ctx().send_viewport_cmd(ViewportCommand::Close);
+            }
+        });
+        false
+    }
+
+    /// `FormClose()`.
+    pub fn on_close(&self) {
         self.abort_autotype();
-        if (self.action_checked("MainMenu_Options_SaveSettingsOnExit") && !self.core.borrow().cmd.config_readonly)
-            || crate::app::restart_requested()
+        pwtool_app::autotype::close_session();
+        pwtool_app::platform::hotkeys::deactivate();
+        if (self.f().menu_checked("MainMenu_Options_SaveSettingsOnExit") && !self.core.borrow().cmd.config_readonly)
+            || pwtool_app::app::restart_requested()
         {
             self.save_config();
         }
-        let seed_ok = self.core.borrow().write_rand_seed_file();
-        if !seed_ok {
-            let path = self
-                .core
-                .borrow()
-                .paths
-                .data_dir
-                .join(crate::program::PROGRAM_RANDSEEDFILE)
-                .to_string_lossy()
-                .into_owned();
-            eprintln!(
-                "{}",
-                trl_format("Could not write to random seed file\n\"%1\".", &[&path])
-            );
+        if !self.core.borrow().write_rand_seed_file() {
+            let path = self.core.borrow().paths.data_dir.join(PROGRAM_RANDSEEDFILE).to_string_lossy().into_owned();
+            eprintln!("{}", trl_format("Could not write to random seed file\n\"%1\".", &[&path]));
         }
-        super::autotype::close_session();
-        if let Some(app) = self.window.application() {
-            super::active_window::stop_watching(&app);
-        }
-        crate::ui::hotkeys::deactivate();
         let tag = self.passw_box_tag.get();
         self.passw_box_tag.set(0);
-        self.entry("PasswBox").set_text("");
+        self.f().set_text("PasswBox", "");
         self.passw_box_tag.set(tag);
     }
 
-    /// Profile given on the command line or configured for start-up
-    /// (`StartupAction()`).
+    /// `OnEndSession()`: save the database and the configuration before the
+    /// user session ends.
+    pub fn on_end_session(&self) {
+        let mng = self.tools.passw_mng.borrow().clone();
+        if let Some(m) = mng {
+            m.save_db_on_shutdown();
+        }
+        if self.f().menu_checked("MainMenu_Options_SaveSettingsOnExit") && !self.core.borrow().cmd.config_readonly {
+            self.save_config();
+        }
+        self.core.borrow().write_rand_seed_file();
+        self.passw_enter().clear_passw_cache();
+    }
+
+    /// Profile given on the command line or configured for start-up.
     fn startup_profile(&self) {
         let (name, from_cmd) = {
             let core = self.core.borrow();
@@ -2290,8 +1839,12 @@ impl MainWindow {
         }
     }
 
-    /// Open PassCube on startup if configured or requested on command line.
-    pub fn startup_open_manager(self: &Rc<Self>) {
+    /// Show start-up errors (`FormActivate`, once).
+    pub fn show_startup_errors(self: &Rc<Self>) {
+        if self.startup_shown.replace(true) {
+            return;
+        }
+        self.auto_check_updates();
         let open_mng = {
             let core = self.core.borrow();
             core.config.database.open_window_on_startup || core.cmd.passw_db_file_name.is_some()
@@ -2299,25 +1852,62 @@ impl MainWindow {
         if open_mng {
             self.show_passw_manager();
         }
-    }
-
-    /// Show start-up errors and start the automatic update check
-    /// (`FormActivate`, runs once when the main window is first shown).
-    pub fn show_startup_errors(self: &Rc<Self>) {
-        if self.startup_shown.replace(true) {
-            return;
-        }
-        self.auto_check_updates();
         let errs: Vec<String> = self.core.borrow_mut().startup_errors.drain(..).collect();
         if !errs.is_empty() {
             let mut m = trl_format("%1 encountered %2 error(s) during startup:", &[PROGRAM_NAME, &errs.len().to_string()]);
             for e in errs {
                 m.push_str("\n- ");
                 m.push_str(&e);
+                eprintln!("pwtool: {e}");
             }
-            msg(Some(&self.win()), &m, MsgIcon::Warning);
+            msg(ROOT, &m, MsgIcon::Warning);
         }
     }
+}
+
+/// What the main window shows each frame.
+pub struct MainContent(pub Rc<MainWindow>);
+
+impl Content for MainContent {
+    fn ui(&self, ui: &mut Ui) {
+        let w = &self.0;
+        w.update_passw_box_menu();
+        w.update_tool_menus();
+        if let Some(pl) = w.passw_list.borrow().as_ref() {
+            pl.update_menu(w.db_open());
+        }
+        let title = w.title.borrow().clone();
+        if *w.title_shown.borrow() != title {
+            ui.ctx().send_viewport_cmd(ViewportCommand::Title(title.clone()));
+            *w.title_shown.borrow_mut() = title;
+        }
+        let busy = w.busy.get();
+        ui.add_enabled_ui(!busy, |ui| Content::ui(&*w.form, ui));
+    }
+}
+
+fn open_uri(uri: &str) {
+    let target = if uri.contains("://") || std::path::Path::new(uri).exists() { uri.to_string() } else { format!("https://{uri}") };
+    if !pwtool_app::platform::sys::system_open(std::ffi::OsStr::new(&target)) {
+        msg(ROOT, &trl_format("Could not open file/execute operation\n\"%1\".", &[&target]), MsgIcon::Error);
+    }
+}
+
+fn timer_info() {
+    let kind = pwtool_core::random::hrtimer::timer_kind();
+    let name = match kind {
+        pwtool_core::random::hrtimer::TimerKind::Rdtsc => "Time stamp counter (RDTSC instruction)",
+        pwtool_core::random::hrtimer::TimerKind::Qpc => {
+            if cfg!(windows) {
+                "QueryPerformanceCounter"
+            } else {
+                "CLOCK_MONOTONIC_RAW"
+            }
+        }
+        pwtool_core::random::hrtimer::TimerKind::None => "N/A",
+    };
+    let val = pwtool_core::random::hrtimer::high_res_timer().to_string();
+    msg(ROOT, &trl_format("High-resolution timer used:\n%1.\n\nCurrent value: %2.", &[name, &val]), MsgIcon::Info);
 }
 
 fn build_char_set_help() -> String {
@@ -2382,5 +1972,8 @@ fn build_format_help() -> String {
     s
 }
 
-#[allow(dead_code)]
-fn _unused(_: gdk::Texture) {}
+/// "Always on Top" for the main window.
+fn set_always_on_top(on: bool) {
+    let level = if on { egui::WindowLevel::AlwaysOnTop } else { egui::WindowLevel::Normal };
+    windows::ctx().send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::WindowLevel(level));
+}

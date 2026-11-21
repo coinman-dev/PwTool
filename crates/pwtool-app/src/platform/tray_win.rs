@@ -1,6 +1,6 @@
 //! System tray icon on Windows (`TTrayIcon` with `TrayMenu` of the main
 //! form): `Shell_NotifyIconW` with a popup menu. The icon is owned by a
-//! hidden window in its own thread; commands are sent to the GTK main loop
+//! hidden window in its own thread; commands are sent to the GUI thread
 //! through a channel. Same interface as the StatusNotifierItem version
 //! (`tray.rs`).
 
@@ -57,7 +57,7 @@ const WM_TRAY_CALLBACK: u32 = WM_APP + 1;
 const WM_TRAY_UPDATE: u32 = WM_APP + 2;
 const WM_TRAY_BALLOON: u32 = WM_APP + 3;
 
-/// State shared between the GTK thread and the tray thread.
+/// State shared between the GUI thread and the tray thread.
 struct Shared {
     title: String,
     icon: Vec<Icon>,
@@ -96,7 +96,7 @@ fn copy_wide(dst: &mut [u16], s: &str) {
     dst[n] = 0;
 }
 
-/// GTK mnemonic ("_File", "__") to a Windows menu label ("&File", "_").
+/// Mnemonic of the tray menus ("_File", "__") to a Windows menu label ("&File", "_").
 fn menu_label(label: &str) -> String {
     let mut out = String::new();
     let mut chars = label.chars().peekable();

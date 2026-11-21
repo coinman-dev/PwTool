@@ -1,8 +1,8 @@
 //! VCL keyboard shortcuts (`TShortCut`: low byte virtual key, 0x2000 Shift,
 //! 0x4000 Ctrl, 0x8000 Alt) as text and as accelerator strings.
 
-/// VCL `ShortCut` value → accelerator string in GTK syntax ("<Control><Alt>p"),
-/// also used for the XDG GlobalShortcuts portal.
+/// VCL `ShortCut` value → accelerator string ("<Control><Alt>p") for the XDG
+/// GlobalShortcuts portal.
 pub fn shortcut_to_accel(code: i64) -> Option<String> {
     let mut s = String::new();
     if code & 0x4000 != 0 {

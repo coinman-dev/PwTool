@@ -1,45 +1,36 @@
 //! Profile editor (`TProfileEditDlg`, `upstream/src/main/ProfileEditor.cpp`)
-//! with `TMainForm::CreateProfile()`/`DeleteProfile()`. Child module of
-//! `main_window`.
-
-#![allow(deprecated)]
+//! with `TMainForm::CreateProfile()`. Child module of `main_window`.
 
 use pwtool_core::config::{PROFILES_MAX_NUM, find_profile};
 
 use super::*;
 
 const CONFIG_ID: &str = "ProfileEditor";
+const WINDOW_ID: &str = "ProfileEditor";
 
 /// Result flags of [`MainWindow::profile_editor`].
 pub const PROFILE_MODIFIED: u32 = 1;
 pub const PROFILE_ADDED: u32 = 2;
 
 pub(super) struct ProfileEditDlg {
-    b: Built,
-    win: gtk::Window,
-    list: gtk::ListBox,
+    form: Rc<Form>,
     modified: Cell<bool>,
     added: Cell<bool>,
     exit_after_add: Cell<bool>,
     done: RefCell<Option<async_channel::Sender<()>>>,
-    main: std::rc::Weak<MainWindow>,
+    main: Weak<MainWindow>,
+}
+
+fn parent() -> ViewportId {
+    ViewportId::from_hash_of(WINDOW_ID)
 }
 
 impl ProfileEditDlg {
     fn new(main: &Rc<MainWindow>) -> Rc<Self> {
-        let b = build_form(load_form("ProfileEditor"), "ProfileEditor");
-        let win = super::super::dialogs::form_window(&b, Some(&main.win()), true);
-        win.set_hide_on_close(true);
-        {
-            let core = main.core.borrow();
-            b.get::<gtk::CheckButton>("ConfirmCheck").set_active(core.ini.read_bool(CONFIG_ID, "Confirm", true));
-        }
-        let list: gtk::ListBox = b.get("ProfileList.list");
-        list.set_selection_mode(gtk::SelectionMode::Multiple);
+        let form = dialogs::load("ProfileEditor");
+        form.set_checked("ConfirmCheck", main.core.borrow().ini.read_bool(CONFIG_ID, "Confirm", true));
         let d = Rc::new(ProfileEditDlg {
-            b,
-            win,
-            list,
+            form,
             modified: Cell::new(false),
             added: Cell::new(false),
             exit_after_add: Cell::new(false),
@@ -47,146 +38,93 @@ impl ProfileEditDlg {
             main: Rc::downgrade(main),
         });
         d.fill_list();
-        d.connect();
-        main.attach_entropy_events(&d.win);
+        let dd = Rc::downgrade(&d);
+        d.form.on_any(move |e| {
+            let Some(d) = dd.upgrade() else { return };
+            use crate::vcl::Event::*;
+            match e {
+                Change(n) if n == "ProfileList" => d.list_click(),
+                DblClick(n) if n == "ProfileList" => d.load(),
+                Change(n) if n == "ProfileNameBox" => d.form.set_enabled("AddBtn", !d.form.text("ProfileNameBox").is_empty()),
+                Enter(n) if n == "ProfileNameBox" => {
+                    let d = d.clone();
+                    spawn(async move { d.add().await });
+                }
+                Click(n) => match n.as_str() {
+                    "AddBtn" => {
+                        let d = d.clone();
+                        spawn(async move { d.add().await });
+                    }
+                    "LoadBtn" => d.load(),
+                    "DeleteBtn" => {
+                        let d = d.clone();
+                        spawn(async move { d.delete().await });
+                    }
+                    "MoveUpBtn" => d.move_by(-1),
+                    "MoveDownBtn" => d.move_by(1),
+                    "CloseBtn" => d.close(),
+                    _ => {}
+                },
+                _ => {}
+            }
+        });
         d
     }
 
-    fn btn(&self, n: &str) -> gtk::Button {
-        self.b.get(n)
-    }
-
-    fn name_box(&self) -> gtk::Entry {
-        self.b.get("ProfileNameBox")
+    fn close(&self) {
+        if let Some(m) = self.main.upgrade() {
+            m.close_tool(WINDOW_ID);
+        }
+        if let Some(tx) = self.done.borrow_mut().take() {
+            let _ = tx.try_send(());
+        }
     }
 
     fn fill_list(&self) {
-        while let Some(c) = self.list.first_child() {
-            self.list.remove(&c);
-        }
         let Some(main) = self.main.upgrade() else { return };
-        for p in &main.core.borrow().profiles {
-            let mut name = p.profile_name.clone();
-            if p.advanced_passw_options.is_some() {
-                name.push_str(" [+]");
-            }
-            let l = gtk::Label::new(Some(&name));
-            l.set_xalign(0.0);
-            l.set_margin_start(4);
-            self.list.append(&l);
-        }
+        let names: Vec<String> = main
+            .core
+            .borrow()
+            .profiles
+            .iter()
+            .map(|p| if p.advanced_passw_options.is_some() { format!("{} [+]", p.profile_name) } else { p.profile_name.clone() })
+            .collect();
+        self.form.set_items("ProfileList", names);
     }
 
     fn selected(&self) -> Vec<usize> {
-        let mut v: Vec<usize> = self.list.selected_rows().iter().map(|r| r.index() as usize).collect();
-        v.sort_unstable();
-        v
-    }
-
-    fn select_only(&self, idx: usize) {
-        self.list.unselect_all();
-        if let Some(r) = self.list.row_at_index(idx as i32) {
-            self.list.select_row(Some(&r));
-        }
-    }
-
-    fn connect(self: &Rc<Self>) {
-        let d = Rc::downgrade(self);
-        self.list.connect_selected_rows_changed(move |_| {
-            if let Some(d) = d.upgrade() {
-                d.list_click();
-            }
-        });
-        let d = Rc::downgrade(self);
-        self.list.connect_row_activated(move |_, _| {
-            if let Some(d) = d.upgrade() {
-                d.load();
-            }
-        });
-        let d = Rc::downgrade(self);
-        self.name_box().connect_changed(move |e| {
-            if let Some(d) = d.upgrade() {
-                d.btn("AddBtn").set_sensitive(e.text_length() != 0);
-            }
-        });
-        let d = Rc::downgrade(self);
-        self.name_box().connect_activate(move |_| {
-            if let Some(d) = d.upgrade() {
-                glib::spawn_future_local(async move { d.add().await });
-            }
-        });
-        let d = Rc::downgrade(self);
-        self.btn("AddBtn").connect_clicked(move |_| {
-            if let Some(d) = d.upgrade() {
-                glib::spawn_future_local(async move { d.add().await });
-            }
-        });
-        let d = Rc::downgrade(self);
-        self.btn("LoadBtn").connect_clicked(move |_| {
-            if let Some(d) = d.upgrade() {
-                d.load();
-            }
-        });
-        let d = Rc::downgrade(self);
-        self.btn("DeleteBtn").connect_clicked(move |_| {
-            if let Some(d) = d.upgrade() {
-                glib::spawn_future_local(async move { d.delete().await });
-            }
-        });
-        let d = Rc::downgrade(self);
-        self.btn("MoveUpBtn").connect_clicked(move |_| {
-            if let Some(d) = d.upgrade() {
-                d.move_by(-1);
-            }
-        });
-        let d = Rc::downgrade(self);
-        self.btn("MoveDownBtn").connect_clicked(move |_| {
-            if let Some(d) = d.upgrade() {
-                d.move_by(1);
-            }
-        });
-        let w = self.win.clone();
-        self.btn("CloseBtn").connect_clicked(move |_| w.close());
-        let d = Rc::downgrade(self);
-        self.win.connect_close_request(move |_| {
-            if let Some(d) = d.upgrade() {
-                if let Some(tx) = d.done.borrow_mut().take() {
-                    let _ = tx.try_send(());
-                }
-            }
-            glib::Propagation::Proceed
-        });
+        self.form.list_selected("ProfileList")
     }
 
     /// `ProfileListClick()`.
     fn list_click(&self) {
         let sel = self.selected();
         let Some(main) = self.main.upgrade() else { return };
+        let f = &self.form;
         match sel.len() {
             0 => {
                 for n in ["LoadBtn", "DeleteBtn", "MoveUpBtn", "MoveDownBtn"] {
-                    self.btn(n).set_sensitive(false);
+                    f.set_enabled(n, false);
                 }
             }
             1 => {
                 let i = sel[0];
                 let count = main.core.borrow().profiles.len();
                 if let Some(p) = main.core.borrow().profiles.get(i) {
-                    self.name_box().set_text(&p.profile_name);
-                    self.b
-                        .get::<gtk::CheckButton>("SaveAdvancedOptionsCheck")
-                        .set_active(p.advanced_passw_options.is_some());
+                    f.set_text("ProfileNameBox", &p.profile_name);
+                    f.set_checked("SaveAdvancedOptionsCheck", p.advanced_passw_options.is_some());
                 }
-                self.btn("LoadBtn").set_sensitive(true);
-                self.btn("DeleteBtn").set_sensitive(true);
-                self.btn("MoveUpBtn").set_sensitive(count > 1 && i > 0);
-                self.btn("MoveDownBtn").set_sensitive(count > 1 && i + 1 < count);
+                f.set_enabled("AddBtn", true);
+                f.set_enabled("LoadBtn", true);
+                f.set_enabled("DeleteBtn", true);
+                f.set_enabled("MoveUpBtn", count > 1 && i > 0);
+                f.set_enabled("MoveDownBtn", count > 1 && i + 1 < count);
             }
             _ => {
-                self.btn("LoadBtn").set_sensitive(false);
-                self.btn("DeleteBtn").set_sensitive(true);
-                self.btn("MoveUpBtn").set_sensitive(false);
-                self.btn("MoveDownBtn").set_sensitive(false);
+                f.set_enabled("LoadBtn", false);
+                f.set_enabled("DeleteBtn", true);
+                f.set_enabled("MoveUpBtn", false);
+                f.set_enabled("MoveDownBtn", false);
             }
         }
     }
@@ -204,14 +142,14 @@ impl ProfileEditDlg {
         if sel.is_empty() {
             return;
         }
-        if self.b.get::<gtk::CheckButton>("ConfirmCheck").is_active() {
+        if self.form.checked("ConfirmCheck") {
             let m = if sel.len() == 1 {
                 let name = main.core.borrow().profiles.get(sel[0]).map(|p| p.profile_name.clone()).unwrap_or_default();
                 trl_format("Delete profile \"%1\"?", &[&name])
             } else {
                 trl_format("Delete %1 profiles?", &[&sel.len().to_string()])
             };
-            if msg_box(Some(&self.win), &m, MsgIcon::Warning, MsgButtons::YesNo, true).await != MsgResult::Yes {
+            if dialogs::ask(parent(), &m, MsgIcon::Warning, MsgButtons::YesNo, true).await != MsgResult::Yes {
                 return;
             }
         }
@@ -226,35 +164,28 @@ impl ProfileEditDlg {
         self.fill_list();
         self.list_click();
         self.modified.set(true);
+        main.update_profile_controls();
+        main.update_tray_icon();
     }
 
     async fn add(&self) {
         let Some(main) = self.main.upgrade() else { return };
-        let name = self.name_box().text().to_string();
+        let name = self.form.text("ProfileNameBox");
         if name.is_empty() {
             return;
         }
-        let save_adv = self.b.get::<gtk::CheckButton>("SaveAdvancedOptionsCheck").is_active();
+        let save_adv = self.form.checked("SaveAdvancedOptionsCheck");
         let found = find_profile(&main.core.borrow().profiles, &name);
         if found.is_none() && main.core.borrow().profiles.len() >= PROFILES_MAX_NUM {
-            msg_box(
-                Some(&self.win),
-                &trl_format(
-                    "Maximum number of profiles (%1) reached.\nPlease delete or overwrite profiles.",
-                    &[&PROFILES_MAX_NUM.to_string()],
-                ),
-                MsgIcon::Warning,
-                MsgButtons::Ok,
-                false,
-            )
-            .await;
+            let m = trl_format("Maximum number of profiles (%1) reached.\nPlease delete or overwrite profiles.", &[&PROFILES_MAX_NUM.to_string()]);
+            dialogs::ask(parent(), &m, MsgIcon::Warning, MsgButtons::Ok, false).await;
             return;
         }
         if let Some(i) = found {
             let existing = main.core.borrow().profiles[i].profile_name.clone();
-            if self.b.get::<gtk::CheckButton>("ConfirmCheck").is_active()
-                && msg_box(
-                    Some(&self.win),
+            if self.form.checked("ConfirmCheck")
+                && dialogs::ask(
+                    parent(),
                     &trl_format("A profile with the name \"%1\" already exists.\nDo you want to overwrite it?", &[&existing]),
                     MsgIcon::Warning,
                     MsgButtons::YesNo,
@@ -263,18 +194,22 @@ impl ProfileEditDlg {
                 .await
                     != MsgResult::Yes
             {
-                self.name_box().grab_focus();
+                self.form.focus("ProfileNameBox");
                 return;
             }
         }
         main.create_profile(&name, save_adv, found);
         self.fill_list();
-        self.name_box().set_text("");
-        self.name_box().grab_focus();
+        self.list_click();
+        self.form.set_text("ProfileNameBox", "");
+        self.form.set_enabled("AddBtn", false);
+        self.form.focus("ProfileNameBox");
         self.modified.set(true);
         self.added.set(true);
+        main.update_profile_controls();
+        main.update_tray_icon();
         if self.exit_after_add.get() {
-            self.win.close();
+            self.close();
         }
     }
 
@@ -289,14 +224,15 @@ impl ProfileEditDlg {
         }
         main.core.borrow_mut().profiles.swap(i, j as usize);
         self.fill_list();
-        self.select_only(j as usize);
+        self.form.set_item_index("ProfileList", Some(j as usize));
+        self.list_click();
         self.modified.set(true);
+        main.update_profile_controls();
+        main.update_tray_icon();
     }
 
-    fn save_config(&self, ini: &mut pwtool_core::config::IniFile) {
-        ini.write_integer(CONFIG_ID, "WindowHeight", self.win.default_height() as i64);
-        ini.write_integer(CONFIG_ID, "WindowWidth", self.win.default_width() as i64);
-        ini.write_bool(CONFIG_ID, "Confirm", self.b.get::<gtk::CheckButton>("ConfirmCheck").is_active());
+    pub(super) fn save_config(&self, ini: &mut pwtool_core::config::IniFile) {
+        ini.write_bool(CONFIG_ID, "Confirm", self.form.checked("ConfirmCheck"));
     }
 }
 
@@ -304,32 +240,43 @@ impl MainWindow {
     /// `TProfileEditDlg::Execute()`: returns `PROFILE_MODIFIED` /
     /// `PROFILE_ADDED` flags.
     pub(super) async fn profile_editor(self: &Rc<Self>, exit_after_add: bool) -> u32 {
-        let existing = self.profile_dlg.borrow().clone();
+        let existing = self.tools.profile_dlg.borrow().clone();
         let dlg = match existing {
             Some(d) => d,
             None => {
                 let d = ProfileEditDlg::new(self);
-                *self.profile_dlg.borrow_mut() = Some(d.clone());
+                *self.tools.profile_dlg.borrow_mut() = Some(d.clone());
                 d
             }
         };
+        if windows::is_open(parent()) {
+            return 0;
+        }
         dlg.modified.set(false);
         dlg.added.set(false);
         dlg.exit_after_add.set(exit_after_add);
         dlg.fill_list();
-        dlg.list.unselect_all();
+        dlg.form.clear_selection("ProfileList");
         dlg.list_click();
-        dlg.name_box().set_text("");
-        dlg.btn("AddBtn").set_sensitive(false);
+        dlg.form.set_text("ProfileNameBox", "");
+        dlg.form.set_enabled("AddBtn", false);
         let (tx, rx) = async_channel::bounded(1);
-        *dlg.done.borrow_mut() = Some(tx);
-        dlg.win.present();
-        dlg.name_box().grab_focus();
+        *dlg.done.borrow_mut() = Some(tx.clone());
+        let win = self.show_tool(WINDOW_ID, CONFIG_ID, true, &dlg.form, ROOT, true);
+        let w = self.weak();
+        let wid = Rc::downgrade(&win);
+        *win.on_close.borrow_mut() = Some(Box::new(move || {
+            if let (Some(w), Some(win)) = (w.upgrade(), wid.upgrade()) {
+                w.remember_size(WINDOW_ID, &win);
+            }
+            let _ = tx.try_send(());
+            true
+        }));
+        dlg.form.focus("ProfileNameBox");
         let _ = rx.recv().await;
         let mut flags = 0;
         if dlg.modified.get() {
             flags |= PROFILE_MODIFIED;
-            self.update_profile_controls();
         }
         if dlg.added.get() {
             flags |= PROFILE_ADDED;
@@ -346,34 +293,5 @@ impl MainWindow {
             Some(i) if i < core.profiles.len() => core.profiles[i] = p,
             _ => core.profiles.push(p),
         }
-    }
-
-    pub(super) fn save_profile_editor_config(&self, ini: &mut pwtool_core::config::IniFile) {
-        if let Some(d) = self.profile_dlg.borrow().as_ref() {
-            d.save_config(ini);
-        }
-    }
-
-    pub(super) fn connect_profile_editor(self: &Rc<Self>) {
-        for name in ["MainMenu_File_Profile_ProfileEditor", "TrayMenu_Profile_ProfileEditor"] {
-            self.act(name, |w| {
-                let w = w.clone();
-                glib::spawn_future_local(async move {
-                    w.profile_editor(false).await;
-                });
-            });
-        }
-        self.click("AddProfileBtn", |w| {
-            let w = w.clone();
-            glib::spawn_future_local(async move {
-                let flags = w.profile_editor(true).await;
-                if flags & PROFILE_ADDED != 0 {
-                    let n = w.core.borrow().profiles.len();
-                    if n > 0 {
-                        w.select_profile_in_list(n - 1);
-                    }
-                }
-            });
-        });
     }
 }

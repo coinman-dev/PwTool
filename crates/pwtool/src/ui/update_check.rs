@@ -3,14 +3,14 @@
 //! repository (`PORT_REPOSITORY`) for the latest release instead of the
 //! version file of the original web site.
 
-use gtk4 as gtk;
-use gtk::gio;
-use gtk::glib;
-use gtk::prelude::*;
+use std::time::Duration;
+
+use egui::ViewportId;
+use pwtool_app::program::{PORT_REPOSITORY, PORT_VERSION, PROGRAM_NAME};
 use pwtool_core::language::{trl, trl_format};
 
-use super::util::{MsgButtons, MsgIcon, MsgResult, msg_box, open_uri};
-use crate::program::{PORT_REPOSITORY, PORT_VERSION, PROGRAM_NAME};
+use super::dialogs::ask;
+use crate::vcl::dialogs::{MsgButtons, MsgIcon, MsgResult};
 
 /// `TUpdateCheckThread::CheckResult`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,7 +23,7 @@ pub enum CheckResult {
     NotConfigured,
 }
 
-/// Latest release: (version, page URL, note).
+/// Latest release.
 struct Release {
     version: String,
     url: String,
@@ -41,66 +41,30 @@ fn repo_path() -> Option<String> {
     (parts.len() == 2).then(|| format!("{}/{}", parts[0], parts[1]))
 }
 
-/// Decode a body with `Transfer-Encoding: chunked`.
-fn dechunk(mut body: &[u8]) -> Vec<u8> {
-    let mut out = Vec::new();
-    loop {
-        let Some(nl) = body.windows(2).position(|w| w == b"\r\n") else { break };
-        let size_str = String::from_utf8_lossy(&body[..nl]);
-        let size = usize::from_str_radix(size_str.split(';').next().unwrap_or("").trim(), 16).unwrap_or(0);
-        body = &body[nl + 2..];
-        if size == 0 || body.len() < size {
-            break;
-        }
-        out.extend_from_slice(&body[..size]);
-        body = &body[(size + 2).min(body.len())..];
-    }
-    out
-}
-
-/// HTTPS GET with GIO (TLS from glib-networking). Returns status and body.
-async fn https_get(host: &str, path: &str, timeout_secs: u32) -> Result<(u32, Vec<u8>), (String, bool)> {
-    let client = gio::SocketClient::new();
-    client.set_tls(true);
-    client.set_timeout(timeout_secs);
-    let map_err = |e: glib::Error| {
-        let timed_out = e.matches(gio::IOErrorEnum::TimedOut);
+/// HTTPS GET in the calling thread: status and body, or (error, timed out).
+fn https_get(url: &str, timeout_secs: u64) -> Result<(u16, Vec<u8>), (String, bool)> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(timeout_secs)))
+        .http_status_as_error(false)
+        .build()
+        .into();
+    let map_err = |e: ureq::Error| {
+        let timed_out = matches!(e, ureq::Error::Timeout(_));
         (e.to_string(), timed_out)
     };
-    let conn = client.connect_to_host_future(host, 443).await.map_err(map_err)?;
-    let req = format!(
-        "GET {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: pwtool-update-check\r\nAccept: application/vnd.github+json\r\nConnection: close\r\n\r\n"
-    );
-    conn.output_stream()
-        .write_all_future(req.into_bytes(), glib::Priority::DEFAULT)
-        .await
-        .map_err(|(_, e)| map_err(e))?;
-    let input = conn.input_stream();
-    let mut data = Vec::new();
-    loop {
-        let buf = vec![0u8; 16384];
-        let (buf, n) = input.read_future(buf, glib::Priority::DEFAULT).await.map_err(|(_, e)| map_err(e))?;
-        if n == 0 {
-            break;
-        }
-        data.extend_from_slice(&buf[..n]);
-        if data.len() > 4 << 20 {
-            return Err(("response too large".into(), false));
-        }
-    }
-    let _ = conn.close_future(glib::Priority::DEFAULT).await;
-    let head_end = data.windows(4).position(|w| w == b"\r\n\r\n").ok_or(("invalid HTTP response".into(), false))?;
-    let head = String::from_utf8_lossy(&data[..head_end]).to_string();
-    let status: u32 = head.split_whitespace().nth(1).and_then(|s| s.parse().ok()).ok_or(("invalid HTTP response".into(), false))?;
-    let mut body = data[head_end + 4..].to_vec();
-    if head.lines().any(|l| l.to_ascii_lowercase().replace(' ', "") == "transfer-encoding:chunked") {
-        body = dechunk(&body);
-    }
+    let mut resp = agent
+        .get(url)
+        .header("User-Agent", "pwtool-update-check")
+        .header("Accept", "application/vnd.github+json")
+        .call()
+        .map_err(map_err)?;
+    let status = resp.status().as_u16();
+    let body = resp.body_mut().with_config().limit(4 << 20).read_to_vec().map_err(map_err)?;
     Ok((status, body))
 }
 
-async fn latest_release(repo: &str, timeout_secs: u32) -> Result<Release, (String, bool)> {
-    let (status, body) = https_get("api.github.com", &format!("/repos/{repo}/releases/latest"), timeout_secs).await?;
+fn latest_release(repo: &str, timeout_secs: u64) -> Result<Release, (String, bool)> {
+    let (status, body) = https_get(&format!("https://api.github.com/repos/{repo}/releases/latest"), timeout_secs)?;
     if !(200..=299).contains(&status) {
         return Err((format!("{} ({status})", trl("Could not download version file")), false));
     }
@@ -116,25 +80,26 @@ async fn latest_release(repo: &str, timeout_secs: u32) -> Result<Release, (Strin
     Ok(Release { version, url, note })
 }
 
-/// `CheckForUpdates()`: with `show_error`, errors (and "up to date") are
-/// reported by the caller/here.
-pub async fn check_for_updates(parent: Option<&gtk::Window>, show_error: bool) -> CheckResult {
+/// `CheckForUpdates()`: with `show_error`, errors are reported here.
+pub async fn check_for_updates(parent: ViewportId, show_error: bool) -> CheckResult {
     let Some(repo) = repo_path() else { return CheckResult::NotConfigured };
-    // Automatic startup check uses a short 3s timeout; manual check uses 15s
+    // automatic start-up check: short timeout; manual check: 15 s
     let timeout_secs = if show_error { 15 } else { 3 };
-    match latest_release(&repo, timeout_secs).await {
+    let (tx, rx) = async_channel::bounded(1);
+    std::thread::spawn(move || {
+        let _ = tx.send_blocking(latest_release(&repo, timeout_secs));
+    });
+    let r = rx.recv().await.unwrap_or_else(|_| Err(("internal error".into(), false)));
+    match r {
         Ok(r) => {
-            if crate::app::compare_versions(&r.version, PORT_VERSION) > 0 {
-                let mut m = trl_format(
-                    "A new version (%1) of %2 is available!\nDo you want to visit the download page now?",
-                    &[&r.version, PROGRAM_NAME],
-                );
+            if pwtool_app::app::compare_versions(&r.version, PORT_VERSION) > 0 {
+                let mut m = trl_format("A new version (%1) of %2 is available!\nDo you want to visit the download page now?", &[&r.version, PROGRAM_NAME]);
                 if !r.note.is_empty() && r.note != r.version && r.note.trim_start_matches(['v', 'V']) != r.version {
                     m.push_str("\n\n");
                     m.push_str(&trl_format("(NOTE: %1)", &[&r.note]));
                 }
-                if msg_box(parent, &m, MsgIcon::Info, MsgButtons::YesNo, false).await == MsgResult::Yes {
-                    open_uri(parent, &r.url);
+                if ask(parent, &m, MsgIcon::Info, MsgButtons::YesNo, false).await == MsgResult::Yes {
+                    pwtool_app::platform::sys::system_open(std::ffi::OsStr::new(&r.url));
                 }
                 CheckResult::Positive
             } else {
@@ -143,14 +108,7 @@ pub async fn check_for_updates(parent: Option<&gtk::Window>, show_error: bool) -
         }
         Err((e, timed_out)) => {
             if show_error {
-                msg_box(
-                    parent,
-                    &trl_format("Error while checking for updates:\n%1.", &[&e]),
-                    MsgIcon::Error,
-                    MsgButtons::Ok,
-                    false,
-                )
-                .await;
+                ask(parent, &trl_format("Error while checking for updates:\n%1.", &[&e]), MsgIcon::Error, MsgButtons::Ok, false).await;
             }
             if timed_out { CheckResult::Timeout } else { CheckResult::Error }
         }

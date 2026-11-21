@@ -1,6 +1,5 @@
-//! Asynchronous runtime glue. The GUI owns the executor (the GLib main loop
-//! in the GTK interface, a local pool polled every frame in the egui
-//! interface) and registers it with [`set_spawner`]; platform code spawns
+//! Asynchronous runtime glue. The GUI owns the executor (a local pool polled
+//! every frame) and registers it with [`set_spawner`]; platform code spawns
 //! its tasks with [`spawn_local`]. Timers come from `async-io`, whose
 //! reactor runs in its own thread and wakes tasks of any executor.
 

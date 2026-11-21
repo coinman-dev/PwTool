@@ -94,16 +94,16 @@ pub fn poll() {
     }
 }
 
-/// Number of unfinished tasks.
-pub fn pending() -> usize {
-    TASKS.with(|t| t.borrow().len()) + NEW.with(|n| n.borrow().len())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::cell::Cell;
     use std::rc::Rc;
+
+    /// Number of unfinished tasks.
+    fn pending() -> usize {
+        TASKS.with(|t| t.borrow().len()) + NEW.with(|n| n.borrow().len())
+    }
 
     #[test]
     fn tasks_and_channels() {

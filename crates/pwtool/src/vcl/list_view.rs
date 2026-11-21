@@ -49,7 +49,6 @@ struct State<K> {
     anchor: Option<usize>,
     cursor: Option<usize>,
     multi: bool,
-    show_header: bool,
     sort: Option<(usize, bool)>,
     scroll_to: Option<usize>,
     font: Option<FontId>,
@@ -60,8 +59,6 @@ struct State<K> {
     enabled: bool,
     focus_request: bool,
     has_focus: bool,
-    /// Width of a single column filling the list (no header).
-    fill_width: bool,
 }
 
 pub struct ListView<K> {
@@ -79,7 +76,6 @@ impl<K: Clone + PartialEq + 'static> ListView<K> {
                 anchor: None,
                 cursor: None,
                 multi,
-                show_header: true,
                 sort: None,
                 scroll_to: None,
                 font: None,
@@ -90,7 +86,6 @@ impl<K: Clone + PartialEq + 'static> ListView<K> {
                 enabled: true,
                 focus_request: false,
                 has_focus: false,
-                fill_width: false,
             }),
             id: egui::Id::new(("listview", id.to_string())),
         })
@@ -105,15 +100,6 @@ impl<K: Clone + PartialEq + 'static> ListView<K> {
 
     pub fn column_widths(&self) -> Vec<f32> {
         self.st.borrow().columns.iter().map(|c| c.1).collect()
-    }
-
-    pub fn set_show_header(&self, on: bool) {
-        self.st.borrow_mut().show_header = on;
-    }
-
-    /// The last column takes the remaining width.
-    pub fn set_fill_width(&self, on: bool) {
-        self.st.borrow_mut().fill_width = on;
     }
 
     /// Sort indicator in the header: shown column index, ascending.
@@ -223,10 +209,6 @@ impl<K: Clone + PartialEq + 'static> ListView<K> {
         self.st.borrow().selected.get(i).copied().unwrap_or(false)
     }
 
-    pub fn selected_indices(&self) -> Vec<usize> {
-        self.st.borrow().selected.iter().enumerate().filter(|(_, x)| **x).map(|(i, _)| i).collect()
-    }
-
     pub fn selected_keys(&self) -> Vec<K> {
         let st = self.st.borrow();
         st.rows.iter().zip(st.selected.iter()).filter(|(_, s)| **s).map(|(r, _)| r.key.clone()).collect()
@@ -240,14 +222,6 @@ impl<K: Clone + PartialEq + 'static> ListView<K> {
             st.selected[i] = true;
             st.anchor = Some(i);
             st.cursor = Some(i);
-        }
-    }
-
-    /// Add row `i` to the selection.
-    pub fn select_add(&self, i: usize) {
-        let mut st = self.st.borrow_mut();
-        if i < st.rows.len() {
-            st.selected[i] = true;
         }
     }
 
@@ -344,13 +318,7 @@ impl<K: Clone + PartialEq + 'static> ListView<K> {
         let text_color = if enabled { st.color.unwrap_or(visuals.text_color()) } else { visuals.weak_text_color() };
         let row_h = ui.fonts_mut(|f| f.row_height(&font)).max(16.0) + 3.0;
         let inner = rect.shrink(1.0);
-        let head_h = if st.show_header && !st.columns.is_empty() { ui.text_style_height(&egui::TextStyle::Body) + 6.0 } else { 0.0 };
-        if st.fill_width {
-            let fixed: f32 = st.columns.iter().rev().skip(1).map(|c| c.1).sum();
-            if let Some(last) = st.columns.last_mut() {
-                last.1 = (inner.width() - fixed - 2.0).max(30.0);
-            }
-        }
+        let head_h = if !st.columns.is_empty() { ui.text_style_height(&egui::TextStyle::Body) + 6.0 } else { 0.0 };
         let total_w: f32 = st.columns.iter().map(|c| c.1).sum::<f32>().max(inner.width());
 
         // keyboard focus

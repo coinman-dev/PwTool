@@ -276,14 +276,6 @@ pub fn set_root_window(frame: &eframe::Frame) {
     let _ = frame;
 }
 
-/// Native window handle of the main window (Windows), 0 if unknown.
-pub fn root_hwnd() -> isize {
-    #[cfg(windows)]
-    return win32::ROOT.with(|r| r.get());
-    #[cfg(not(windows))]
-    0
-}
-
 #[cfg(windows)]
 mod win32 {
     use std::cell::RefCell;

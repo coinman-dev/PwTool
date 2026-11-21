@@ -17,7 +17,7 @@ thread_local! {
 }
 
 /// Message-only window owning the clipboard data (with a NULL owner
-/// `SetClipboardData` fails after `EmptyClipboard`). Created on the GTK
+/// `SetClipboardData` fails after `EmptyClipboard`). Created on the GUI
 /// thread, whose message loop serves it.
 fn owner_window() -> HWND {
     OWNER.with(|o| {

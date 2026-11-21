@@ -1,7 +1,7 @@
 //! System tray icon (`TTrayIcon` with `TrayMenu` of the main form) as a
 //! StatusNotifierItem (shown by KDE Plasma and other desktops with SNI
-//! support). The tray runs in its own thread; commands are sent to the GTK
-//! main loop through a channel.
+//! support). The tray runs in its own thread; commands are sent to the GUI
+//! thread through a channel.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

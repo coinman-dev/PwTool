@@ -1,20 +1,16 @@
-//! Clipboard for sensitive data (`upstream/src/util/SecureClipboard.*`).
-//!
-//! Text is put on the clipboard together with the KDE hint
-//! `x-kde-passwordManagerHint: secret`, so that Klipper does not keep it in
-//! its history. On Windows the formats `ExcludeClipboardContentFromMonitorProcessing`,
-//! `CanIncludeInClipboardHistory` and `CanUploadToCloudClipboard` keep it out of
-//! the clipboard history and cloud clipboard. A SHA-256 digest of the text is kept; automatic clearing only
-//! clears the clipboard if it still holds that text.
+//! Clipboard for sensitive data (`SecureClipboard` of the original).
+//! Passwords are marked so that clipboard histories leave them alone:
+//! on Windows with the clipboard formats of `pwtool_app::platform::clipboard`,
+//! on Linux with the KDE hint `x-kde-passwordManagerHint` (arboard's
+//! `exclude_from_history`). A digest of the text is kept; the automatic
+//! clearing clears the clipboard only if it still holds that text.
 
 use std::cell::RefCell;
 
-use gtk4 as gtk;
-use gtk::prelude::*;
-use gtk::{gdk, glib};
 use zeroize::Zeroizing;
 
 thread_local! {
+    static BOARD: RefCell<Option<arboard::Clipboard>> = const { RefCell::new(None) };
     static DIGEST: RefCell<Option<[u8; 32]>> = const { RefCell::new(None) };
     static ON_SET: RefCell<Vec<Box<dyn Fn()>>> = RefCell::new(Vec::new());
 }
@@ -24,14 +20,41 @@ fn digest(text: &str) -> [u8; 32] {
     pwtool_core::crypto::sha256(&units[..units.len().min(1_000_000)])
 }
 
-fn clipboard() -> Option<gdk::Clipboard> {
-    gdk::Display::default().map(|d| d.clipboard())
+/// Run `f` with the clipboard (kept open: on Linux the content lives as
+/// long as the clipboard object).
+fn with_board<R>(f: impl FnOnce(&mut arboard::Clipboard) -> R) -> Option<R> {
+    BOARD.with(|b| {
+        let mut b = b.borrow_mut();
+        if b.is_none() {
+            *b = arboard::Clipboard::new().ok();
+        }
+        b.as_mut().map(f)
+    })
 }
 
-/// Register a function called after sensitive data was put on the clipboard
-/// (`RegisterOnSetDataFun`; the main window starts the auto-clear timer).
+/// Register a function called after sensitive data was put on the
+/// clipboard (the main window starts the auto-clear timer).
 pub fn on_set_data(f: impl Fn() + 'static) {
     ON_SET.with(|v| v.borrow_mut().push(Box::new(f)));
+}
+
+fn set_secret(text: &str) -> bool {
+    #[cfg(windows)]
+    if pwtool_app::platform::clipboard::set_secret_text(text) {
+        return true;
+    }
+    with_board(|b| {
+        #[cfg(target_os = "linux")]
+        {
+            use arboard::SetExtLinux;
+            b.set().exclude_from_history().text(text).is_ok()
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            b.set_text(text).is_ok()
+        }
+    })
+    .unwrap_or(false)
 }
 
 /// Put sensitive text on the clipboard (`SecureClipboard::SetData`).
@@ -48,71 +71,41 @@ pub fn set_data(text: &str) {
     });
 }
 
-/// Put sensitive text on the clipboard with the password-manager hint, but
-/// without automatic clearing (decrypted text: the original uses the plain
-/// clipboard here).
+/// Sensitive text without automatic clearing (decrypted text).
 pub fn set_hidden(text: &str) {
     set_secret(text);
 }
 
-/// Put text on the clipboard marked as secret.
-fn set_secret(text: &str) {
-    #[cfg(windows)]
-    if pwtool_app::platform::clipboard::set_secret_text(text) {
-        return;
-    }
-    let Some(cb) = clipboard() else { return };
-    let providers = [
-        gdk::ContentProvider::for_bytes("text/plain;charset=utf-8", &glib::Bytes::from(text.as_bytes())),
-        gdk::ContentProvider::for_value(&text.to_value()),
-        gdk::ContentProvider::for_bytes("x-kde-passwordManagerHint", &glib::Bytes::from_static(b"secret")),
-    ];
-    let _ = cb.set_content(Some(&gdk::ContentProvider::new_union(&providers)));
-}
-
-/// Put ordinary (non-sensitive) text on the clipboard.
+/// Ordinary text.
 pub fn set_plain(text: &str) {
-    if let Some(cb) = clipboard() {
-        cb.set_text(text);
-    }
+    with_board(|b| b.set_text(text));
 }
 
-/// Clear the clipboard (`ClearData`): with `force` always, otherwise only if
-/// it still holds the text set by [`set_data`]. The callback receives
-/// whether the operation succeeded.
-pub fn clear_data(force: bool, done: impl FnOnce(bool) + 'static) {
+/// Text on the clipboard.
+pub fn read_text() -> Option<Zeroizing<String>> {
+    with_board(|b| b.get_text().ok().map(Zeroizing::new)).flatten()
+}
+
+/// Clear the clipboard (`ClearData`): with `force` always, otherwise only
+/// if it still holds the text set by [`set_data`]. Returns whether the
+/// clipboard could be accessed.
+pub fn clear_data(force: bool) -> bool {
     let has_digest = DIGEST.with(|d| d.borrow().is_some());
     if !has_digest && !force {
-        done(true);
-        return;
+        return true;
     }
-    let Some(cb) = clipboard() else {
-        done(false);
-        return;
-    };
-    let cb2 = cb.clone();
-    cb.read_text_async(gtk::gio::Cancellable::NONE, move |r| {
-        let current = r.ok().flatten().map(|s| Zeroizing::new(s.to_string()));
+    let ok = with_board(|b| {
+        let current = b.get_text().ok().map(Zeroizing::new);
         let clear = match &current {
             Some(t) if !t.is_empty() => force || DIGEST.with(|d| *d.borrow() == Some(digest(t))),
             _ => false,
         };
         if clear {
-            let _ = cb2.set_content(None::<&gdk::ContentProvider>);
-            cb2.set_text("");
+            let _ = b.clear();
         }
-        DIGEST.with(|d| *d.borrow_mut() = None);
-        done(true);
-    });
-}
-
-/// Read the clipboard text.
-pub fn read_text(done: impl FnOnce(Option<Zeroizing<String>>) + 'static) {
-    let Some(cb) = clipboard() else {
-        done(None);
-        return;
-    };
-    cb.read_text_async(gtk::gio::Cancellable::NONE, move |r| {
-        done(r.ok().flatten().map(|s| Zeroizing::new(s.to_string())));
-    });
+        true
+    })
+    .unwrap_or(false);
+    DIGEST.with(|d| *d.borrow_mut() = None);
+    ok
 }

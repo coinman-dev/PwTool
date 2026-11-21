@@ -1,90 +1,68 @@
 //! Character Set Builder (`TCharSetBuilderForm`, `upstream/src/main/
 //! CharSetBuilder.cpp`). Child module of `main_window`.
 
-#![allow(deprecated)]
+use pwtool_app::char_set_builder::{BuildError, BuilderParams, CHARSET_USED, NUM_PARAM, build_char_set};
 
 use super::*;
 
-const CONFIG_ID: &str = "CharSetBuilder";
-pub use pwtool_app::char_set_builder::*;
+const WINDOW_ID: &str = "CharSetBuilder";
 
 pub(super) struct CharSetBuilderWin {
-    b: Built,
-    win: gtk::Window,
+    form: Rc<Form>,
     updating: Cell<bool>,
 }
 
 impl CharSetBuilderWin {
     fn new(main: &Rc<MainWindow>) -> Rc<Self> {
-        let b = build_form(load_form("CharSetBuilder"), "CharSetBuilder");
-        let win = super::super::dialogs::form_window(&b, Some(&main.win()), false);
-        win.set_hide_on_close(true);
+        let form = dialogs::load("CharSetBuilder");
         for i in 1..=NUM_PARAM {
-            if let Some(u) = b.updowns.get(&format!("NumSpinBtn{i}")) {
-                u.set_min(0);
-                u.set_position(0);
-            }
+            form.set_range(&format!("NumSpinBtn{i}"), 0, form_max(&form, i));
+            form.set_position(&format!("NumSpinBtn{i}"), 0);
         }
-        let d = Rc::new(CharSetBuilderWin { b, win, updating: Cell::new(false) });
-        for (i, name) in CHARSET_USED.iter().enumerate() {
-            let dd = Rc::downgrade(&d);
-            d.b.get::<gtk::CheckButton>(name).connect_toggled(move |_| {
-                if let Some(dd) = dd.upgrade() {
-                    dd.used_changed(i);
-                }
-            });
+        let d = Rc::new(CharSetBuilderWin { form, updating: Cell::new(false) });
+        for i in 0..NUM_PARAM {
             d.used_changed_enable(i);
         }
-        let mut entries: Vec<String> = (1..=NUM_PARAM).map(|i| format!("NumBox{i}")).collect();
-        entries.extend(["FromBox", "ToBox", "AdditionalCharsBox", "ExcludeCharsBox", "TagBox"].map(String::from));
-        for e in entries {
-            let dd = Rc::downgrade(&d);
-            d.b.get::<gtk::Entry>(&e).connect_changed(move |_| {
-                if let Some(dd) = dd.upgrade() {
-                    dd.param_change();
-                }
-            });
-        }
-        for i in 1..=NUM_PARAM {
-            let dd = Rc::downgrade(&d);
-            d.b.get::<gtk::CheckButton>(&format!("AtLeastCheck{i}")).connect_toggled(move |_| {
-                if let Some(dd) = dd.upgrade() {
-                    dd.param_change();
-                }
-            });
-        }
         let dd = Rc::downgrade(&d);
-        d.b.get::<gtk::Button>("ResetBtn").connect_clicked(move |_| {
-            if let Some(dd) = dd.upgrade() {
-                dd.reset();
-            }
-        });
         let w = Rc::downgrade(main);
-        let dd = Rc::downgrade(&d);
-        d.b.get::<gtk::Button>("ApplyBtn").connect_clicked(move |_| {
-            if let (Some(w), Some(dd)) = (w.upgrade(), dd.upgrade()) {
-                let text = dd.b.get::<gtk::Entry>("ResultBox").text().to_string();
-                set_combo_text(&w.combo("CharSetList"), &text);
-                w.char_set_list_exit();
+        d.form.on_any(move |e| {
+            let (Some(d), Some(w)) = (dd.upgrade(), w.upgrade()) else { return };
+            use crate::vcl::Event::*;
+            match e {
+                Click(n) if n == "ResetBtn" => d.reset(),
+                Click(n) if n == "ApplyBtn" => {
+                    let text = d.form.text("ResultBox");
+                    w.f().set_text("CharSetList", &text);
+                    w.char_set_list_exit();
+                }
+                Click(n) => {
+                    if let Some(i) = CHARSET_USED.iter().position(|c| c == n) {
+                        d.used_changed(i);
+                    } else if n.starts_with("AtLeastCheck") || n.starts_with("NumSpinBtn") {
+                        d.param_change();
+                    }
+                }
+                Change(n) if n != "ResultBox" => d.param_change(),
+                _ => {}
             }
         });
-        main.attach_entropy_events(&d.win);
         d
     }
 
     fn used_changed_enable(&self, i: usize) {
-        let on = self.b.get::<gtk::CheckButton>(CHARSET_USED[i]).is_active();
+        let f = &self.form;
+        let on = f.checked(CHARSET_USED[i]);
         let n = i + 1;
-        self.b.w(&format!("NumBox{n}")).set_sensitive(on);
-        self.b.updowns[&format!("NumSpinBtn{n}")].set_sensitive(on);
-        self.b.w(&format!("AtLeastCheck{n}")).set_sensitive(on);
+        for c in [format!("NumBox{n}"), format!("NumSpinBtn{n}"), format!("AtLeastCheck{n}")] {
+            f.set_enabled(&c, on);
+        }
         match i {
             4 => {
-                for w in ["FromLbl", "ToLbl", "FromBox", "ToBox"] {
-                    self.b.w(w).set_sensitive(on);
+                for c in ["FromLbl", "ToLbl", "FromBox", "ToBox"] {
+                    f.set_enabled(c, on);
                 }
             }
-            5 => self.b.w("AdditionalCharsBox").set_sensitive(on),
+            5 => f.set_enabled("AdditionalCharsBox", on),
             _ => {}
         }
     }
@@ -92,27 +70,27 @@ impl CharSetBuilderWin {
     fn used_changed(&self, i: usize) {
         self.used_changed_enable(i);
         self.param_change();
-        let on = self.b.get::<gtk::CheckButton>(CHARSET_USED[i]).is_active();
+        let on = self.form.checked(CHARSET_USED[i]);
         if on && i == 4 {
-            self.b.w("FromBox").grab_focus();
+            self.form.focus("FromBox");
         } else if on && i == 5 {
-            self.b.w("AdditionalCharsBox").grab_focus();
+            self.form.focus("AdditionalCharsBox");
         }
     }
 
     fn params(&self) -> BuilderParams {
+        let f = &self.form;
         let mut p = BuilderParams::default();
         for i in 0..NUM_PARAM {
-            p.used[i] = self.b.get::<gtk::CheckButton>(CHARSET_USED[i]).is_active();
-            p.num_chars[i] = self.b.updowns[&format!("NumSpinBtn{}", i + 1)].position();
-            p.at_least[i] = self.b.get::<gtk::CheckButton>(&format!("AtLeastCheck{}", i + 1)).is_active();
+            p.used[i] = f.checked(CHARSET_USED[i]);
+            p.num_chars[i] = f.position(&format!("NumSpinBtn{}", i + 1));
+            p.at_least[i] = f.checked(&format!("AtLeastCheck{}", i + 1));
         }
-        let t = |n: &str| self.b.get::<gtk::Entry>(n).text().to_string();
-        p.from = t("FromBox");
-        p.to = t("ToBox");
-        p.additional = t("AdditionalCharsBox");
-        p.exclude = t("ExcludeCharsBox");
-        p.tag = t("TagBox");
+        p.from = f.text("FromBox");
+        p.to = f.text("ToBox");
+        p.additional = f.text("AdditionalCharsBox");
+        p.exclude = f.text("ExcludeCharsBox");
+        p.tag = f.text("TagBox");
         p
     }
 
@@ -122,56 +100,51 @@ impl CharSetBuilderWin {
         }
         match build_char_set(&self.params()) {
             Ok(s) => {
-                self.b.get::<gtk::Entry>("ResultBox").set_text(&s);
-                self.b.w("ApplyBtn").set_sensitive(!s.is_empty());
+                self.form.set_text("ResultBox", &s);
+                self.form.set_enabled("ApplyBtn", !s.is_empty());
             }
-            Err(BuildError::InvalidRange) => msg(Some(&self.win), &trl("Invalid character range."), MsgIcon::Error),
+            Err(BuildError::InvalidRange) => msg(ViewportId::from_hash_of(WINDOW_ID), &trl("Invalid character range."), MsgIcon::Error),
         }
     }
 
     fn reset(&self) {
         self.updating.set(true);
         for i in 0..NUM_PARAM {
-            self.b.get::<gtk::CheckButton>(CHARSET_USED[i]).set_active(false);
-            self.b.updowns[&format!("NumSpinBtn{}", i + 1)].set_position(0);
-            self.b.get::<gtk::CheckButton>(&format!("AtLeastCheck{}", i + 1)).set_active(false);
+            self.form.set_checked(CHARSET_USED[i], false);
+            self.form.set_position(&format!("NumSpinBtn{}", i + 1), 0);
+            self.form.set_checked(&format!("AtLeastCheck{}", i + 1), false);
+            self.used_changed_enable(i);
         }
         for e in ["FromBox", "ToBox", "AdditionalCharsBox"] {
-            self.b.get::<gtk::Entry>(e).set_text("");
+            self.form.set_text(e, "");
         }
         self.updating.set(false);
         self.param_change();
     }
+}
 
-    fn save_config(&self, ini: &mut pwtool_core::config::IniFile) {
-        ini.write_integer(CONFIG_ID, "WindowHeight", self.win.default_height() as i64);
-        ini.write_integer(CONFIG_ID, "WindowWidth", self.win.default_width() as i64);
-    }
+/// Maximum of a "number of characters" spin button (the form's `Max`).
+fn form_max(form: &Form, i: usize) -> i64 {
+    form.obj.find(&format!("NumSpinBtn{i}")).and_then(|o| o.int("Max")).filter(|&m| m > 0).unwrap_or(100)
 }
 
 impl MainWindow {
     /// `BuildBtnClick()`.
     pub(super) fn char_set_builder(self: &Rc<Self>) {
-        let existing = self.char_set_builder.borrow().clone();
+        let existing = self.tools.char_set_builder.borrow().clone();
         let d = match existing {
             Some(d) => d,
             None => {
                 let d = CharSetBuilderWin::new(self);
-                *self.char_set_builder.borrow_mut() = Some(d.clone());
+                *self.tools.char_set_builder.borrow_mut() = Some(d.clone());
                 d
             }
         };
         // `FormShow()`: only clear TagBox when opening from hidden state
-        if !d.win.is_visible() {
-            d.b.get::<gtk::Entry>("TagBox").set_text("");
+        if !windows::is_open(ViewportId::from_hash_of(WINDOW_ID)) {
+            d.form.set_text("TagBox", "");
+            d.param_change();
         }
-        d.win.present();
-    }
-
-    pub(super) fn save_char_set_builder_config(&self, ini: &mut pwtool_core::config::IniFile) {
-        if let Some(d) = self.char_set_builder.borrow().as_ref() {
-            d.save_config(ini);
-        }
+        self.show_tool(WINDOW_ID, "CharSetBuilder", true, &d.form, ROOT, false);
     }
 }
-

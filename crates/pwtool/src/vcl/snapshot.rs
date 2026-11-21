@@ -1,6 +1,6 @@
 //! Pictures of egui output without a window or GPU: the tessellated
 //! meshes are rasterized in software. Used to compare the forms with the
-//! GTK version and the original, in tests and on machines without a display.
+//! original, in tests and on machines without a display.
 
 use std::collections::HashMap;
 

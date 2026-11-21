@@ -10,8 +10,8 @@ fn main() {
 
 /// Program icon (`pwtool.ico` with PNG images from assets/appicons) and
 /// version information, compiled with windres (llvm-mingw / MinGW) and
-/// linked into the executable. The first icon of the executable is also used
-/// by GTK for its windows and the taskbar.
+/// linked into the executable (Explorer, the taskbar before the window sets
+/// its own icon).
 fn windows_resources() {
     let out = Path::new(&std::env::var("OUT_DIR").unwrap()).to_path_buf();
     let icons = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/appicons");

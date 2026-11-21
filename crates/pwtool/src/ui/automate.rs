@@ -1,7 +1,7 @@
 //! Test automation (`PWTOOL_AUTOMATE`): commands separated by `;` —
 //! `click NAME`, `act NAME` (menu item), `text NAME VALUE`, `wait MS`,
 //! `print NAME` (text of a control to stdout), `snap PATH` (picture of the
-//! main window), `quit`. The same scripts work with the GTK version.
+//! main window), `quit`.
 
 use std::cell::RefCell;
 use std::rc::Rc;

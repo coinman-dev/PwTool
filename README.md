@@ -15,8 +15,9 @@
 [![License](https://img.shields.io/badge/license-GPL--2.0--or--later-blue)](LICENSE)
 
 **Password Tool** (PwTool) is a port of [Password Tech](https://github.com/cthoeing/PasswordTech) 3.6.1
-to Rust and GTK4 for Linux and Windows. It preserves the original windows, cryptographic algorithms,
-and file formats: password databases (`.pwdb`), configuration files (`PwTool.ini` / `PwTech.ini`),
+to Rust for Linux and Windows. The windows are drawn with [egui](https://github.com/emilk/egui) from
+the form descriptions of the original, so the program is a single executable with no toolkit to
+install. It preserves the original windows, cryptographic algorithms, and file formats: password databases (`.pwdb`), configuration files (`PwTool.ini` / `PwTech.ini`),
 profiles, word lists, Lua scripts, and translations are compatible with the original Password Tech.
 
 <p align="center">
@@ -32,10 +33,12 @@ profiles, word lists, Lua scripts, and translations are compatible with the orig
 
 | Edition | Download | Usage |
 |---|---|---|
-| Linux package | [pwtool_0.1.0.beta_amd64.deb](https://github.com/coinman-dev/PwTool/releases/download/v0.1.0-beta/pwtool_0.1.0.beta_amd64.deb) | `sudo apt install ./pwtool_0.1.0.beta_amd64.deb` installs Password Tool, icons, translations, script examples, and PDF manuals. |
-| Windows, portable | `pwtool_<version>_windows_x64.zip` on the [releases page](https://github.com/coinman-dev/PwTool/releases) (from the next release on) | Unpack anywhere and run `PwTool\bin\pwtool.exe`. GTK 4 and all libraries are included; nothing is installed. |
+| Linux package | [pwtool_0.1.0.beta_amd64.deb](https://github.com/coinman-dev/PwTool/releases/download/v0.1.0-beta/pwtool_0.1.0.beta_amd64.deb) | `sudo apt install ./pwtool_0.1.0.beta_amd64.deb` installs Password Tool with its menu entry and icons. |
+| Windows | `pwtool_<version>_windows_x64.exe` on the [releases page](https://github.com/coinman-dev/PwTool/releases) (from the next release on) | One file: save it to any folder and run it. Nothing is installed. |
 
-Linux: Ubuntu 24.04 or newer, Debian 13 or newer, amd64 (GTK 4.10+). Windows: 10 or 11, x64.
+Translations, script examples, and the PDF manuals are built into the program.
+Linux: Ubuntu 24.04 or newer, Debian 13 or newer, amd64, Wayland or X11 with OpenGL.
+Windows: 10 or 11, x64.
 No advertising or telemetry.
 Update checks contact only GitHub and can be disabled in **Options → Configuration**.
 [All releases](https://github.com/coinman-dev/PwTool/releases) ·
@@ -44,9 +47,10 @@ Update checks contact only GitHub and can be disabled in **Options → Configura
 ## Quick start
 
 1. Linux: install the `.deb` package with `sudo apt install ./pwtool_0.1.0.beta_amd64.deb`.
-   Windows: unpack the `.zip` to any folder (for example `%LOCALAPPDATA%\Programs`).
+   Windows: save `pwtool_<version>_windows_x64.exe` to any folder (for example
+   `%LOCALAPPDATA%\Programs\PwTool`), renaming it to `pwtool.exe` if you like.
 2. Open **Password Tool** from your application menu (**Utilities**) or run `pwtool`;
-   on Windows start `PwTool\bin\pwtool.exe` (pin it to Start or the taskbar if you like).
+   on Windows start the `.exe` (pin it to Start or the taskbar if you like).
 3. Choose a character set, passphrase word list, format string, or Lua script and click
    **Generate** — the 16-block strength meter shows estimated entropy in bits.
 4. Click the database icon on the toolbar (or **File → Password Manager**) to open
@@ -75,7 +79,7 @@ The interface supports 13 languages, light, dark, and system themes, and custom 
   passwords to a window or file, or create random data and trigram files.
 - **CLI mode**: generate passwords, passphrases, and formatted strings directly from the
   terminal without opening a window.
-- **Bundled documentation**: `manual.pdf` and `scripting.pdf` are installed locally and
+- **Built-in documentation**: `manual.pdf` and `scripting.pdf` are part of the program and
   open from **Help** or the toolbar.
 
 ## Desktop integration
@@ -89,6 +93,8 @@ Linux:
 - **Secure clipboard**: copied passwords are marked as secret (`x-kde-passwordManagerHint`)
   so clipboard managers such as Klipper do not keep them in history, with configurable
   auto-clear timeout.
+- **Session end**: the open database and the settings are saved when you log out (session
+  monitor of `xdg-desktop-portal`).
 
 Windows (Win32 API, as in Password Tech):
 
@@ -99,16 +105,23 @@ Windows (Win32 API, as in Password Tech):
 - **Secure clipboard**: passwords are excluded from the clipboard history (Win+V), cloud
   clipboard sync, and clipboard monitors.
 - **Autostart** via the `Run` key of the current user; **Always on Top**, single instance,
-  dark/light app mode of Windows followed by the **Default** style.
+  dark/light app mode of Windows followed by the **Default** style; the database and the
+  settings are saved when Windows shuts down.
+
+Not available compared with Password Tech: dragging text out of the program with the mouse
+(copy and paste works), and user name autocompletion in PassCube. Screen readers can read
+the main window; the other windows show only their titles to them (a limitation of the
+egui window integration).
 
 ## Settings and data
 
 | What | Linux | Windows |
 |---|---|---|
-| Program binary | `/usr/bin/pwtool` | `PwTool\bin\pwtool.exe` |
-| Bundled data (translations, word lists, script examples, PDF manuals) | `/usr/share/pwtool/` | `PwTool\share\pwtool\` |
+| Program | `/usr/bin/pwtool` | `pwtool.exe` wherever you saved it |
+| Built-in data (translations, common passwords, script examples, PDF manuals) | inside the program; written to `$XDG_RUNTIME_DIR/pwtool/` when used | inside the program; written to `%TEMP%\PwTool\` when used |
+| Own translations (`.po`, `.lng`) | `~/.config/pwtool/` | `%APPDATA%\PwTool\` (portable mode: next to `pwtool.exe`) |
 | Settings, profiles, and random seed | `~/.config/pwtool/PwTool.ini`, `randseed.dat` | `%APPDATA%\PwTool\PwTool.ini`, `randseed.dat` |
-| Portable mode | Place `PwTool.ini` next to the `pwtool` binary | Place `PwTool.ini` next to `pwtool.exe` (in `bin`) |
+| Portable mode | Place `PwTool.ini` next to the `pwtool` binary | Place `PwTool.ini` next to `pwtool.exe` |
 | Password databases (`.pwdb`) | Wherever you save them | Wherever you save them |
 
 **Options → Restore Settings from Backup** also accepts backup files from Password Tech
@@ -130,12 +143,14 @@ Command Prompt or PowerShell window (or can be redirected to a file).
 
 ## Building
 
-Requires Rust 1.90+, a C/C++ compiler (`build-essential`), `pkg-config`, and `libgtk-4-dev`
-(GTK 4.10 or newer). LibreOffice (`libreoffice-writer-nogui`) is optional and used to build
-`manual.pdf` and `scripting.pdf` from `doc/manual/*.odt`.
+Requires Rust 1.90+ and a C/C++ compiler (`build-essential`); no system libraries need to
+be installed for building. LibreOffice (`libreoffice-writer-nogui`) is optional: it builds
+`manual.pdf` and `scripting.pdf` from `doc/manual/*.odt`, which are then embedded into the
+program (run `packaging/manuals.sh` before `cargo build`).
 
 ```bash
 cargo test --workspace --locked
+packaging/manuals.sh               # optional: PDF manuals into target/manuals
 cargo build --release --locked -p pwtool
 
 packaging/install.sh /usr/local    # install to PREFIX
@@ -146,22 +161,23 @@ packaging/build-deb.sh             # build target/pwtool_<version>_<arch>.deb
 
 The Windows version is cross-compiled on Linux (no Windows toolchain is needed) for the
 Rust target `x86_64-pc-windows-gnullvm` with [llvm-mingw](https://github.com/mstorsjo/llvm-mingw)
-(UCRT). GTK 4 and its dependencies are taken from the MSYS2 CLANG64 repository, which is built
-with the same kind of toolchain; `packaging/windows/fetch-gtk.py` downloads them (checked
-against the SHA-256 sums of the repository database) into `~/.cache/pwtool-win/sysroot`.
+(UCRT). The C runtime is linked statically: the result is one `.exe` that needs only the DLLs
+of Windows itself (the build script checks this).
 
 ```bash
 rustup target add x86_64-pc-windows-gnullvm
 # llvm-mingw unpacked to ~/.local/opt/llvm-mingw-<version>-ucrt-ubuntu-22.04-x86_64
-# (or set LLVM_MINGW); needs python3 with zstd and glib-compile-schemas
-packaging/windows/build.sh            # target/pwtool_<version>_windows_x64.zip
+# (or set LLVM_MINGW); needs python3
+packaging/manuals.sh                  # optional: manuals to embed
+packaging/windows/build.sh            # target/pwtool_<version>_windows_x64.exe
 packaging/windows/build.sh --tests    # also target/windows/tests/*.exe for running on Windows
 ```
 
-Headless GUI automation:
+Headless GUI automation and form checks:
 
 ```bash
 tools/headless.sh env PWTOOL_AUTOMATE="click GenerateBtn;wait 400;print PasswBox;quit" ./target/debug/pwtool
+./target/debug/pwtool --forms /tmp/forms --lang Russian --fit   # pictures of all windows, captions that do not fit
 ```
 
 ## Automated releases
@@ -170,7 +186,7 @@ Pushing a version tag such as `v0.1.0-beta` runs the
 [release workflow](.github/workflows/release.yml). The tag must match `version` in
 `Cargo.toml`. GitHub runs the workspace tests on Ubuntu 24.04, converts the PDF manuals,
 builds and checks `pwtool_<version>_amd64.deb`, cross-builds
-`pwtool_<version>_windows_x64.zip`, runs the tests and the console mode of the Windows
+`pwtool_<version>_windows_x64.exe`, runs the tests and the console mode of the Windows
 build on a Windows runner, computes `SHA256SUMS.txt`, and publishes the release. Tags containing a hyphen suffix are automatically marked as prereleases.
 
 ## License
@@ -178,7 +194,7 @@ build on a Windows runner, computes `SHA256SUMS.txt`, and publishes the release.
 GNU General Public License v2 or later — see [LICENSE](LICENSE).
 
 Based on **Password Tech** (Copyright © 2002–2026 Christian Thöing). Third-party components
-retain their own licenses: miniLZO (GPL v2+), miniz (MIT), zxcvbn-c (MIT), and Lua (MIT,
-via `mlua`). The Windows build ships GTK 4 and its dependencies as unmodified MSYS2 packages
-(mostly LGPL and MIT); their names and versions are listed in `GTK-PACKAGES.txt` in the zip,
-and their sources are available from [MSYS2](https://packages.msys2.org/).
+retain their own licenses: miniLZO (GPL v2+), miniz (MIT), zxcvbn-c (MIT), Lua (MIT, via
+`mlua`), and the Rust crates the program is built from (egui, winit and others, MIT or
+Apache-2.0), including the fallback fonts bundled with egui (Hack, Ubuntu Light, Noto Emoji,
+emoji-icon-font) under their own free licenses.

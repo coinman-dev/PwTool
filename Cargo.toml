@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/pwtool-core", "crates/pwtool-app", "crates/pwtool", "crates/pwtool-egui"]
+members = ["crates/pwtool-core", "crates/pwtool-app", "crates/pwtool"]
 
 [workspace.package]
 version = "0.1.0-beta"

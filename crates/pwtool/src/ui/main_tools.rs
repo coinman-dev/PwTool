@@ -1,41 +1,34 @@
 //! Tools and menus of the main window (child module of `main_window`):
-//! File | Profile menu, encryption of the clipboard, deterministic random
-//! generator, password cache, list menu of the combo boxes, backup/restore
-//! of settings, and the small tool dialogs (`ProvideEntropy`,
-//! `CreateRandDataFile`, `CreateTrigramFile`, `About`).
-
-#![allow(deprecated)]
+//! encryption of the clipboard, deterministic random generator, password
+//! cache, list menu of the combo boxes, backup/restore of settings, the
+//! small tool dialogs (`ProvideEntropy`, `CreateRandDataFile`,
+//! `CreateTrigramFile`, `About`) and the update check.
 
 use std::path::Path;
 
 use pwtool_core::crypt_text::{CryptTextError, decrypt_text_with_password, encrypt_text_with_password};
 
-use super::*;
 use crate::ui::passw_enter::*;
-
-/// Characters used for the profile shortcuts (Alt+Shift+...).
-const PROFILES_MENU_SHORTCUTS: &str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+use super::*;
 
 /// State of the tools (dialogs are created on first use).
 pub(super) struct ToolsState {
     pub passw_enter: RefCell<Option<Rc<PasswEnterDlg>>>,
-    provide_entropy: RefCell<Option<(Built, gtk::Window)>>,
-    rand_data_file: RefCell<Option<(Built, gtk::Window)>>,
-    trigram_file: RefCell<Option<(Built, gtk::Window)>>,
-    about: RefCell<Option<(Built, gtk::Window)>>,
-    profile_section: gio::Menu,
-    tray_profile_section: gio::Menu,
-    profile_accels: RefCell<Vec<String>>,
+    provide_entropy: RefCell<Option<Rc<Form>>>,
+    rand_data_file: RefCell<Option<Rc<Form>>>,
+    trigram_file: RefCell<Option<Rc<Form>>>,
+    about: RefCell<Option<Rc<Form>>>,
     last_cache_countdown: Cell<i64>,
     last_total_bits: Cell<i64>,
-    /// Identity of visible windows when "Always on Top" was last applied.
-    top_windows: RefCell<Vec<usize>>,
-    /// Font of the password boxes set by the user.
-    pub passw_font: RefCell<Option<crate::ui::util::FontSpec>>,
+    update_check_running: Cell<bool>,
+    pub config_dlg: RefCell<Option<Rc<super::config_dlg::ConfigDlg>>>,
+    pub profile_dlg: RefCell<Option<Rc<super::profile_editor::ProfileEditDlg>>>,
+    pub char_set_builder: RefCell<Option<Rc<super::char_set_builder::CharSetBuilderWin>>>,
+    pub mp_passw_gen: RefCell<Option<Rc<super::mp_passw_gen::MpPasswGenWin>>>,
+    pub passw_mng: RefCell<Option<Rc<crate::ui::passw_manager::PasswManager>>>,
+    /// Window sizes of the tool dialogs (`WindowWidth`/`WindowHeight`).
+    sizes: RefCell<std::collections::HashMap<&'static str, egui::Vec2>>,
 }
-
-/// CSS class of the password boxes (main window and MP generator).
-pub const PASSW_FONT_CLASS: &str = "pwtool-passw-font";
 
 impl ToolsState {
     pub fn new() -> Self {
@@ -45,391 +38,366 @@ impl ToolsState {
             rand_data_file: RefCell::new(None),
             trigram_file: RefCell::new(None),
             about: RefCell::new(None),
-            profile_section: gio::Menu::new(),
-            tray_profile_section: gio::Menu::new(),
-            profile_accels: RefCell::new(Vec::new()),
             last_cache_countdown: Cell::new(-1),
             last_total_bits: Cell::new(-1),
-            top_windows: RefCell::new(Vec::new()),
-            passw_font: RefCell::new(None),
+            update_check_running: Cell::new(false),
+            config_dlg: RefCell::new(None),
+            profile_dlg: RefCell::new(None),
+            char_set_builder: RefCell::new(None),
+            mp_passw_gen: RefCell::new(None),
+            passw_mng: RefCell::new(None),
+            sizes: RefCell::new(std::collections::HashMap::new()),
         }
     }
 }
 
+/// A form window that is kept and shown again (`Show()`): a click on a
+/// close button only closes the window.
+pub(super) fn tool_window(id: &'static str, form: &Rc<Form>, parent: ViewportId, modal: bool, size: Option<egui::Vec2>) -> Rc<windows::Window> {
+    let mut w = dialogs::form_window(id, form.clone(), parent, modal);
+    let min = w.size.get();
+    if let Some(s) = size {
+        w.size.set(s.max(min));
+    }
+    if form.obj.ident("BorderStyle").is_none_or(|b| b == "bsSizeable" || b == "bsSizeToolWin") {
+        w = w.resizable(true, min);
+    }
+    Rc::new(w)
+}
+
 impl MainWindow {
     pub(super) fn connect_tools(self: &Rc<Self>) {
-        // File | Profile and Tray | Profile: profile entries before the editor
-        for (menu, section) in [
-            ("MainMenu_File_Profile", &self.tools.profile_section),
-            ("TrayMenu_Profile", &self.tools.tray_profile_section),
-        ] {
-            if let Some(sub) = self.b.submenus.get(menu) {
-                sub.prepend_section(None, section);
-            }
-        }
-        let a = gio::SimpleAction::new("LoadProfileIdx", Some(glib::VariantTy::INT32));
-        let w = Rc::downgrade(self);
-        a.connect_activate(move |_, p| {
-            if let (Some(w), Some(i)) = (w.upgrade(), p.and_then(|p| p.get::<i32>())) {
-                w.profile_menu_click(i as usize);
-            }
+        self.menu("MainMenu_Tools_EncryptClip", |w| w.crypt_text_spawn(true, None, ROOT));
+        self.menu("MainMenu_Tools_DecryptClip", |w| w.crypt_text_spawn(false, None, ROOT));
+        self.menu("TrayMenu_EncryptClip", |w| w.crypt_text_spawn(true, None, ROOT));
+        self.menu("TrayMenu_DecryptClip", |w| w.crypt_text_spawn(false, None, ROOT));
+        self.menu("PasswBoxMenu_EncryptCopy", |w| {
+            let text = w.f().selected_text("PasswBox");
+            w.crypt_text_spawn(true, Some(text), ROOT);
         });
-        self.b.actions.add_action(&a);
-        self.update_profile_menu();
-
-        self.act("MainMenu_Tools_EncryptClip", |w| w.crypt_text_spawn(true, None));
-        self.act("MainMenu_Tools_DecryptClip", |w| w.crypt_text_spawn(false, None));
-        self.act("TrayMenu_EncryptClip", |w| w.crypt_text_spawn(true, None));
-        self.act("TrayMenu_DecryptClip", |w| w.crypt_text_spawn(false, None));
-        self.act("PasswBoxMenu_EncryptCopy", |w| {
-            let e = w.entry("PasswBox");
-            let text = match e.selection_bounds() {
-                Some((s, end)) => Zeroizing::new(e.chars(s, end).to_string()),
-                None => Zeroizing::new(String::new()),
-            };
-            w.crypt_text_spawn(true, Some(text));
-        });
-        self.act("MainMenu_Tools_DetermRandGen_Setup", |w| {
+        self.menu("MainMenu_Tools_DetermRandGen_Setup", |w| {
             let w = w.clone();
-            glib::spawn_future_local(async move { w.det_rand_gen_setup().await });
+            spawn(async move { w.det_rand_gen_setup().await });
         });
-        self.act("MainMenu_Options_ClearPasswCache", |w| {
+        self.menu("MainMenu_Options_ClearPasswCache", |w| {
             w.passw_enter().clear_passw_cache();
-            info_box(&w.win(), &trl("Password cache cleared."));
+            info_box(ROOT, &trl("Password cache cleared."));
             w.update_passw_cache_menu();
         });
-        self.act("MainMenu_Tools_ProvideAddEntropy_AsText", |w| w.provide_entropy());
-        self.act("MainMenu_Tools_CreateRandDataFile", |w| w.create_rand_data_file());
-        self.act("TrayMenu_CreateRandDataFile", |w| w.create_rand_data_file());
-        self.act("MainMenu_Tools_CreateTrigramFile", |w| w.create_trigram_file());
-        self.b.set_menu_label(
-            "MainMenu_Help_About",
-            &crate::ui::builder::mnemonic(&trl_format("About %1...", &[PROGRAM_NAME])),
-        );
-        self.act("MainMenu_Help_About", |w| w.about());
-        self.act("TrayMenu_About", |w| w.about());
-        self.act("TrayMenu_OpenManual", |w| w.help_btn_click());
-        self.act("MainMenu_File_BackupSettings", |w| w.backup_settings());
+        self.menu("MainMenu_Tools_ProvideAddEntropy_AsText", |w| w.provide_entropy());
+        self.menu("MainMenu_Tools_CreateRandDataFile", |w| w.create_rand_data_file());
+        self.menu("TrayMenu_CreateRandDataFile", |w| {
+            w.restore_from_tray();
+            w.create_rand_data_file();
+        });
+        self.menu("MainMenu_Tools_CreateTrigramFile", |w| w.create_trigram_file());
+        self.f().set_menu_caption("MainMenu_Help_About", &trl_format("About %1...", &[PROGRAM_NAME]));
+        self.menu("MainMenu_Help_About", |w| w.about());
+        self.menu("TrayMenu_About", |w| {
+            w.restore_from_tray();
+            w.about();
+        });
+        self.menu("TrayMenu_OpenManual", |w| w.help_btn_click());
+        self.menu("MainMenu_File_BackupSettings", |w| {
+            let w = w.clone();
+            spawn(async move { w.backup_settings().await });
+        });
+        self.menu("MainMenu_File_RestoreSettings", |w| {
+            let w = w.clone();
+            spawn(async move { w.restore_settings().await });
+        });
         for name in ["MainMenu_Tools_MPPasswGen", "TrayMenu_MPPasswGen"] {
-            self.act(name, |w| w.mp_passw_gen());
+            self.menu(name, |w| {
+                w.restore_from_tray();
+                w.mp_passw_gen();
+            });
         }
         self.click("MPPasswGenBtn", |w| w.mp_passw_gen());
         for name in ["MainMenu_File_PasswManager", "TrayMenu_PasswManager"] {
-            self.act(name, |w| w.show_passw_manager());
+            self.menu(name, |w| {
+                w.restore_from_tray();
+                w.show_passw_manager();
+            });
         }
         self.click("PasswMngBtn", |w| w.show_passw_manager());
-        self.act("PasswBoxMenu_AddToDb", |w| {
-            let e = w.entry("PasswBox");
-            if let Some((s, end)) = e.selection_bounds() {
-                let passw = Zeroizing::new(e.chars(s, end).to_string());
+        self.menu("PasswBoxMenu_AddToDb", |w| {
+            let passw = w.f().selected_text("PasswBox");
+            if !passw.is_empty() {
                 w.add_passw_to_db(&passw, false, None);
             }
         });
-        self.act("PasswBoxMenu_PerformAutotype", |w| {
-            let passw = Zeroizing::new(w.entry("PasswBox").text().to_string());
-            let win = w.win();
-            w.perform_autotype(&win, "", None, None, None, Some(&passw));
+        self.menu("PasswBoxMenu_PerformAutotype", |w| {
+            let passw = w.f().secret_text("PasswBox");
+            w.perform_autotype("", None, Some(&passw));
         });
-        self.click("CryptTextBtn", |w| w.crypt_text_spawn(true, None));
+        self.click("CryptTextBtn", |w| w.crypt_text_spawn(true, None, ROOT));
         self.click("ConfigBtn", |w| {
             let w = w.clone();
-            glib::spawn_future_local(async move { w.configuration().await });
+            spawn(async move { w.configuration().await });
         });
+        self.menu("MainMenu_Options_Config", |w| {
+            let w = w.clone();
+            spawn(async move { w.configuration().await });
+        });
+        self.menu("MainMenu_Help_CheckForUpdates", |w| {
+            let w = w.clone();
+            spawn(async move { w.check_for_updates(true).await });
+        });
+        self.click("BuildBtn", |w| w.char_set_builder());
+        for name in ["MainMenu_File_Profile_ProfileEditor", "TrayMenu_Profile_ProfileEditor"] {
+            self.menu(name, |w| {
+                w.restore_from_tray();
+                let w = w.clone();
+                spawn(async move {
+                    w.profile_editor(false).await;
+                });
+            });
+        }
         self.click("ProfileEditorBtn", |w| {
             let w = w.clone();
-            glib::spawn_future_local(async move {
+            spawn(async move {
                 w.profile_editor(false).await;
             });
         });
-        self.act("MainMenu_Help_CheckForUpdates", |w| {
+        self.click("AddProfileBtn", |w| {
             let w = w.clone();
-            glib::spawn_future_local(async move { w.check_for_updates(true).await });
-        });
-        self.act("MainMenu_Options_Config", |w| {
-            let w = w.clone();
-            glib::spawn_future_local(async move { w.configuration().await });
-        });
-        self.act("MainMenu_File_RestoreSettings", |w| w.restore_settings());
-        self.connect_list_menus();
-        // drag & drop of the password (`PasswGroupMouseMove` / `PasswInfoLblMouseMove`)
-        for name in ["PasswInfoLbl", "PasswGauge"] {
-            let w = Rc::downgrade(self);
-            crate::ui::util::add_text_drag_source(&self.b.w(name), move || {
-                w.upgrade().map(|w| Zeroizing::new(w.entry("PasswBox").text().to_string())).unwrap_or_default()
-            });
-        }
-        self.act("TrayMenu_ResetWindowPos", |w| {
-            if let Some(app) = w.window.application() {
-                glib::spawn_future_local(async move {
-                    crate::ui::active_window::reset_window_positions(&app).await;
-                });
-            }
-        });
-        // Always on Top (`TopMostManager`): KWin keeps the windows above
-        self.act("MainMenu_Options_AlwaysOnTop", |w| {
-            w.tools.top_windows.borrow_mut().clear();
-            w.apply_always_on_top();
-        });
-        // password box font
-        self.entry("PasswBox").add_css_class(PASSW_FONT_CLASS);
-        if let Some(f) = crate::ui::util::FontSpec::parse(&self.core.borrow().ini.read_string("Main", "PasswBoxFont", "")) {
-            crate::ui::util::set_class_font(PASSW_FONT_CLASS, Some(&f));
-            *self.tools.passw_font.borrow_mut() = Some(f);
-        }
-        self.act("PasswBoxMenu_ChangeFont", |w| {
-            let w2 = w.clone();
-            let cur = w.tools.passw_font.borrow().clone();
-            crate::ui::util::choose_font(&w.win(), cur.as_ref(), move |f| {
-                crate::ui::util::set_class_font(PASSW_FONT_CLASS, Some(&f));
-                *w2.tools.passw_font.borrow_mut() = Some(f);
-            });
-        });
-        self.act("PasswBoxMenu_ResetFont", |w| {
-            if w.tools.passw_font.borrow_mut().take().is_some() {
-                crate::ui::util::set_class_font(PASSW_FONT_CLASS, None);
-            }
-        });
-        self.update_passw_cache_menu();
-        self.update_total_ent_bits_menu();
-        if let Some(b) = self.b.try_get::<gtk::Button>("CryptTextBtn") {
-            // right click: decrypt (`CryptTextBtnMouseUp`)
-            let g = gtk::GestureClick::new();
-            g.set_button(3);
-            let w = Rc::downgrade(self);
-            g.connect_released(move |_, _, _, _| {
-                if let Some(w) = w.upgrade() {
-                    w.crypt_text_spawn(false, None);
-                }
-            });
-            b.add_controller(g);
-        }
-    }
-
-    /// `MainMenu_Help_CheckForUpdatesClick()` (manual) and the automatic
-    /// check at start-up (`FormActivate()`).
-    pub(super) async fn check_for_updates(self: &Rc<Self>, manual: bool) {
-        use crate::ui::update_check::{CheckResult, check_for_updates};
-        let win = self.win();
-        self.b.action("MainMenu_Help_CheckForUpdates").set_enabled(false);
-        let r = check_for_updates(Some(&win), manual).await;
-        self.b.action("MainMenu_Help_CheckForUpdates").set_enabled(true);
-        match r {
-            CheckResult::NotConfigured => {
-                if manual {
-                    msg_box(
-                        Some(&win),
-                        &trl("The update check is not configured in this build."),
-                        MsgIcon::Info,
-                        MsgButtons::Ok,
-                        false,
-                    )
-                    .await;
-                }
-                return;
-            }
-            CheckResult::Negative if manual => {
-                msg_box(
-                    Some(&win),
-                    &trl_format("Your version of %1 is up-to-date.", &[PROGRAM_NAME]),
-                    MsgIcon::Info,
-                    MsgButtons::Ok,
-                    false,
-                )
-                .await;
-            }
-            _ => {}
-        }
-        if matches!(r, CheckResult::Negative | CheckResult::Positive) {
-            let now = glib::DateTime::now_local().ok();
-            if let Some(d) = now {
-                let s = pwtool_core::util::format_short_date(d.year(), d.month() as u32, d.day_of_month() as u32);
-                self.core.borrow_mut().ini.write_string("Main", "LastUpdateCheck", &s);
-            }
-        }
-    }
-
-    /// Automatic check at start-up if due (`AutoCheckUpdates`).
-    pub(super) fn auto_check_updates(self: &Rc<Self>) {
-        use crate::app_config::AutoCheckUpdates;
-        let (mode, last) = {
-            let core = self.core.borrow();
-            (core.config.auto_check_updates, core.ini.read_string("Main", "LastUpdateCheck", ""))
-        };
-        if mode == AutoCheckUpdates::Disabled {
-            return;
-        }
-        let Ok(now) = glib::DateTime::now_local() else { return };
-        let due = match pwtool_core::util::parse_short_date(&last)
-            .and_then(|(y, m, d)| glib::DateTime::from_local(y, m as i32, d as i32, 0, 0, 0.0).ok())
-        {
-            None => true,
-            Some(l) => {
-                let days = now.difference(&l).as_days();
-                match mode {
-                    AutoCheckUpdates::Daily => days >= 1,
-                    AutoCheckUpdates::Weekly => days >= 7,
-                    _ => {
-                        let months = (now.year() - l.year()) * 12 + now.month() - l.month()
-                            - if now.day_of_month() < l.day_of_month() { 1 } else { 0 };
-                        months >= 1
+            spawn(async move {
+                let flags = w.profile_editor(true).await;
+                if flags & super::profile_editor::PROFILE_ADDED != 0 {
+                    let n = w.core.borrow().profiles.len();
+                    if n > 0 {
+                        w.profile_list_guard.set(true);
+                        w.f().set_item_index("ProfileList", Some(n - 1));
+                        w.profile_list_guard.set(false);
                     }
                 }
+            });
+        });
+        // list menu of the combo boxes (`ListMenu`)
+        self.menu("ListMenu_RemoveEntry", |w| {
+            let Some(name) = w.list_menu_owner() else { return };
+            let text = w.f().text(&name);
+            let mut items = w.f().items(&name);
+            if let Some(i) = items.iter().position(|s| *s == text) {
+                items.remove(i);
+                w.f().set_items(&name, items);
+                w.f().set_text(&name, &text);
             }
-        };
-        if due {
-            let w = self.clone();
-            glib::spawn_future_local(async move { w.check_for_updates(false).await });
-        }
+        });
+        self.menu("ListMenu_ClearList", |w| {
+            let Some(name) = w.list_menu_owner() else { return };
+            if w.f().items(&name).is_empty() {
+                return;
+            }
+            let w = w.clone();
+            spawn(async move {
+                if dialogs::ask(ROOT, &trl("All entries will be removed from the list.\nAre you sure?"), MsgIcon::Warning, MsgButtons::YesNo, true)
+                    .await
+                    == MsgResult::Yes
+                {
+                    w.f().set_items(&name, Vec::new());
+                    w.f().set_text(&name, "");
+                }
+            });
+        });
+        // password box font (`PasswBoxMenu_ChangeFont`)
+        let font = self.core.borrow().ini.read_string("Main", "PasswBoxFont", "");
+        crate::vcl::fonts::set_passw_font(&windows::ctx(), crate::vcl::fonts::FontSpec::parse(&font));
+        self.f().set_font_family("PasswBox", Some(crate::vcl::fonts::PASSW));
+        self.menu("PasswBoxMenu_ChangeFont", |_| {
+            spawn(async move {
+                let cur = crate::vcl::fonts::passw_font();
+                if let Some(f) = crate::ui::font_dialog::choose_font(ROOT, cur.as_ref(), true).await {
+                    crate::vcl::fonts::set_passw_font(&windows::ctx(), Some(f));
+                }
+            });
+        });
+        self.menu("PasswBoxMenu_ResetFont", |_| crate::vcl::fonts::set_passw_font(&windows::ctx(), None));
+        self.update_passw_cache_menu();
+        self.update_total_ent_bits_menu();
+    }
+
+    /// Combo box whose list menu is open.
+    fn list_menu_owner(&self) -> Option<String> {
+        self.f().popup_owner().filter(|n| ["CharSetList", "WLFNList", "FormatList", "ScriptList"].contains(&n.as_str()))
+    }
+
+    /// Enabled state of the list menu items (every frame).
+    pub(super) fn update_list_menu(&self) {
+        let Some(name) = self.list_menu_owner() else { return };
+        let items = self.f().items(&name);
+        let text = self.f().text(&name);
+        self.f().set_menu_enabled("ListMenu_RemoveEntry", items.iter().any(|s| *s == text));
+        self.f().set_menu_enabled("ListMenu_ClearList", !items.is_empty());
     }
 
     /// Called every second by the main timer.
-    pub(super) fn tools_timer(self: &Rc<Self>) {
+    pub(super) fn tools_timer(&self) {
         self.update_passw_cache_menu();
         self.update_total_ent_bits_menu();
-        // new windows also have to stay on top
-        if self.action_checked("MainMenu_Options_AlwaysOnTop") {
-            use gtk::glib::object::ObjectType;
-            let mut ids: Vec<usize> = gtk::Window::list_toplevels()
-                .into_iter()
-                .filter_map(|x| x.downcast::<gtk::Window>().ok())
-                .filter(|x| x.is_visible())
-                .map(|x| x.as_ptr() as usize)
-                .collect();
-            ids.sort_unstable();
-            if *self.tools.top_windows.borrow() != ids {
-                *self.tools.top_windows.borrow_mut() = ids;
-                self.apply_always_on_top();
-            }
-        }
     }
 
-    /// `MainMenu_Options_AlwaysOnTopClick()`.
-    fn apply_always_on_top(self: &Rc<Self>) {
-        let above = self.action_checked("MainMenu_Options_AlwaysOnTop");
-        let Some(app) = self.window.application() else { return };
-        let w = Rc::downgrade(self);
-        glib::spawn_future_local(async move {
-            if !crate::ui::active_window::set_keep_above(&app, above).await {
-                if let Some(w) = w.upgrade() {
-                    // no KWin: the function is not available
-                    w.set_action_checked("MainMenu_Options_AlwaysOnTop", false);
-                    w.b.action("MainMenu_Options_AlwaysOnTop").set_enabled(false);
-                }
-            }
-        });
-    }
-
-    pub(super) fn passw_enter(self: &Rc<Self>) -> Rc<PasswEnterDlg> {
+    pub(crate) fn passw_enter(&self) -> Rc<PasswEnterDlg> {
         if let Some(d) = self.tools.passw_enter.borrow().as_ref() {
             d.use_advanced_passw_est.set(self.core.borrow().use_advanced_passw_est);
             return d.clone();
         }
-        let d = PasswEnterDlg::new(&self.win(), &self.core.borrow().ini);
-        self.attach_entropy_events(&d.win);
+        let d = PasswEnterDlg::new(&self.core.borrow().ini);
         d.use_advanced_passw_est.set(self.core.borrow().use_advanced_passw_est);
         *self.tools.passw_enter.borrow_mut() = Some(d.clone());
         d
     }
 
+    pub(super) fn tool_size(&self, id: &'static str, ini_id: &str, height: bool) -> Option<egui::Vec2> {
+        if let Some(s) = self.tools.sizes.borrow().get(id) {
+            return Some(*s);
+        }
+        let core = self.core.borrow();
+        let w = core.ini.read_int(ini_id, "WindowWidth", 0);
+        let h = if height { core.ini.read_int(ini_id, "WindowHeight", 0) } else { 0 };
+        (w > 0).then(|| egui::vec2(w as f32, h as f32))
+    }
+
+    pub(super) fn remember_size(&self, id: &'static str, win: &windows::Window) {
+        if let Some(s) = win.last_size.get() {
+            self.tools.sizes.borrow_mut().insert(id, s);
+        }
+    }
+
+    /// Show a kept tool window; its size is remembered when it closes.
+    pub(super) fn show_tool(self: &Rc<Self>, id: &'static str, ini_id: &str, height: bool, form: &Rc<Form>, parent: ViewportId, modal: bool) -> Rc<windows::Window> {
+        let win = tool_window(id, form, parent, modal, self.tool_size(id, ini_id, height));
+        let w = self.weak();
+        let wid = Rc::downgrade(&win);
+        *win.on_close.borrow_mut() = Some(Box::new(move || {
+            if let (Some(w), Some(win)) = (w.upgrade(), wid.upgrade()) {
+                w.remember_size(id, &win);
+            }
+            true
+        }));
+        windows::present(win.clone());
+        win
+    }
+
+    /// Close a kept tool window, remembering its size.
+    pub(super) fn close_tool(&self, id: &'static str) {
+        let vid = ViewportId::from_hash_of(id);
+        if let Some(s) = windows::last_size(vid) {
+            self.tools.sizes.borrow_mut().insert(id, s);
+        }
+        windows::close(vid);
+    }
+
     /// Save the configuration of the tool dialogs (part of `SaveConfig()`).
     pub(super) fn save_tools_config(&self) {
+        for (id, _) in [("ProvideEntropy", 0), ("CreateRandDataFile", 0), ("CreateTrigramFile", 0), ("ConfigWin", 0), ("ProfileEditor", 0), ("CharSetBuilder", 0), ("MPPasswGen", 0)] {
+            if let Some(s) = windows::last_size(ViewportId::from_hash_of(id)) {
+                self.tools.sizes.borrow_mut().insert(id, s);
+            }
+        }
+        let sizes = self.tools.sizes.borrow().clone();
         let mut core = self.core.borrow_mut();
         let ini = &mut core.ini;
-        self.save_config_dlg_config(ini);
-        self.save_profile_editor_config(ini);
-        self.save_char_set_builder_config(ini);
-        self.save_mp_passw_gen_config(ini);
-        if let Some(m) = self.passw_mng.borrow().as_ref() {
-            m.save_config(ini);
+        for (id, s) in sizes {
+            ini.write_integer(id, "WindowWidth", s.x as i64);
+            if id != "CreateRandDataFile" && id != "CreateTrigramFile" {
+                ini.write_integer(id, "WindowHeight", s.y as i64);
+            }
         }
-        if let Some(pl) = self.passw_list.borrow().as_ref() {
-            pl.save_config(ini);
-        }
-        super::super::dialogs::save_quick_help_config(ini);
-        ini.write_string(
-            "Main",
-            "PasswBoxFont",
-            &self.tools.passw_font.borrow().as_ref().map(|f| f.to_font_string()).unwrap_or_default(),
-        );
+        ini.write_string("Main", "PasswBoxFont", &crate::vcl::fonts::passw_font().map(|f| f.to_font_string()).unwrap_or_default());
         if let Some(d) = self.tools.passw_enter.borrow().as_ref() {
             d.save_config(ini);
         }
-        if let Some((_, win)) = self.tools.provide_entropy.borrow().as_ref() {
-            ini.write_integer("ProvideEntropy", "WindowHeight", win.default_height() as i64);
-            ini.write_integer("ProvideEntropy", "WindowWidth", win.default_width() as i64);
+        if let Some(f) = self.tools.rand_data_file.borrow().as_ref() {
+            ini.write_string("CreateRandDataFile", "FileSize", &f.text("FileSizeBox"));
+            ini.write_integer("CreateRandDataFile", "FileSizeUnitIdx", f.item_index("SizeUnitList").unwrap_or(0) as i64);
         }
-        if let Some((b, win)) = self.tools.rand_data_file.borrow().as_ref() {
-            ini.write_integer("CreateRandDataFile", "WindowWidth", win.default_width() as i64);
-            ini.write_string("CreateRandDataFile", "FileSize", &b.get::<gtk::Entry>("FileSizeBox").text());
-            ini.write_integer(
-                "CreateRandDataFile",
-                "FileSizeUnitIdx",
-                b.get::<gtk::ComboBoxText>("SizeUnitList").active().map(|i| i as i64).unwrap_or(0),
-            );
+        if let Some(d) = self.tools.profile_dlg.borrow().as_ref() {
+            d.save_config(ini);
         }
-        if let Some((_, win)) = self.tools.trigram_file.borrow().as_ref() {
-            ini.write_integer("CreateTrigramFile", "WindowWidth", win.default_width() as i64);
+        if let Some(d) = self.tools.mp_passw_gen.borrow().as_ref() {
+            d.save_config(ini);
+        }
+        if let Some(pm) = self.tools.passw_mng.borrow().as_ref() {
+            pm.save_config(ini);
         }
     }
 
     // ------------------------------------------------------------------
-    // profiles
+    // password manager
 
-    /// Profile entries of File | Profile and Tray | Profile
-    /// (`UpdateProfileControls()`).
-    pub(super) fn update_profile_menu(&self) {
-        self.update_tray_icon();
-        let names: Vec<String> = self.core.borrow().profiles.iter().map(|p| p.profile_name.clone()).collect();
-        let app = self.window.application();
-        for old in self.tools.profile_accels.borrow_mut().drain(..) {
-            if let Some(app) = &app {
-                app.set_accels_for_action(&old, &[]);
-            }
+    /// The password manager (created on first use).
+    pub fn passw_manager(self: &Rc<Self>) -> Rc<crate::ui::passw_manager::PasswManager> {
+        if let Some(pm) = self.tools.passw_mng.borrow().as_ref() {
+            return pm.clone();
         }
-        for section in [&self.tools.profile_section, &self.tools.tray_profile_section] {
-            section.remove_all();
-        }
-        let shortcuts: Vec<char> = PROFILES_MENU_SHORTCUTS.chars().collect();
-        for (i, name) in names.iter().enumerate() {
-            let mut caption = String::new();
-            if let Some(&c) = shortcuts.get(i) {
-                caption.push('_');
-                caption.push(c);
-                caption.push(' ');
-            }
-            caption.push_str(&name.replace('_', "__"));
-            for section in [&self.tools.profile_section, &self.tools.tray_profile_section] {
-                let item = gio::MenuItem::new(Some(&caption), None);
-                item.set_action_and_target_value(Some("m.LoadProfileIdx"), Some(&(i as i32).to_variant()));
-                section.append_item(&item);
-            }
-            if let (Some(&c), Some(app)) = (shortcuts.get(i), &app) {
-                let detailed = format!("m.LoadProfileIdx({i})");
-                let key = if c.is_ascii_digit() { c.to_string() } else { c.to_ascii_lowercase().to_string() };
-                app.set_accels_for_action(&detailed, &[&format!("<Alt><Shift>{key}")]);
-                self.tools.profile_accels.borrow_mut().push(detailed);
-            }
+        let pm = crate::ui::passw_manager::PasswManager::new(self);
+        *self.tools.passw_mng.borrow_mut() = Some(pm.clone());
+        pm
+    }
+
+    /// `MainMenu_File_PasswManagerClick()`.
+    pub fn show_passw_manager(self: &Rc<Self>) {
+        self.passw_manager().show();
+    }
+
+    /// Whether a database is open in the password manager.
+    pub(super) fn db_open(&self) -> bool {
+        self.tools.passw_mng.borrow().as_ref().is_some_and(|pm| pm.is_db_open())
+    }
+
+    /// "Add to Database" (one entry per line).
+    pub fn add_passw_to_db(self: &Rc<Self>, passw: &str, show_num_passw: bool, param: Option<&str>) -> usize {
+        let pm = self.tools.passw_mng.borrow().clone();
+        match pm {
+            Some(pm) if pm.is_db_open() => pm.add_passw_to_db(passw, show_num_passw, param),
+            _ => 0,
         }
     }
 
-    /// `MainMenu_File_ProfileClick()`.
-    fn profile_menu_click(&self, i: usize) {
-        let Some(name) = self.core.borrow().profiles.get(i).map(|p| p.profile_name.clone()) else { return };
-        self.load_profile(i);
-        info_box(&self.win(), &trl_format("Profile \"%1\" activated.", &[&name]));
+    /// Generate a single password with the current settings and pass it to
+    /// `f` instead of showing it (`GeneratePassw(gpdGuiSingle, pEditBox)`).
+    pub fn generate_passw_for(self: &Rc<Self>, f: Rc<dyn Fn(&str)>) {
+        *self.gen_target.borrow_mut() = Some(f);
+        self.generate_passw(GenDest::GuiSingle);
+    }
+
+    /// `LoadProfile(name)`: `false` if there is no such profile.
+    pub fn load_profile_by_name(&self, name: &str) -> bool {
+        let idx = pwtool_core::config::find_profile(&self.core.borrow().profiles, name);
+        match idx {
+            Some(i) => {
+                self.load_profile(i);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Formatted password from the deterministic generator if active, else
+    /// the random pool (PassCube's "FormatPW" key and new entries).
+    pub fn format_passw_with_active_rng(&self, format: &str) -> Option<Zeroizing<String>> {
+        let pg = PasswordGenerator::new();
+        let f = pwtool_core::unicode::str_to_w32(format);
+        let r = if let Some(det) = self.key_seeded_prng.borrow_mut().as_mut() {
+            pg.get_format_passw(det, &f, 0, None, 16000, None)
+        } else {
+            pg.get_format_passw(&mut *RandomPool::global(), &f, 0, None, 16000, None)
+        };
+        if r.passw.is_empty() { None } else { Some(pwtool_core::unicode::w32_to_string_secure(&r.passw)) }
     }
 
     // ------------------------------------------------------------------
     // encryption of text
 
-    fn crypt_text_spawn(self: &Rc<Self>, encrypt: bool, text: Option<Zeroizing<String>>) {
+    pub(super) fn crypt_text_spawn(self: &Rc<Self>, encrypt: bool, text: Option<Zeroizing<String>>, parent: ViewportId) {
         let w = self.clone();
-        glib::spawn_future_local(async move { w.crypt_text(encrypt, text, None).await });
+        spawn(async move { w.crypt_text(encrypt, text, parent).await });
     }
 
     /// `CryptText()`: encrypt/decrypt `text` (or the clipboard text) and put
     /// the result on the clipboard.
-    pub async fn crypt_text(self: &Rc<Self>, encrypt: bool, text: Option<Zeroizing<String>>, parent: Option<gtk::Window>) {
+    pub async fn crypt_text(self: &Rc<Self>, encrypt: bool, text: Option<Zeroizing<String>>, parent: ViewportId) {
         let dlg = self.passw_enter();
         let mut flags = PASSWENTER_FLAG_ENABLEPASSWCACHE;
         flags |= if encrypt {
@@ -437,8 +405,7 @@ impl MainWindow {
         } else {
             PASSWENTER_FLAG_DECRYPT | PASSWENTER_FLAG_ENABLEOLDVER
         };
-        let parent = parent.unwrap_or_else(|| self.win());
-        if dlg.execute(flags, "", Some(&parent)).await != EnterResult::Ok {
+        if dlg.execute(flags, "", parent).await != EnterResult::Ok {
             dlg.clear_and_flush();
             return;
         }
@@ -447,16 +414,7 @@ impl MainWindow {
         dlg.clear_and_flush();
         self.update_passw_cache_menu();
 
-        let text = match text {
-            Some(t) => Some(t),
-            None => {
-                let (tx, rx) = async_channel::bounded(1);
-                super::super::clipboard::read_text(move |t| {
-                    let _ = tx.try_send(t);
-                });
-                rx.recv().await.ok().flatten()
-            }
-        };
+        let text = text.or_else(clipboard::read_text);
         let result: Result<(), CryptTextError> = match text {
             None => Err(CryptTextError::NoText),
             Some(t) if t.is_empty() => Err(CryptTextError::NoText),
@@ -470,20 +428,19 @@ impl MainWindow {
                         pool.flush();
                         r
                     };
-                    r.map(|out| super::super::clipboard::set_plain(&out))
+                    r.map(|out| clipboard::set_plain(&out))
                 } else {
-                    decrypt_text_with_password(&t, &passw, old_version)
-                        .map(|out| super::super::clipboard::set_hidden(&out.text))
+                    decrypt_text_with_password(&t, &passw, old_version).map(|out| clipboard::set_hidden(&out.text))
                 }
             }
         };
         match result {
             Ok(()) => {
                 let m = trl(if encrypt { "Text successfully encrypted." } else { "Text successfully decrypted." });
-                if self.tray.hidden.get() {
-                    show_tray_info(self, &m, false);
+                if self.is_hidden() {
+                    self.show_tray_info(&m, false);
                 } else {
-                    info_box(&parent, &m);
+                    info_box(parent, &m);
                 }
             }
             Err(e) => {
@@ -491,9 +448,7 @@ impl MainWindow {
                     CryptTextError::Clipboard => trl("Could not open clipboard."),
                     CryptTextError::NoText => trl("No text available to process."),
                     CryptTextError::TextTooLong => trl("The text to be encrypted is too long."),
-                    CryptTextError::OutOfMemory => {
-                        trl("Not enough memory available to perform\nthe operation. Try to use a shorter text.")
-                    }
+                    CryptTextError::OutOfMemory => trl("Not enough memory available to perform\nthe operation. Try to use a shorter text."),
                     CryptTextError::TextCorrupted | CryptTextError::BadKey => {
                         let mut m = trl("Decryption failed. This may be attributed\nto the following reasons:");
                         m.push('\n');
@@ -504,11 +459,13 @@ impl MainWindow {
                         m.push_str(&trl("- The text is corrupted.\n- The text is not encrypted."));
                         m
                     }
-                    CryptTextError::DecomprFailed => {
-                        trl("This should not have happened:\nDecryption successful, but decompression\nfailed.")
-                    }
+                    CryptTextError::DecomprFailed => trl("This should not have happened:\nDecryption successful, but decompression\nfailed."),
                 };
-                msg_box(Some(&parent), &m, MsgIcon::Error, MsgButtons::Ok, false).await;
+                if self.is_hidden() {
+                    self.show_tray_info(&m, true);
+                } else {
+                    dialogs::ask(parent, &m, MsgIcon::Error, MsgButtons::Ok, false).await;
+                }
             }
         }
     }
@@ -523,7 +480,7 @@ impl MainWindow {
             .execute(
                 PASSWENTER_FLAG_CONFIRMPASSW | PASSWENTER_FLAG_ENABLEPASSWCACHE | PASSWENTER_FLAG_PASSWQUALITY,
                 &trl("Master password"),
-                Some(&self.win()),
+                ROOT,
             )
             .await
             == EnterResult::Ok;
@@ -531,24 +488,27 @@ impl MainWindow {
         dlg.clear_and_flush();
         self.update_passw_cache_menu();
         if let Some(p) = passw {
-            self.use_key_seeded_prng(&p);
+            self.use_key_seeded_prng_with(pwtool_core::mp_passw_gen::deterministic_generator(&p));
         }
     }
 
     /// Caption/state of Options | Clear Password Cache
     /// (`MainMenu_OptionsClick()`).
     fn update_passw_cache_menu(&self) {
-        let n = self.tools.passw_enter.borrow().as_ref().map(|d| d.passw_cache_expiry_countdown()).unwrap_or(0);
-        if n == self.tools.last_cache_countdown.get() {
+        let d = self.tools.passw_enter.borrow().clone();
+        let n = d.as_ref().map(|d| d.passw_cache_expiry_countdown()).unwrap_or(0);
+        let cached = d.as_ref().is_some_and(|d| d.has_cached_passw());
+        let key = if cached { n.max(0) + 1 } else { 0 };
+        if key == self.tools.last_cache_countdown.get() {
             return;
         }
-        self.tools.last_cache_countdown.set(n);
+        self.tools.last_cache_countdown.set(key);
         let mut caption = trl("Clear Password Cache");
         if n > 0 {
             caption.push_str(&if n > 99 { format!(" ({:.1}min)", n as f64 / 60.0) } else { format!(" ({n}sec)") });
         }
-        self.b.set_menu_label("MainMenu_Options_ClearPasswCache", &super::super::builder::mnemonic(&caption));
-        self.b.action("MainMenu_Options_ClearPasswCache").set_enabled(n > 0);
+        self.f().set_menu_caption("MainMenu_Options_ClearPasswCache", &caption);
+        self.f().set_menu_enabled("MainMenu_Options_ClearPasswCache", cached);
     }
 
     /// Caption of Help | Total Entropy Bits (`MainMenu_HelpClick()`).
@@ -557,161 +517,74 @@ impl MainWindow {
         if self.tools.last_total_bits.replace(total as i64) == total as i64 {
             return;
         }
-        self.b.set_menu_label("MainMenu_Help_TotalEntBits", &trl_format("Total Entropy Bits: %1", &[&total.to_string()]));
-        self.b.action("MainMenu_Help_TotalEntBits").set_enabled(false);
+        self.f().set_menu_caption("MainMenu_Help_TotalEntBits", &trl_format("Total Entropy Bits: %1", &[&total.to_string()]));
+        self.f().set_menu_enabled("MainMenu_Help_TotalEntBits", false);
     }
 
     // ------------------------------------------------------------------
-    // list menu of the combo boxes
+    // autotype
 
-    fn connect_list_menus(self: &Rc<Self>) {
-        let remove = gio::SimpleAction::new("ListRemoveEntry", Some(glib::VariantTy::STRING));
-        let w = Rc::downgrade(self);
-        remove.connect_activate(move |_, p| {
-            let (Some(w), Some(name)) = (w.upgrade(), p.and_then(|p| p.get::<String>())) else { return };
-            let cb = w.combo(&name);
-            let text = combo_text(&cb);
-            let idx = cb.active().or_else(|| {
-                w.combo_items(&name).iter().position(|s| s == &text).map(|i| i as u32)
-            });
-            if let Some(i) = idx {
-                cb.remove(i as i32);
-                set_combo_text(&cb, &text);
-            }
-        });
-        self.b.actions.add_action(&remove);
-        let clear = gio::SimpleAction::new("ListClearList", Some(glib::VariantTy::STRING));
-        let w = Rc::downgrade(self);
-        clear.connect_activate(move |_, p| {
-            let (Some(w), Some(name)) = (w.upgrade(), p.and_then(|p| p.get::<String>())) else { return };
-            glib::spawn_future_local(async move {
-                let cb = w.combo(&name);
-                if cb.model().map(|m| m.iter_n_children(None)).unwrap_or(0) == 0 {
-                    return;
-                }
-                if msg_box(
-                    Some(&w.win()),
-                    &trl("All entries will be removed from the list.\nAre you sure?"),
-                    MsgIcon::Warning,
-                    MsgButtons::YesNo,
-                    true,
-                )
-                .await
-                    == MsgResult::Yes
-                {
-                    cb.remove_all();
-                    set_combo_text(&cb, "");
-                }
-            });
-        });
-        self.b.actions.add_action(&clear);
-        let label = |name: &str, def: &str| {
-            self.b
-                .obj(name)
-                .and_then(|o| o.str("Caption"))
-                .map(|c| super::super::builder::mnemonic(&super::super::builder::tr_caption(c)))
-                .unwrap_or_else(|| def.to_string())
+    /// Perform autotype (`SendKeys` / `TSendKeysThread`): an empty
+    /// `sequence` types `passw` only.
+    pub(super) fn perform_autotype(self: &Rc<Self>, sequence: &str, param: Option<&str>, passw: Option<&str>) {
+        let (delay, minimize) = {
+            let c = &self.core.borrow().config;
+            (c.autotype_delay.clamp(0, 10000) as u32, c.minimize_autotype)
         };
-        let remove_label = label("ListMenu_RemoveEntry", "Remove Entry");
-        let clear_label = label("ListMenu_ClearList", "Clear List");
-        for name in ["CharSetList", "WLFNList", "FormatList", "ScriptList"] {
-            let Some(e) = combo_entry(&self.combo(name)) else { continue };
-            let menu = gio::Menu::new();
-            let item = gio::MenuItem::new(Some(&remove_label), None);
-            item.set_action_and_target_value(Some("m.ListRemoveEntry"), Some(&name.to_variant()));
-            menu.append_item(&item);
-            let item = gio::MenuItem::new(Some(&clear_label), None);
-            item.set_action_and_target_value(Some("m.ListClearList"), Some(&name.to_variant()));
-            menu.append_item(&item);
-            e.set_extra_menu(Some(&menu));
-            e.set_enable_undo(true);
-            // update Remove/Clear enabled states when opening the context menu
-            let gesture = gtk::GestureClick::new();
-            gesture.set_button(gdk::BUTTON_SECONDARY);
-            gesture.set_propagation_phase(gtk::PropagationPhase::Capture);
-            let w = Rc::downgrade(self);
-            let (rem_a, clr_a) = (remove.clone(), clear.clone());
-            let cname = name.to_string();
-            gesture.connect_pressed(move |_, _, _, _| {
-                if let Some(w) = w.upgrade() {
-                    let cb = w.combo(&cname);
-                    let items = w.combo_items(&cname);
-                    let text = combo_text(&cb);
-                    let has_entry = cb.active().is_some() || items.iter().any(|s| s == &text);
-                    rem_a.set_enabled(has_entry);
-                    clr_a.set_enabled(!items.is_empty());
-                }
-            });
-            e.add_controller(gesture);
-        }
+        let strokes = if sequence.is_empty() {
+            let mut v = Vec::new();
+            pwtool_app::autotype::string_sequence(passw.unwrap_or(""), delay, &mut v);
+            v
+        } else {
+            pwtool_app::autotype::build_sequence(sequence, None, param, passw, delay)
+        };
+        self.send_keys(strokes, minimize);
     }
 
     // ------------------------------------------------------------------
     // backup / restore settings
 
-    fn backup_settings(self: &Rc<Self>) {
-        let dlg = gtk::FileDialog::new();
-        dlg.set_title(&trl("Select folder to store backup"));
-        let w = self.clone();
-        dlg.select_folder(Some(&self.window), gio::Cancellable::NONE, move |r| {
-            let Some(dir) = r.ok().and_then(|f| f.path()) else { return };
-            let ini_path = dir.join(PROGRAM_INIFILE);
-            if !w.save_config_to(Some(&ini_path)) {
-                return;
+    async fn backup_settings(self: &Rc<Self>) {
+        let Some(dir) = crate::vcl::dialogs::pick_folder(&trl("Select folder to store backup")).await else { return };
+        let ini_path = dir.join(PROGRAM_INIFILE);
+        if !self.save_config_to(Some(&ini_path)) {
+            return;
+        }
+        let mut failed = Vec::new();
+        for le in &self.core.borrow().languages {
+            let Some(src) = &le.file_name else { continue };
+            let Some(name) = src.file_name() else { continue };
+            if std::fs::copy(src, dir.join(name)).is_err() {
+                failed.push(name.to_string_lossy().into_owned());
             }
-            let mut failed = Vec::new();
-            for le in &w.core.borrow().languages {
-                let Some(src) = &le.file_name else { continue };
-                let Some(name) = src.file_name() else { continue };
-                if std::fs::copy(src, dir.join(name)).is_err() {
-                    failed.push(name.to_string_lossy().into_owned());
-                }
-            }
-            let w2 = w.clone();
-            glib::spawn_future_local(async move {
-                if !failed.is_empty() {
-                    let m = trl_format("Could not copy the following language file(s):\n%1", &[&failed.join("\n")]);
-                    msg_box(Some(&w2.win()), &m, MsgIcon::Warning, MsgButtons::Ok, false).await;
-                }
-                msg_box(
-                    Some(&w2.win()),
-                    &trl_format("Backup of settings and language files\nstored in \"%1\".", &[&dir.to_string_lossy()]),
-                    MsgIcon::Info,
-                    MsgButtons::Ok,
-                    false,
-                )
-                .await;
-            });
-        });
+        }
+        if !failed.is_empty() {
+            let m = trl_format("Could not copy the following language file(s):\n%1", &[&failed.join("\n")]);
+            dialogs::ask(ROOT, &m, MsgIcon::Warning, MsgButtons::Ok, false).await;
+        }
+        dialogs::ask(
+            ROOT,
+            &trl_format("Backup of settings and language files\nstored in \"%1\".", &[&dir.to_string_lossy()]),
+            MsgIcon::Info,
+            MsgButtons::Ok,
+            false,
+        )
+        .await;
     }
 
-    fn restore_settings(self: &Rc<Self>) {
-        let dlg = gtk::FileDialog::new();
-        dlg.set_title(&trl("Select folder containing backup to restore"));
-        let w = self.clone();
-        dlg.select_folder(Some(&self.window), gio::Cancellable::NONE, move |r| {
-            let Some(dir) = r.ok().and_then(|f| f.path()) else { return };
-            let w = w.clone();
-            glib::spawn_future_local(async move { w.restore_settings_from(&dir).await });
-        });
+    async fn restore_settings(self: &Rc<Self>) {
+        let Some(dir) = crate::vcl::dialogs::pick_folder(&trl("Select folder containing backup to restore")).await else { return };
+        self.restore_settings_from(&dir).await;
     }
 
     async fn restore_settings_from(self: &Rc<Self>, dir: &Path) {
-        let parent = self.win();
         let mut src = dir.join(PROGRAM_INIFILE);
         if !src.is_file() {
             // a backup of the original program (Password Tech)
             src = dir.join("PwTech.ini");
         }
         if !src.is_file() {
-            msg_box(
-                Some(&parent),
-                &trl_format("Configuration file \"%1\" not found in folder.", &[PROGRAM_INIFILE]),
-                MsgIcon::Error,
-                MsgButtons::Ok,
-                false,
-            )
-            .await;
+            dialogs::ask(ROOT, &trl_format("Configuration file \"%1\" not found in folder.", &[PROGRAM_INIFILE]), MsgIcon::Error, MsgButtons::Ok, false).await;
             return;
         }
         if let Ok(ini) = pwtool_core::config::IniFile::load(&src) {
@@ -719,9 +592,9 @@ impl MainWindow {
             if v.is_empty() {
                 v = "0".into();
             }
-            if crate::app::compare_versions(&v, PROGRAM_VERSION) < 0
-                && msg_box(
-                    Some(&parent),
+            if pwtool_app::app::compare_versions(&v, PROGRAM_VERSION) < 0
+                && dialogs::ask(
+                    ROOT,
                     &trl_format("Backup was created with an older version (%1)\nof the program. Continue anyway?", &[&v]),
                     MsgIcon::Warning,
                     MsgButtons::YesNo,
@@ -739,14 +612,8 @@ impl MainWindow {
         };
         let _ = std::fs::create_dir_all(&data_dir);
         if std::fs::copy(&src, &dest).is_err() {
-            msg_box(
-                Some(&parent),
-                &trl_format("Could not copy configuration file to\n\"%1\".", &[&dest.to_string_lossy()]),
-                MsgIcon::Error,
-                MsgButtons::Ok,
-                false,
-            )
-            .await;
+            dialogs::ask(ROOT, &trl_format("Could not copy configuration file to\n\"%1\".", &[&dest.to_string_lossy()]), MsgIcon::Error, MsgButtons::Ok, false)
+                .await;
             return;
         }
         let mut failed = Vec::new();
@@ -766,12 +633,12 @@ impl MainWindow {
         }
         if !failed.is_empty() {
             let m = trl_format("Could not copy the following language file(s):\n%1", &[&failed.join("\n")]);
-            msg_box(Some(&parent), &m, MsgIcon::Warning, MsgButtons::Ok, false).await;
+            dialogs::ask(ROOT, &m, MsgIcon::Warning, MsgButtons::Ok, false).await;
         }
         // ensure that the restored file will not be overwritten during runtime
         self.core.borrow_mut().fake_ini = true;
-        if msg_box(
-            Some(&parent),
+        if dialogs::ask(
+            ROOT,
             &trl("Restored settings will only take effect after\na program restart. Do you want to restart now?"),
             MsgIcon::Question,
             MsgButtons::YesNo,
@@ -782,8 +649,8 @@ impl MainWindow {
         {
             self.restart_program();
         } else {
-            msg_box(
-                Some(&parent),
+            dialogs::ask(
+                ROOT,
                 &trl("Configuration settings will not be saved until\nthe next time the program is started."),
                 MsgIcon::Info,
                 MsgButtons::Ok,
@@ -795,8 +662,8 @@ impl MainWindow {
 
     /// Close the program and start it again (`TerminateAction::RestartProgram`).
     pub(super) fn restart_program(&self) {
-        crate::app::request_restart();
-        self.window.close();
+        pwtool_app::app::request_restart();
+        windows::ctx().send_viewport_cmd(ViewportCommand::Close);
     }
 
     // ------------------------------------------------------------------
@@ -804,126 +671,127 @@ impl MainWindow {
 
     /// `MainMenu_Tools_ProvideAddEntropy_AsTextClick()`.
     fn provide_entropy(self: &Rc<Self>) {
-        if self.tools.provide_entropy.borrow().is_none() {
-            let b = build_form(load_form("ProvideEntropy"), "ProvideEntropy");
-            let win = super::super::dialogs::form_window(&b, Some(&self.win()), true);
-            win.set_hide_on_close(true);
-            if let Some(l) = b.try_get::<gtk::Label>("InfoLbl") {
-                l.set_wrap(true);
+        let form = self.tools.provide_entropy.borrow().clone();
+        let form = match form {
+            Some(f) => f,
+            None => {
+                let f = dialogs::load("ProvideEntropy");
+                f.set_secret("TextBox");
+                f.set_enabled("OKBtn", false);
+                let ff = Rc::downgrade(&f);
+                f.on_change("TextBox", move |_| {
+                    if let Some(f) = ff.upgrade() {
+                        f.set_enabled("OKBtn", !f.secret_text("TextBox").is_empty());
+                    }
+                });
+                let ww = self.weak();
+                f.on_click("CancelBtn", move |_| {
+                    if let Some(w) = ww.upgrade() {
+                        w.f_provide_entropy_clear();
+                        w.close_tool("ProvideEntropy");
+                    }
+                });
+                let ww = self.weak();
+                f.on_click("OKBtn", move |_| {
+                    let Some(w) = ww.upgrade() else { return };
+                    let Some(f) = w.tools.provide_entropy.borrow().clone() else { return };
+                    let text = f.secret_text("TextBox");
+                    w.f_provide_entropy_clear();
+                    w.close_tool("ProvideEntropy");
+                    if !text.is_empty() {
+                        let bits = EntropyManager::global().add_data(&mut RandomPool::global(), text.as_bytes(), 0.437, 3.5);
+                        w.update_entropy_progress(false);
+                        msg(ROOT, &trl_format("%1 bits of entropy have been added to the random pool.", &[&bits.to_string()]), MsgIcon::Info);
+                    }
+                });
+                *self.tools.provide_entropy.borrow_mut() = Some(f.clone());
+                f
             }
-            let view: gtk::TextView = b.get("TextBox.view");
-            view.set_wrap_mode(gtk::WrapMode::WordChar);
-            let ok: gtk::Button = b.get("OKBtn");
-            ok.set_sensitive(false);
-            let ok2 = ok.clone();
-            view.buffer().connect_changed(move |buf| ok2.set_sensitive(buf.char_count() != 0));
-            let win2 = win.clone();
-            b.get::<gtk::Button>("CancelBtn").connect_clicked(move |_| win2.close());
-            let w = Rc::downgrade(self);
-            let win2 = win.clone();
-            let view2 = view.clone();
-            ok.connect_clicked(move |_| {
-                let Some(w) = w.upgrade() else { return };
-                let buf = view2.buffer();
-                let text = Zeroizing::new(buf.text(&buf.start_iter(), &buf.end_iter(), false).to_string());
-                buf.set_text("");
-                if !text.is_empty() {
-                    let bits = EntropyManager::global().add_data(&mut RandomPool::global(), text.as_bytes(), 0.437, 3.5);
-                    w.update_entropy_progress(false);
-                    msg(
-                        Some(&win2),
-                        &trl_format("%1 bits of entropy have been added to the random pool.", &[&bits.to_string()]),
-                        MsgIcon::Info,
-                    );
-                }
-                win2.close();
-            });
-            let view2 = view.clone();
-            win.connect_hide(move |_| view2.buffer().set_text(""));
-            win.set_default_widget(Some(&ok));
-            crate::ui::util::close_on_escape(&win);
-            self.attach_entropy_events(&win);
-            *self.tools.provide_entropy.borrow_mut() = Some((b, win));
-        }
-        if let Some((b, win)) = self.tools.provide_entropy.borrow().as_ref() {
-            win.present();
-            b.w("TextBox.view").grab_focus();
+        };
+        let win = self.show_tool("ProvideEntropy", "ProvideEntropy", true, &form, ROOT, true);
+        let w = self.weak();
+        let wid = Rc::downgrade(&win);
+        *win.on_close.borrow_mut() = Some(Box::new(move || {
+            if let (Some(w), Some(win)) = (w.upgrade(), wid.upgrade()) {
+                w.remember_size("ProvideEntropy", &win);
+                w.f_provide_entropy_clear();
+            }
+            true
+        }));
+        form.focus("TextBox");
+    }
+
+    fn f_provide_entropy_clear(&self) {
+        if let Some(f) = self.tools.provide_entropy.borrow().as_ref() {
+            f.set_text("TextBox", "");
+            f.set_enabled("OKBtn", false);
         }
     }
 
     /// `MainMenu_Tools_CreateRandDataFileClick()`.
     fn create_rand_data_file(self: &Rc<Self>) {
-        if self.tools.rand_data_file.borrow().is_none() {
-            let b = build_form(load_form("CreateRandDataFile"), "CreateRandDataFile");
-            let win = super::super::dialogs::form_window(&b, Some(&self.win()), true);
-            win.set_hide_on_close(true);
-            {
-                let core = self.core.borrow();
-                b.get::<gtk::Entry>("FileSizeBox").set_text(&core.ini.read_string("CreateRandDataFile", "FileSize", ""));
-                let units: gtk::ComboBoxText = b.get("SizeUnitList");
-                let items: Vec<String> = b.obj("SizeUnitList").map(|o| o.strings("Items.Strings")).unwrap_or_default().iter().map(|s| trl(s)).collect();
-                set_combo_items(&units, &items);
-                let n = units.model().map(|m| m.iter_n_children(None)).unwrap_or(0);
-                let idx = core.ini.read_int("CreateRandDataFile", "FileSizeUnitIdx", 0);
-                units.set_active(Some(if idx >= 0 && idx < n { idx as u32 } else { 0 }));
-            }
-            let create: gtk::Button = b.get("CreateFileBtn");
-            let name_box: gtk::Entry = b.get("FileNameBox");
-            let size_box: gtk::Entry = b.get("FileSizeBox");
-            name_box.set_activates_default(true);
-            size_box.set_activates_default(true);
-            let update = {
-                let (create, name_box, size_box) = (create.clone(), name_box.clone(), size_box.clone());
-                move || create.set_sensitive(name_box.text_length() != 0 && size_box.text_length() != 0)
-            };
-            update();
-            let u = update.clone();
-            name_box.connect_changed(move |_| u());
-            let u = update.clone();
-            size_box.connect_changed(move |_| u());
-            let win2 = win.clone();
-            b.get::<gtk::Button>("CloseBtn").connect_clicked(move |_| win2.close());
-            let win2 = win.clone();
-            let nb = name_box.clone();
-            b.get::<gtk::Button>("BrowseBtn").connect_clicked(move |_| {
-                let dlg = gtk::FileDialog::new();
-                let nb = nb.clone();
-                dlg.save(Some(&win2), gio::Cancellable::NONE, move |r| {
-                    if let Some(p) = r.ok().and_then(|f| f.path()) {
-                        nb.set_text(&p.to_string_lossy());
-                        nb.grab_focus();
+        let form = self.tools.rand_data_file.borrow().clone();
+        let form = match form {
+            Some(f) => f,
+            None => {
+                let f = dialogs::load("CreateRandDataFile");
+                {
+                    let core = self.core.borrow();
+                    f.set_text("FileSizeBox", &core.ini.read_string("CreateRandDataFile", "FileSize", ""));
+                    let units: Vec<String> = f.items("SizeUnitList").iter().map(|s| trl(s)).collect();
+                    let n = units.len() as i32;
+                    f.set_items("SizeUnitList", units);
+                    let idx = core.ini.read_int("CreateRandDataFile", "FileSizeUnitIdx", 0);
+                    f.set_item_index("SizeUnitList", Some(if idx >= 0 && idx < n { idx as usize } else { 0 }));
+                }
+                let update = |f: &Form| f.set_enabled("CreateFileBtn", !f.text("FileNameBox").is_empty() && !f.text("FileSizeBox").is_empty());
+                update(&f);
+                for n in ["FileNameBox", "FileSizeBox"] {
+                    let ff = Rc::downgrade(&f);
+                    f.on_change(n, move |_| {
+                        if let Some(f) = ff.upgrade() {
+                            update(&f);
+                        }
+                    });
+                }
+                let ww = self.weak();
+                f.on_click("CloseBtn", move |_| {
+                    if let Some(w) = ww.upgrade() {
+                        w.close_tool("CreateRandDataFile");
                     }
                 });
-            });
-            let w = Rc::downgrade(self);
-            create.connect_clicked(move |_| {
-                if let Some(w) = w.upgrade() {
-                    glib::spawn_future_local(async move { w.create_rand_data_file_run().await });
-                }
-            });
-            win.set_default_widget(Some(&create));
-            crate::ui::util::close_on_escape(&win);
-            self.attach_entropy_events(&win);
-            *self.tools.rand_data_file.borrow_mut() = Some((b, win));
-        }
-        if let Some((b, win)) = self.tools.rand_data_file.borrow().as_ref() {
-            win.present();
-            b.w("FileNameBox").grab_focus();
-        }
+                let ff = Rc::downgrade(&f);
+                f.on_click("BrowseBtn", move |_| {
+                    let ff = ff.clone();
+                    spawn(async move {
+                        if let Some(p) = crate::vcl::dialogs::save_file(&trl("Create random data file"), None, None, &[]).await {
+                            if let Some(f) = ff.upgrade() {
+                                f.set_text("FileNameBox", &p.to_string_lossy());
+                                f.push_event(crate::vcl::Event::Change("FileNameBox".into()));
+                                f.focus("FileNameBox");
+                            }
+                        }
+                    });
+                });
+                let ww = self.weak();
+                f.on_click("CreateFileBtn", move |_| {
+                    if let Some(w) = ww.upgrade() {
+                        spawn(async move { w.create_rand_data_file_run().await });
+                    }
+                });
+                *self.tools.rand_data_file.borrow_mut() = Some(f.clone());
+                f
+            }
+        };
+        self.show_tool("CreateRandDataFile", "CreateRandDataFile", false, &form, ROOT, false);
+        form.focus("FileNameBox");
     }
 
     /// `CreateFileBtnClick()` of `TCreateRandDataFileDlg`.
     async fn create_rand_data_file_run(self: &Rc<Self>) {
-        let (name, size_text, unit, win) = {
-            let r = self.tools.rand_data_file.borrow();
-            let (b, win) = r.as_ref().unwrap();
-            (
-                b.get::<gtk::Entry>("FileNameBox").text().to_string(),
-                b.get::<gtk::Entry>("FileSizeBox").text().to_string(),
-                b.get::<gtk::ComboBoxText>("SizeUnitList").active().unwrap_or(0),
-                win.clone(),
-            )
-        };
+        let Some(f) = self.tools.rand_data_file.borrow().clone() else { return };
+        let parent = ViewportId::from_hash_of("CreateRandDataFile");
+        let (name, size_text, unit) = (f.text("FileNameBox"), f.text("FileSizeBox"), f.item_index("SizeUnitList").unwrap_or(0));
         let mut path = PathBuf::from(&name);
         if path.parent().is_none_or(|p| p.as_os_str().is_empty()) {
             path = self.core.borrow().paths.data_dir.join(&name);
@@ -943,19 +811,12 @@ impl MainWindow {
         };
         // limit file size to 10 TB
         if size == 0 || size > 0xa00_0000_0000 {
-            msg_box(Some(&win), &trl("Invalid file size."), MsgIcon::Error, MsgButtons::Ok, false).await;
+            dialogs::ask(parent, &trl("Invalid file size."), MsgIcon::Error, MsgButtons::Ok, false).await;
             return;
         }
-        if let Some(free) = free_disk_space(&path) {
+        if let Some(free) = pwtool_app::platform::sys::free_disk_space(&path) {
             if free < size {
-                msg_box(
-                    Some(&win),
-                    &trl("Not enough free disk space available\nto create the file."),
-                    MsgIcon::Error,
-                    MsgButtons::Ok,
-                    false,
-                )
-                .await;
+                dialogs::ask(parent, &trl("Not enough free disk space available\nto create the file."), MsgIcon::Error, MsgButtons::Ok, false).await;
                 return;
             }
         }
@@ -981,22 +842,22 @@ impl MainWindow {
             let mut written: u64 = 0;
             let r = (|| -> std::io::Result<()> {
                 use std::io::Write;
-                let mut f = std::fs::File::create(&path2)?;
+                let mut file = std::fs::File::create(&path2)?;
                 let mut buf = Zeroizing::new(vec![0u8; if size >= 10_485_760 { 1_048_576 } else { 65_536 }]);
                 let mut rest = size;
                 while rest > 0 && !c2.load(Ordering::Relaxed) {
                     let n = rest.min(buf.len() as u64) as usize;
                     rng.get_data(&mut buf[..n]);
-                    f.write_all(&buf[..n])?;
+                    file.write_all(&buf[..n])?;
                     written += n as u64;
                     rest -= n as u64;
                     p2.store(written / step, Ordering::Relaxed);
                 }
-                f.flush()
+                file.flush()
             })();
             let _ = tx.send_blocking((rng, written, r));
         });
-        win.set_sensitive(false);
+        f.set_enabled("CreateFileBtn", false);
         let mut progress_win: Option<Rc<ProgressWindow>> = None;
         let start = std::time::Instant::now();
         let fmt = trl("%1 of %2 %3 written.").replace("%3", step_name);
@@ -1004,11 +865,9 @@ impl MainWindow {
             if let Ok(r) = rx.try_recv() {
                 break r;
             }
-            glib::timeout_future(std::time::Duration::from_millis(20)).await;
+            pwtool_app::rt::sleep(Duration::from_millis(20)).await;
             if progress_win.is_none() && start.elapsed().as_millis() >= 1000 {
-                let pw = ProgressWindow::new(&win, &trl("Creating random data file ..."), "");
-                pw.win.present();
-                progress_win = Some(pw);
+                progress_win = Some(ProgressWindow::new(parent, &trl("Creating random data file ..."), ""));
             }
             if let Some(pw) = &progress_win {
                 if pw.cancel.get() {
@@ -1018,41 +877,22 @@ impl MainWindow {
             }
         };
         if let Some(pw) = progress_win {
-            pw.win.destroy();
+            pw.close();
         }
-        win.set_sensitive(true);
+        f.set_enabled("CreateFileBtn", true);
         if let GenRng::Det(g) = rng {
             *self.key_seeded_prng.borrow_mut() = Some(g);
         }
-        let err = if cancel.load(Ordering::Relaxed) {
-            Some(trl("Process was cancelled by the user"))
-        } else {
-            r.err().map(|e| e.to_string())
-        };
+        let err = if cancel.load(Ordering::Relaxed) { Some(trl("Process was cancelled by the user")) } else { r.err().map(|e| e.to_string()) };
         match err {
             Some(e) => {
-                msg_box(
-                    Some(&win),
-                    &trl_format(
-                        "Error while creating file\n\"%1\":\n%2.\n\n%3 bytes written.",
-                        &[&path.to_string_lossy(), &e, &written.to_string()],
-                    ),
-                    MsgIcon::Error,
-                    MsgButtons::Ok,
-                    false,
-                )
-                .await;
+                let m = trl_format("Error while creating file\n\"%1\":\n%2.\n\n%3 bytes written.", &[&path.to_string_lossy(), &e, &written.to_string()]);
+                dialogs::ask(parent, &m, MsgIcon::Error, MsgButtons::Ok, false).await;
             }
             None => {
                 let fname = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                msg_box(
-                    Some(&win),
-                    &trl_format("File \"%1\" successfully created.\n\n%2 bytes written.", &[&fname, &written.to_string()]),
-                    MsgIcon::Info,
-                    MsgButtons::Ok,
-                    false,
-                )
-                .await;
+                let m = trl_format("File \"%1\" successfully created.\n\n%2 bytes written.", &[&fname, &written.to_string()]);
+                dialogs::ask(parent, &m, MsgIcon::Info, MsgButtons::Ok, false).await;
             }
         }
         self.update_entropy_progress(false);
@@ -1060,184 +900,201 @@ impl MainWindow {
 
     /// `MainMenu_Tools_CreateTrigramFileClick()`.
     fn create_trigram_file(self: &Rc<Self>) {
-        if self.tools.trigram_file.borrow().is_none() {
-            let b = build_form(load_form("CreateTrigramFile"), "CreateTrigramFile");
-            let win = super::super::dialogs::form_window(&b, Some(&self.win()), true);
-            win.set_hide_on_close(true);
-            let create: gtk::Button = b.get("CreateFileBtn");
-            let src: gtk::Entry = b.get("SourceFileBox");
-            let dest: gtk::Entry = b.get("DestFileBox");
-            src.set_activates_default(true);
-            dest.set_activates_default(true);
-            let update = {
-                let (create, src, dest) = (create.clone(), src.clone(), dest.clone());
-                move || create.set_sensitive(src.text_length() != 0 && dest.text_length() != 0)
-            };
-            update();
-            let u = update.clone();
-            src.connect_changed(move |_| u());
-            let u = update.clone();
-            dest.connect_changed(move |_| u());
-            let win2 = win.clone();
-            b.get::<gtk::Button>("CloseBtn").connect_clicked(move |_| win2.close());
-            let (win2, src2) = (win.clone(), src.clone());
-            b.get::<gtk::Button>("BrowseBtn").connect_clicked(move |_| {
-                let dlg = gtk::FileDialog::new();
-                let e = src2.clone();
-                dlg.open(Some(&win2), gio::Cancellable::NONE, move |r| {
-                    if let Some(p) = r.ok().and_then(|f| f.path()) {
-                        e.set_text(&p.to_string_lossy());
-                        e.grab_focus();
-                    }
-                });
-            });
-            let (win2, dest2) = (win.clone(), dest.clone());
-            b.get::<gtk::Button>("BrowseBtn2").connect_clicked(move |_| {
-                let dlg = gtk::FileDialog::new();
-                let filters = gio::ListStore::new::<gtk::FileFilter>();
-                let f = gtk::FileFilter::new();
-                f.set_name(Some(&format!("{} (*.tgm)", trl("Trigram files"))));
-                f.add_pattern("*.tgm");
-                filters.append(&f);
-                let f = gtk::FileFilter::new();
-                f.set_name(Some(&format!("{} (*.*)", trl("All files"))));
-                f.add_pattern("*");
-                filters.append(&f);
-                dlg.set_filters(Some(&filters));
-                let e = dest2.clone();
-                dlg.save(Some(&win2), gio::Cancellable::NONE, move |r| {
-                    if let Some(mut p) = r.ok().and_then(|f| f.path()) {
-                        if p.extension().is_none() {
-                            p.set_extension("tgm");
+        let form = self.tools.trigram_file.borrow().clone();
+        let form = match form {
+            Some(f) => f,
+            None => {
+                let f = dialogs::load("CreateTrigramFile");
+                let update = |f: &Form| f.set_enabled("CreateFileBtn", !f.text("SourceFileBox").is_empty() && !f.text("DestFileBox").is_empty());
+                update(&f);
+                for n in ["SourceFileBox", "DestFileBox"] {
+                    let ff = Rc::downgrade(&f);
+                    f.on_change(n, move |_| {
+                        if let Some(f) = ff.upgrade() {
+                            update(&f);
                         }
-                        e.set_text(&p.to_string_lossy());
-                        e.grab_focus();
+                    });
+                }
+                let ww = self.weak();
+                f.on_click("CloseBtn", move |_| {
+                    if let Some(w) = ww.upgrade() {
+                        w.close_tool("CreateTrigramFile");
                     }
                 });
-            });
-            let w = Rc::downgrade(self);
-            let win2 = win.clone();
-            create.connect_clicked(move |_| {
-                let Some(w) = w.upgrade() else { return };
-                let (src_t, dest_t) = {
-                    let r = w.tools.trigram_file.borrow();
-                    let b = &r.as_ref().unwrap().0;
-                    (b.get::<gtk::Entry>("SourceFileBox").text(), b.get::<gtk::Entry>("DestFileBox").text())
-                };
-                let data_dir = w.core.borrow().paths.data_dir.clone();
-                let abs = |s: &str| {
-                    let p = PathBuf::from(s);
-                    if p.parent().is_none_or(|x| x.as_os_str().is_empty()) { data_dir.join(p) } else { p }
-                };
-                let (sp, dp) = (abs(&src_t), abs(&dest_t));
-                let enc = w.core.borrow().file_encoding;
-                let (m, icon) = match PasswordGenerator::create_trigram_file(&sp, &dp, enc) {
-                    Ok((n, bits)) => (
-                        trl_format(
-                            "Trigram file \"%1\" successfully created.\n\n%2 trigrams evaluated.\n%3 bits of entropy per letter.",
-                            &[
-                                &dp.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
-                                &n.to_string(),
-                                &format!("{bits:.2}"),
-                            ],
+                for (btn, edit, save) in [("BrowseBtn", "SourceFileBox", false), ("BrowseBtn2", "DestFileBox", true)] {
+                    let ff = Rc::downgrade(&f);
+                    f.on_click(btn, move |_| {
+                        let ff = ff.clone();
+                        spawn(async move {
+                            let p = if save {
+                                let t = format!("{} (*.tgm)", trl("Trigram files"));
+                                let all = format!("{} (*.*)", trl("All files"));
+                                crate::vcl::dialogs::save_file(&trl("Save trigram file"), None, None, &[(&t, &["tgm"]), (&all, &["*"])]).await.map(|mut p| {
+                                    if p.extension().is_none() {
+                                        p.set_extension("tgm");
+                                    }
+                                    p
+                                })
+                            } else {
+                                crate::vcl::dialogs::open_file(&trl("Select source file"), None, &[]).await
+                            };
+                            if let (Some(p), Some(f)) = (p, ff.upgrade()) {
+                                f.set_text(edit, &p.to_string_lossy());
+                                f.push_event(crate::vcl::Event::Change(edit.into()));
+                                f.focus(edit);
+                            }
+                        });
+                    });
+                }
+                let ww = self.weak();
+                f.on_click("CreateFileBtn", move |_| {
+                    let Some(w) = ww.upgrade() else { return };
+                    let Some(f) = w.tools.trigram_file.borrow().clone() else { return };
+                    let data_dir = w.core.borrow().paths.data_dir.clone();
+                    let abs = |s: &str| {
+                        let p = PathBuf::from(s);
+                        if p.parent().is_none_or(|x| x.as_os_str().is_empty()) { data_dir.join(p) } else { p }
+                    };
+                    let (sp, dp) = (abs(&f.text("SourceFileBox")), abs(&f.text("DestFileBox")));
+                    let enc = w.core.borrow().file_encoding;
+                    let (m, icon) = match PasswordGenerator::create_trigram_file(&sp, &dp, enc) {
+                        Ok((n, bits)) => (
+                            trl_format(
+                                "Trigram file \"%1\" successfully created.\n\n%2 trigrams evaluated.\n%3 bits of entropy per letter.",
+                                &[&dp.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), &n.to_string(), &format!("{bits:.2}")],
+                            ),
+                            MsgIcon::Info,
                         ),
-                        MsgIcon::Info,
-                    ),
-                    Err(e) => (
-                        trl_format("Error while creating file\n\"%1\":\n%2.", &[&dp.to_string_lossy(), &trl(&e.to_string())]),
-                        MsgIcon::Error,
-                    ),
-                };
-                msg(Some(&win2), &m, icon);
-            });
-            win.set_default_widget(Some(&create));
-            crate::ui::util::close_on_escape(&win);
-            self.attach_entropy_events(&win);
-            *self.tools.trigram_file.borrow_mut() = Some((b, win));
-        }
-        if let Some((b, win)) = self.tools.trigram_file.borrow().as_ref() {
-            win.present();
-            b.w("SourceFileBox").grab_focus();
-        }
+                        Err(e) => (trl_format("Error while creating file\n\"%1\":\n%2.", &[&dp.to_string_lossy(), &trl(&e.to_string())]), MsgIcon::Error),
+                    };
+                    msg(ViewportId::from_hash_of("CreateTrigramFile"), &m, icon);
+                });
+                *self.tools.trigram_file.borrow_mut() = Some(f.clone());
+                f
+            }
+        };
+        self.show_tool("CreateTrigramFile", "CreateTrigramFile", false, &form, ROOT, false);
+        form.focus("SourceFileBox");
     }
 
     /// `MainMenu_Help_AboutClick()`.
     fn about(self: &Rc<Self>) {
-        if self.tools.about.borrow().is_none() {
-            let b = build_form(load_form("About"), "About");
-            let win = super::super::dialogs::form_window(&b, Some(&self.win()), true);
-            win.set_hide_on_close(true);
-            win.set_title(Some(&trl_format("About %1", &[PROGRAM_NAME])));
-            b.get::<gtk::Label>("ProgramLbl").set_text(PROGRAM_NAME);
-            b.get::<gtk::Label>("VersionLbl").set_text(&format!(
-                "Version {PORT_VERSION} ({}-bit), based on {ORIGINAL_NAME} {PROGRAM_VERSION}",
-                usize::BITS
-            ));
-            let link = |url: &str, text: &str| {
-                format!(
-                    "<a href=\"{}\">{}</a>",
-                    glib::markup_escape_text(url),
-                    glib::markup_escape_text(text)
-                )
-            };
-            b.get::<gtk::Label>("AuthorLink").set_markup(&format!(
-                "{} {}",
-                glib::markup_escape_text(PROGRAM_COPYRIGHT),
-                link(&format!("mailto:{PROGRAM_AUTHOR_EMAIL}"), PROGRAM_AUTHOR)
-            ));
-            let www = if PORT_REPOSITORY.is_empty() { PROGRAM_URL_ORIGINAL } else { PORT_REPOSITORY };
-            b.get::<gtk::Label>("WWWLink").set_markup(&link(www, www));
-            let license = self.core.borrow().paths.resources.join(PROGRAM_LICENSEFILE);
-            let license_uri = gio::File::for_path(&license).uri();
-            b.get::<gtk::Label>("LicenseLink").set_markup(&link(&license_uri, &trl("View license")));
-            b.get::<gtk::Label>("LicenseLink").set_tooltip_text(Some(PROGRAM_LICENSEFILE));
-            for name in ["AuthorLink", "WWWLink", "LicenseLink"] {
-                let wv = win.clone();
-                b.get::<gtk::Label>(name).connect_activate_link(move |_, uri| {
-                    open_uri(Some(&wv), uri);
-                    glib::Propagation::Stop
+        let form = self.tools.about.borrow().clone();
+        let form = match form {
+            Some(f) => f,
+            None => {
+                let f = dialogs::load("About");
+                f.set_caption(&trl_format("About %1", &[PROGRAM_NAME]));
+                f.set_text("ProgramLbl", PROGRAM_NAME);
+                f.set_text("VersionLbl", &format!("Version {PORT_VERSION} ({}-bit), based on {ORIGINAL_NAME} {PROGRAM_VERSION}", usize::BITS));
+                let link = |url: &str, text: &str| format!("<a href=\"{url}\">{text}</a>");
+                f.set_control_caption("AuthorLink", &format!("{PROGRAM_COPYRIGHT} {}", link(&format!("mailto:{PROGRAM_AUTHOR_EMAIL}"), PROGRAM_AUTHOR)));
+                let www = if PORT_REPOSITORY.is_empty() { PROGRAM_URL_ORIGINAL } else { PORT_REPOSITORY };
+                f.set_control_caption("WWWLink", &link(www, www));
+                f.set_control_caption("LicenseLink", &link("license", &trl("View license")));
+                f.set_hint("LicenseLink", PROGRAM_LICENSEFILE);
+                let (lang_name, translator) = {
+                    let core = self.core.borrow();
+                    let le = &core.languages[core.language];
+                    if le.file_name.is_some() {
+                        (le.name.clone(), pwtool_core::language::translator_name().unwrap_or_default())
+                    } else {
+                        (LANGUAGE_DEFAULT_NAME.to_string(), "(original language)".to_string())
+                    }
+                };
+                f.set_text("LanguageInfoLbl", &trl_format("Current language: %1\nTranslator: %2", &[&lang_name, &translator]));
+                if f.has("DonorLbl") {
+                    f.set_text("DonorLbl", &trl("Community"));
+                }
+                if f.has("Logo") {
+                    f.set_image("Logo", Some(include_bytes!("../../../../assets/about_logo.png").to_vec()));
+                }
+                let ww = self.weak();
+                f.on_any(move |e| {
+                    let Some(w) = ww.upgrade() else { return };
+                    match e {
+                        crate::vcl::Event::Link(_, url) if url == "license" => {
+                            let file = w.core.borrow().paths.resources.join(PROGRAM_LICENSEFILE);
+                            if file.exists() {
+                                open_uri(&file.to_string_lossy());
+                            } else {
+                                open_uri(&format!("{PORT_REPOSITORY}/blob/main/LICENSE"));
+                            }
+                        }
+                        crate::vcl::Event::Link(_, url) => open_uri(url),
+                        crate::vcl::Event::Click(n) if n == "OKBtn" => windows::close(ViewportId::from_hash_of("About")),
+                        _ => {}
+                    }
                 });
+                *self.tools.about.borrow_mut() = Some(f.clone());
+                f
             }
-            let (lang_name, translator) = {
-                let core = self.core.borrow();
-                let le = &core.languages[core.language];
-                if le.file_name.is_some() {
-                    (
-                        le.name.clone(),
-                        pwtool_core::language::translator_name().unwrap_or_default(),
-                    )
-                } else {
-                    (LANGUAGE_DEFAULT_NAME.to_string(), "(original language)".to_string())
-                }
-            };
-            let li: gtk::Label = b.get("LanguageInfoLbl");
-            li.set_wrap(true);
-            li.set_text(&trl_format("Current language: %1\nTranslator: %2", &[&lang_name, &translator]));
-            if let Some(l) = b.try_get::<gtk::Label>("LicenseLbl") {
-                l.set_wrap(true);
-            }
-            if let Some(l) = b.try_get::<gtk::Label>("DonorLbl") {
-                l.set_text(&trl("Community"));
-            }
-            if let Some(p) = b.try_get::<gtk::Picture>("Logo") {
-                p.set_can_shrink(true);
-                p.set_content_fit(gtk::ContentFit::Contain);
-                let bytes = glib::Bytes::from_static(include_bytes!("../../../../assets/about_logo.png"));
-                if let Ok(t) = gdk::Texture::from_bytes(&bytes) {
-                    p.set_paintable(Some(&t));
-                }
-            }
-            let win2 = win.clone();
-            let ok: gtk::Button = b.get("OKBtn");
-            ok.connect_clicked(move |_| win2.close());
-            win.set_default_widget(Some(&ok));
-            crate::ui::util::close_on_escape(&win);
-            *self.tools.about.borrow_mut() = Some((b, win));
+        };
+        let win = Rc::new(dialogs::form_window("About", form, ROOT, true));
+        windows::present(win);
+    }
+
+    // ------------------------------------------------------------------
+    // update check
+
+    /// `MainMenu_Help_CheckForUpdatesClick()` (manual) and the automatic
+    /// check at start-up (`FormActivate()`).
+    pub(super) async fn check_for_updates(self: &Rc<Self>, manual: bool) {
+        use crate::ui::update_check::{CheckResult, check_for_updates};
+        if self.tools.update_check_running.replace(true) {
+            return;
         }
-        if let Some((_, win)) = self.tools.about.borrow().as_ref() {
-            win.present();
+        self.f().set_menu_enabled("MainMenu_Help_CheckForUpdates", false);
+        let r = check_for_updates(ROOT, manual).await;
+        self.f().set_menu_enabled("MainMenu_Help_CheckForUpdates", true);
+        self.tools.update_check_running.set(false);
+        match r {
+            CheckResult::NotConfigured => {
+                if manual {
+                    dialogs::ask(ROOT, &trl("The update check is not configured in this build."), MsgIcon::Info, MsgButtons::Ok, false).await;
+                }
+                return;
+            }
+            CheckResult::Negative if manual => {
+                dialogs::ask(ROOT, &trl_format("Your version of %1 is up-to-date.", &[PROGRAM_NAME]), MsgIcon::Info, MsgButtons::Ok, false).await;
+            }
+            _ => {}
+        }
+        if matches!(r, CheckResult::Negative | CheckResult::Positive) {
+            let d = jiff::Zoned::now().date();
+            let s = pwtool_core::util::format_short_date(d.year() as i32, d.month() as u32, d.day() as u32);
+            self.core.borrow_mut().ini.write_string("Main", "LastUpdateCheck", &s);
+        }
+    }
+
+    /// Automatic check at start-up if due (`AutoCheckUpdates`).
+    pub(super) fn auto_check_updates(self: &Rc<Self>) {
+        use pwtool_app::app_config::AutoCheckUpdates;
+        let (mode, last) = {
+            let core = self.core.borrow();
+            (core.config.auto_check_updates, core.ini.read_string("Main", "LastUpdateCheck", ""))
+        };
+        if mode == AutoCheckUpdates::Disabled {
+            return;
+        }
+        let now = jiff::Zoned::now().date();
+        let due = match pwtool_core::util::parse_short_date(&last).and_then(|(y, m, d)| jiff::civil::Date::new(y as i16, m as i8, d as i8).ok()) {
+            None => true,
+            Some(l) => {
+                let days = now.since(l).map(|s| s.get_days() as i64).unwrap_or(0);
+                match mode {
+                    AutoCheckUpdates::Daily => days >= 1,
+                    AutoCheckUpdates::Weekly => days >= 7,
+                    _ => {
+                        let months = (now.year() as i32 - l.year() as i32) * 12 + now.month() as i32 - l.month() as i32 - i32::from(now.day() < l.day());
+                        months >= 1
+                    }
+                }
+            }
+        };
+        if due {
+            let w = self.clone();
+            spawn(async move { w.check_for_updates(false).await });
         }
     }
 }
-
-use pwtool_app::platform::sys::free_disk_space;

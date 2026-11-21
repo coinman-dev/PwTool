@@ -4,7 +4,7 @@
 //! services of the operating system (`platform`: tray, global hot keys,
 //! autotype, clipboard, single instance, autostart…).
 //!
-//! Used by the GTK interface (`pwtool`) and the egui interface.
+//! Used by the interface (`pwtool`).
 
 pub mod app;
 pub mod app_config;
@@ -16,5 +16,6 @@ pub mod icons;
 pub mod platform;
 pub mod program;
 pub mod quality;
+pub mod resources;
 pub mod rt;
 pub mod shortcut;

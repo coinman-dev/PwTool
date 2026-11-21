@@ -60,8 +60,10 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends \
-            build-essential pkg-config libgtk-4-dev dpkg-dev desktop-file-utils \
-            libreoffice-writer-nogui
+            build-essential dpkg-dev libreoffice-writer-nogui
+      # before the build: the PDF manuals are embedded into the executable
+      - name: Build PDF manuals
+        run: bash packaging/manuals.sh --required
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -79,9 +81,13 @@ jobs:
           deb="target/release-files/pwtool_${v//-/.}_amd64.deb"
           dpkg-deb -f "$deb" Package Version Architecture Depends
           contents="$(dpkg-deb -c "$deb")"
-          grep -E "bin/pwtool|manual\.pdf|scripting\.pdf|hicolor/.*/io\.github\.coinman_dev\.PwTool\.png" <<< "$contents"
-          grep -q "usr/share/pwtool/manual.pdf" <<< "$contents"
-          grep -q "usr/share/pwtool/scripting.pdf" <<< "$contents"
+          grep -E "bin/pwtool|\.desktop|hicolor/.*/io\.github\.coinman_dev\.PwTool\.png" <<< "$contents"
+          grep -q "usr/share/applications/io.github.coinman_dev.PwTool.desktop" <<< "$contents"
+          # the manuals are embedded; the console mode needs no display
+          grep -aq '%PDF-' target/release/pwtool || { echo 'manuals not embedded'; exit 1; }
+          out="$(target/release/pwtool --gen 3)"
+          echo "$out"
+          [[ "$(grep -cE '^\S{16}$' <<< "$out")" == 3 ]] || { echo 'console mode did not print 3 passwords'; exit 1; }
       - uses: actions/upload-artifact@v7
         with:
           name: linux-release
@@ -103,7 +109,7 @@ jobs:
           retention-days: 1
 
   windows:
-    name: Cross-build Windows zip (llvm-mingw)
+    name: Cross-build Windows exe (llvm-mingw)
     needs: [linux]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -114,10 +120,6 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.dry_run && github.sha || inputs.tag || github.sha }}
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends zstd libglib2.0-bin
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-gnullvm
@@ -140,35 +142,24 @@ jobs:
           name="llvm-mingw-${LLVM_MINGW_VERSION}-ucrt-ubuntu-22.04-x86_64"
           curl -fsSL --retry 3 "https://github.com/mstorsjo/llvm-mingw/releases/download/${LLVM_MINGW_VERSION}/${name}.tar.xz" \
             | tar -xJ -C ~/.local/opt
-      - name: Cache GTK packages (MSYS2 CLANG64)
-        uses: actions/cache@v6
-        with:
-          path: ~/.cache/pwtool-win/sysroot/.cache
-          key: msys2-clang64-${{ hashFiles('packaging/windows/fetch-gtk.py') }}-${{ github.run_id }}
-          restore-keys: msys2-clang64-${{ hashFiles('packaging/windows/fetch-gtk.py') }}-
+      # the manuals are embedded into the executable (built by the linux job)
       - uses: actions/download-artifact@v8
         with:
           name: manuals
           path: target/manuals
-      - name: Build Windows zip and test executables
+      - name: Build Windows exe and test executables
         shell: bash
         run: |
           set -euo pipefail
-          python3 -I packaging/windows/fetch-gtk.py ~/.cache/pwtool-win/sysroot
           v="${RELEASE_TAG#v}"
           mkdir -p target/release-files
-          OUTPUT="$PWD/target/release-files/pwtool_${v//-/.}_windows_x64.zip" packaging/windows/build.sh --tests
-          zip="target/release-files/pwtool_${v//-/.}_windows_x64.zip"
-          contents="$(python3 -I -m zipfile -l "$zip")"
-          for f in PwTool/bin/pwtool.exe PwTool/bin/libgtk-4-1.dll PwTool/share/pwtool/manual.pdf \
-                   PwTool/share/pwtool/scripting.pdf PwTool/share/glib-2.0/schemas/gschemas.compiled \
-                   PwTool/lib/gio/modules/libgiognutls.dll; do
-            grep -q "$f" <<< "$contents" || { echo "missing in zip: $f"; exit 1; }
-          done
+          exe="$PWD/target/release-files/pwtool_${v//-/.}_windows_x64.exe"
+          OUTPUT="$exe" packaging/windows/build.sh --tests
+          grep -aq '%PDF-' "$exe" || { echo 'manuals not embedded'; exit 1; }
       - uses: actions/upload-artifact@v7
         with:
           name: windows-release
-          path: target/release-files/*.zip
+          path: target/release-files/*.exe
           if-no-files-found: error
           retention-days: 3
       - uses: actions/upload-artifact@v7
@@ -196,13 +187,12 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          Expand-Archive -Path (Get-ChildItem dist\*.zip).FullName -DestinationPath app
-          Copy-Item tests\*.exe app\PwTool\bin\
-          Get-ChildItem app\PwTool\bin\*.exe -Exclude pwtool.exe | ForEach-Object {
+          Get-ChildItem tests\*.exe | ForEach-Object {
             & $_.FullName
             if ($LASTEXITCODE -ne 0) { throw "$($_.Name) failed" }
           }
-          $out = & app\PwTool\bin\pwtool.exe --gen 3 | Out-String
+          $exe = (Get-ChildItem dist\*.exe).FullName
+          $out = & $exe --gen 3 | Out-String
           Write-Output $out
           if (($out -split "`n" | Where-Object { $_ -match '^\S{16}\s*$' }).Count -ne 3) { throw 'console mode did not print 3 passwords' }
 
@@ -235,7 +225,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          (cd dist && sha256sum -- *.deb *.zip > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          (cd dist && sha256sum -- *.deb *.exe > SHA256SUMS.txt && cat SHA256SUMS.txt)
           prerelease=false
           [[ "$RELEASE_TAG" == *-* ]] && prerelease=true
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then

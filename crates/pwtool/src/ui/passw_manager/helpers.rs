@@ -1,13 +1,6 @@
-//! Helpers of the password manager: fuzzy search, expiry dates, fonts,
-//! a date picker (`TDateTimePicker`), file names.
+//! Helpers of the password manager: fuzzy search, expiry dates, file
+//! names, text conversions.
 
-use std::cell::{Cell, RefCell};
-use std::rc::Rc;
-
-use gtk4 as gtk;
-use gtk::glib;
-use gtk::pango;
-use gtk::prelude::*;
 use pwtool_core::passw::database::encode_expiry_date;
 
 /// `levenshteinDist()` with the original costs (insert 2, delete 1,
@@ -101,16 +94,20 @@ pub fn wcscmp(a: &str, b: &str) -> std::cmp::Ordering {
     a.encode_utf16().cmp(b.encode_utf16())
 }
 
+fn now() -> jiff::Zoned {
+    jiff::Zoned::now()
+}
+
 /// Today's local date as `(year, month, day)`.
 pub fn today() -> (i32, u32, u32) {
-    let d = glib::DateTime::now_local().expect("local time");
-    (d.year(), d.month() as u32, d.day_of_month() as u32)
+    let d = now().date();
+    (d.year() as i32, d.month() as u32, d.day() as u32)
 }
 
 /// Local date `days` days from today.
 pub fn today_plus_days(days: i32) -> (i32, u32, u32) {
-    let d = glib::DateTime::now_local().expect("local time").add_days(days).expect("date");
-    (d.year(), d.month() as u32, d.day_of_month() as u32)
+    let d = now().date().saturating_add(jiff::Span::new().days(days as i64));
+    (d.year() as i32, d.month() as u32, d.day() as u32)
 }
 
 /// `getExpiryCheckDates()`: encoded current date and the "expires soon"
@@ -123,18 +120,10 @@ pub fn expiry_check_dates(warn_days: i32) -> (u32, u32) {
 
 /// `getTimeStampString()`: `YYYYMMDDhhmmss[_mmm]` in local time.
 pub fn time_stamp_string(millisec: bool) -> String {
-    let d = glib::DateTime::now_local().expect("local time");
-    let mut s = format!(
-        "{}{:02}{:02}{:02}{:02}{:02}",
-        d.year(),
-        d.month(),
-        d.day_of_month(),
-        d.hour(),
-        d.minute(),
-        d.second()
-    );
+    let t = now();
+    let mut s = t.strftime("%Y%m%d%H%M%S").to_string();
     if millisec {
-        s.push_str(&format!("_{:03}", d.microsecond() / 1000));
+        s.push_str(&format!("_{:03}", t.millisecond()));
     }
     s
 }
@@ -170,171 +159,13 @@ pub fn shorten_file_name(name: &str, max_len: usize) -> String {
     result.into_iter().collect()
 }
 
-/// `FontToString()`: `name;size;style;color` (style bits: bold 1,
-/// italic 2, underline 4, strike-out 8).
-pub fn font_to_string(desc: &pango::FontDescription) -> String {
-    let name = desc.family().map(|f| f.to_string()).unwrap_or_default();
-    let size = (desc.size() as f64 / pango::SCALE as f64).round() as i32;
-    let mut style = 0;
-    if desc.weight() >= pango::Weight::Bold {
-        style |= 1;
-    }
-    if desc.style() != pango::Style::Normal {
-        style |= 2;
-    }
-    format!("{name};{size};{style};clWindowText")
-}
 
-/// `StringToFont()`: `None` if the string is empty or invalid.
-pub fn string_to_font(s: &str) -> Option<pango::FontDescription> {
-    if s.is_empty() {
-        return None;
-    }
-    let mut it = s.split(';');
-    let name = it.next()?.trim();
-    let size: i32 = it.next()?.trim().parse().ok()?;
-    if name.is_empty() || size == 0 {
-        return None;
-    }
-    let style: i32 = it.next().and_then(|v| v.trim().parse().ok()).unwrap_or(0);
-    let mut d = pango::FontDescription::new();
-    d.set_family(name);
-    d.set_size(size.abs() * pango::SCALE);
-    if style & 1 != 0 {
-        d.set_weight(pango::Weight::Bold);
-    }
-    if style & 2 != 0 {
-        d.set_style(pango::Style::Italic);
-    }
-    Some(d)
-}
-
-/// CSS declarations for a font description.
-pub fn font_css(desc: &pango::FontDescription) -> String {
-    let mut css = String::new();
-    if let Some(f) = desc.family() {
-        css.push_str(&format!("font-family: \"{}\";", f.replace('"', "")));
-    }
-    if desc.size() > 0 {
-        css.push_str(&format!("font-size: {}pt;", desc.size() / pango::SCALE));
-    }
-    if desc.weight() >= pango::Weight::Bold {
-        css.push_str("font-weight: bold;");
-    }
-    if desc.style() != pango::Style::Normal {
-        css.push_str("font-style: italic;");
-    }
-    css
-}
-
-/// A widget with a replaceable CSS provider (fonts/colours that change at
-/// run time).
-pub struct DynCss {
-    provider: gtk::CssProvider,
-    class: String,
-}
-
-thread_local! {
-    static DYN_CSS_COUNTER: Cell<u32> = const { Cell::new(0) };
-}
-
-impl DynCss {
-    pub fn new(w: &impl IsA<gtk::Widget>) -> Self {
-        let n = DYN_CSS_COUNTER.with(|c| {
-            c.set(c.get() + 1);
-            c.get()
-        });
-        let class = format!("pwdyn{n}");
-        let provider = gtk::CssProvider::new();
-        if let Some(display) = gtk::gdk::Display::default() {
-            gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
-        }
-        w.add_css_class(&class);
-        DynCss { provider, class }
-    }
-
-    /// Replace the declarations (applied to the widget and its descendants).
-    pub fn set(&self, decls: &str) {
-        let c = &self.class;
-        self.provider.load_from_data(&format!(".{c}, .{c} * {{ {decls} }}"));
-    }
-}
-
-/// `TDateTimePicker` (date only): a menu button showing the date in the
-/// locale's short format with a calendar popover.
-pub struct DatePicker {
-    pub button: gtk::MenuButton,
-    pub calendar: gtk::Calendar,
-    date: Cell<(i32, u32, u32)>,
-    on_change: RefCell<Option<Box<dyn Fn()>>>,
-    updating: Cell<bool>,
-}
-
-impl DatePicker {
-    pub fn new(button: gtk::MenuButton, calendar: gtk::Calendar) -> Rc<Self> {
-        let p = Rc::new(DatePicker {
-            button,
-            calendar,
-            date: Cell::new(today()),
-            on_change: RefCell::new(None),
-            updating: Cell::new(false),
-        });
-        let pp = Rc::downgrade(&p);
-        p.calendar.connect_day_selected(move |cal| {
-            let Some(p) = pp.upgrade() else { return };
-            if p.updating.get() {
-                return;
-            }
-            let d = cal.date();
-            p.date.set((d.year(), d.month() as u32, d.day_of_month() as u32));
-            p.update_label();
-            if let Some(pop) = p.button.popover() {
-                pop.popdown();
-            }
-            if let Some(f) = p.on_change.borrow().as_ref() {
-                f();
-            }
-        });
-        p.update_label();
-        p
-    }
-
-    fn update_label(&self) {
-        let (y, m, d) = self.date.get();
-        self.button.set_label(&pwtool_core::util::format_short_date(y, m, d));
-    }
-
-    pub fn date(&self) -> (i32, u32, u32) {
-        self.date.get()
-    }
-
-    /// Set the date without calling the change handler.
-    pub fn set_date(&self, (y, m, d): (i32, u32, u32)) {
-        self.date.set((y, m, d));
-        if let Ok(dt) = glib::DateTime::from_local(y, m as i32, d as i32, 0, 0, 0.0) {
-            self.updating.set(true);
-            self.calendar.select_day(&dt);
-            self.updating.set(false);
-        }
-        self.update_label();
-    }
-
-    pub fn connect_changed(&self, f: impl Fn() + 'static) {
-        *self.on_change.borrow_mut() = Some(Box::new(f));
-    }
-
-    pub fn encoded(&self) -> u32 {
-        let (y, m, d) = self.date.get();
-        encode_expiry_date(y, m, d)
-    }
-}
-
-/// Convert `\r\n` (file) to `\n` (text widgets).
+/// Convert `\r\n` (file) to `\n` (text controls).
 pub fn crlf_to_lf(s: &str) -> String {
     s.replace("\r\n", "\n")
 }
 
-/// Convert `\n` (text widgets) to `\r\n` (file, as the original stores the
+/// Convert `\n` (text controls) to `\r\n` (file, as the original stores the
 /// text of memo controls).
 pub fn lf_to_crlf(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 8);
@@ -347,12 +178,6 @@ pub fn lf_to_crlf(s: &str) -> String {
         prev_cr = c == '\r';
     }
     out
-}
-
-/// Text of a text view.
-pub fn text_view_text(tv: &gtk::TextView) -> zeroize::Zeroizing<String> {
-    let buf = tv.buffer();
-    zeroize::Zeroizing::new(buf.text(&buf.start_iter(), &buf.end_iter(), false).to_string())
 }
 
 /// Local `FILETIME` (wall clock as UTC) of a file system time, for
@@ -377,20 +202,6 @@ pub fn format_thousands(n: u64) -> String {
         out.push(c);
     }
     out
-}
-
-/// Close a dialog window with Escape (`Cancel = true` buttons of VCL).
-pub fn close_on_escape(win: &gtk::Window) {
-    let key = gtk::EventControllerKey::new();
-    let w = win.clone();
-    key.connect_key_pressed(move |_, k, _, _| {
-        if k == gtk::gdk::Key::Escape {
-            w.close();
-            return glib::Propagation::Stop;
-        }
-        glib::Propagation::Proceed
-    });
-    win.add_controller(key);
 }
 
 #[cfg(test)]
@@ -425,12 +236,5 @@ mod tests {
     fn crlf() {
         assert_eq!(lf_to_crlf("a\nb\r\nc"), "a\r\nb\r\nc");
         assert_eq!(crlf_to_lf("a\r\nb"), "a\nb");
-    }
-
-    #[test]
-    fn fonts() {
-        let d = string_to_font("Consolas;10;1;clWindowText").unwrap();
-        assert_eq!(font_to_string(&d), "Consolas;10;1;clWindowText");
-        assert!(string_to_font("").is_none());
     }
 }

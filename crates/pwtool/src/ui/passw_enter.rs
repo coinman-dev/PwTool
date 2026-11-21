@@ -1,16 +1,13 @@
 //! Password entry dialog (`upstream/src/main/PasswEnter.*`): used for
-//! encrypting/decrypting text, the deterministic random generator, and
-//! opening/creating password databases (with key files).
-
-#![allow(deprecated)]
+//! encrypting/decrypting text, the deterministic random generator, the
+//! MP password generator and (later) password databases with key files.
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::time::Duration;
 
-use gtk4 as gtk;
-use gtk::glib;
-use gtk::prelude::*;
+use egui::ViewportId;
 use pwtool_core::config::IniFile;
 use pwtool_core::language::{trl, trl_format};
 use pwtool_core::passw::generator::PasswordGenerator;
@@ -18,11 +15,11 @@ use pwtool_core::random::{RandomGenerator, RandomPool};
 use pwtool_core::util::floor_entropy_bits;
 use zeroize::Zeroizing;
 
-use super::builder::{Built, build_form};
-use super::dialogs::form_window;
-use super::form::load_form;
+use super::dialogs::{ask, form_window, load, msg};
 use super::quality_bar::QualityBar;
-use super::util::{MsgButtons, MsgIcon, msg, msg_box};
+use crate::vcl::Form;
+use crate::vcl::dialogs::{MsgButtons, MsgIcon};
+use crate::windows;
 
 pub const PASSWENTER_FLAG_ENCRYPT: u32 = 0x0001;
 pub const PASSWENTER_FLAG_DECRYPT: u32 = 0x0002;
@@ -35,7 +32,7 @@ pub const PASSWENTER_FLAG_PASSWQUALITY: u32 = 0x0080;
 pub const PASSWENTER_FLAG_ALLOWSKIP: u32 = 0x0100;
 
 const CONFIG_ID: &str = "PasswEnter";
-const PASSWORD_CHAR: char = '*';
+const WINDOW_ID: &str = "PasswEnter";
 
 /// Result of [`PasswEnterDlg::execute`] (`mrOk`, `mrCancel`, `mrIgnore`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,11 +50,7 @@ struct PasswCache {
 }
 
 pub struct PasswEnterDlg {
-    pub b: Built,
-    pub win: gtk::Window,
-    passw_box: gtk::Entry,
-    confirm_box: gtk::Entry,
-    key_file_box: gtk::ComboBoxText,
+    pub form: Rc<Form>,
     bar: QualityBar,
     flags: Cell<u32>,
     est_quality: Cell<bool>,
@@ -65,218 +58,169 @@ pub struct PasswEnterDlg {
     pub use_advanced_passw_est: Cell<bool>,
     cache: RefCell<Option<PasswCache>>,
     expiry_countdown: Cell<i64>,
-    timer: RefCell<Option<glib::SourceId>>,
+    /// Incremented to stop a running expiry countdown.
+    timer_gen: Cell<u64>,
     result: Cell<EnterResult>,
     done: RefCell<Option<async_channel::Sender<()>>>,
-    suppress_change: Cell<bool>,
+    window: Cell<ViewportId>,
+    width: Cell<f32>,
 }
 
 impl PasswEnterDlg {
-    pub fn new(parent: &gtk::Window, ini: &IniFile) -> Rc<Self> {
-        let b = build_form(load_form("PasswEnter"), "PasswEnter");
-        let win = form_window(&b, Some(parent), true);
-        win.set_hide_on_close(true);
-        let passw_box: gtk::Entry = b.get("PasswBox");
-        let confirm_box: gtk::Entry = b.get("ConfirmPasswBox");
-        // password entry buffers keep their text in non-pageable memory
-        // and wipe it when freed
-        for e in [&passw_box, &confirm_box] {
-            e.set_buffer(&gtk::PasswordEntryBuffer::new().upcast::<gtk::EntryBuffer>());
-            e.set_invisible_char(Some(PASSWORD_CHAR));
+    pub fn new(ini: &IniFile) -> Rc<Self> {
+        let form = load("PasswEnter");
+        for n in ["PasswBox", "ConfirmPasswBox"] {
+            form.set_secret(n);
+            form.set_password_char(n, true);
         }
-        let key_file_box: gtk::ComboBoxText = b.get("KeyFileBox");
-        key_file_box.remove_all();
-        key_file_box.append_text(&trl("(None)"));
-        key_file_box.set_active(Some(0));
-        let bar = QualityBar::new(b.get("PasswGauge"), 128);
-        if let Some(l) = b.try_get::<gtk::Label>("PasswLbl") {
-            l.add_css_class("heading");
-        }
-        if let Some(l) = b.try_get::<gtk::Label>("KeyFileLbl") {
-            l.add_css_class("heading");
+        form.set_items("KeyFileBox", vec![trl("(None)")]);
+        form.set_item_index("KeyFileBox", Some(0));
+        let bar = QualityBar::new(128);
+        let b = bar.clone();
+        form.set_painter("PasswGauge", move |ui, rect| b.paint(ui, rect));
+        for n in ["PasswLbl", "KeyFileLbl"] {
+            if form.has(n) {
+                form.set_bold(n, true);
+            }
         }
         let d = Rc::new(PasswEnterDlg {
-            b,
-            win,
-            passw_box,
-            confirm_box,
-            key_file_box,
+            form,
             bar,
             flags: Cell::new(0),
             est_quality: Cell::new(false),
             use_advanced_passw_est: Cell::new(false),
             cache: RefCell::new(None),
             expiry_countdown: Cell::new(0),
-            timer: RefCell::new(None),
+            timer_gen: Cell::new(0),
             result: Cell::new(EnterResult::Cancel),
             done: RefCell::new(None),
-            suppress_change: Cell::new(false),
+            window: Cell::new(ViewportId::from_hash_of(WINDOW_ID)),
+            width: Cell::new(0.0),
         });
         d.load_config(ini);
         d.connect();
         d
     }
 
+    fn f(&self) -> &Form {
+        &self.form
+    }
+
     fn load_config(&self, ini: &IniFile) {
-        if let Some(u) = self.b.updowns.get("RememberPasswTimeSpinBtn") {
-            u.set_position(ini.read_integer(CONFIG_ID, "RememberPasswTime", 60));
-        }
-        self.check("PasswQualityCheck")
-            .set_active(ini.read_bool(CONFIG_ID, "EstimatePasswQuality", true));
+        self.f().set_position("RememberPasswTimeSpinBtn", ini.read_integer(CONFIG_ID, "RememberPasswTime", 60));
+        self.f().set_checked("PasswQualityCheck", ini.read_bool(CONFIG_ID, "EstimatePasswQuality", true));
+        self.width.set(ini.read_int(CONFIG_ID, "WindowWidth", 0) as f32);
     }
 
     /// `SaveConfig()`.
     pub fn save_config(&self, ini: &mut IniFile) {
-        ini.write_integer(CONFIG_ID, "WindowWidth", self.win.width().max(self.b.client.0) as i64);
+        let client = self.f().client_size().x;
+        ini.write_integer(CONFIG_ID, "WindowWidth", self.width.get().max(client) as i64);
         ini.write_integer(CONFIG_ID, "RememberPasswTime", self.remember_time());
-        ini.write_bool(CONFIG_ID, "EstimatePasswQuality", self.check("PasswQualityCheck").is_active());
-    }
-
-    fn check(&self, name: &str) -> gtk::CheckButton {
-        self.b.get(name)
+        ini.write_bool(CONFIG_ID, "EstimatePasswQuality", self.f().checked("PasswQualityCheck"));
     }
 
     fn remember_time(&self) -> i64 {
-        self.b.updowns.get("RememberPasswTimeSpinBtn").map(|u| u.position()).unwrap_or(60)
+        self.f().position("RememberPasswTimeSpinBtn")
     }
 
     fn connect(self: &Rc<Self>) {
-        let d = self.clone();
-        self.b.get::<gtk::Button>("OKBtn").connect_clicked(move |_| {
-            let d2 = d.clone();
-            glib::spawn_future_local(async move { d2.ok_clicked().await });
+        let on = |name: &str, f: fn(&Rc<Self>)| {
+            let d = Rc::downgrade(self);
+            self.form.on_click(name, move |_| {
+                if let Some(d) = d.upgrade() {
+                    f(&d);
+                }
+            });
+        };
+        on("OKBtn", |d| {
+            let d = d.clone();
+            crate::runtime::spawn(async move { d.ok_clicked().await });
         });
-        let d = self.clone();
-        self.b.get::<gtk::Button>("CancelBtn").connect_clicked(move |_| d.finish(EnterResult::Cancel));
-        let d = self.clone();
-        self.b.get::<gtk::Button>("SkipBtn").connect_clicked(move |_| d.finish(EnterResult::Skip));
-        let d = self.clone();
-        self.win.connect_close_request(move |_| {
-            if let Some(tx) = d.done.borrow_mut().take() {
-                let _ = tx.try_send(());
-            }
-            glib::Propagation::Proceed
+        on("CancelBtn", |d| d.finish(EnterResult::Cancel));
+        on("SkipBtn", |d| d.finish(EnterResult::Skip));
+        on("TogglePasswBtn", |d| d.toggle_passw());
+        on("RememberPasswCheck", |d| d.remember_passw_check());
+        on("PasswQualityCheck", |d| d.passw_quality_check());
+        on("BrowseBtn", |d| {
+            let d = d.clone();
+            crate::runtime::spawn(async move { d.browse().await });
         });
-        let d = self.clone();
-        self.b.get::<gtk::ToggleButton>("TogglePasswBtn").connect_toggled(move |_| d.toggle_passw());
-        let d = self.clone();
-        self.check("RememberPasswCheck").connect_toggled(move |_| d.remember_passw_check());
-        let d = self.clone();
-        self.check("PasswQualityCheck").connect_toggled(move |_| d.passw_quality_check());
-        let d = self.clone();
-        self.passw_box.connect_changed(move |_| d.passw_box_change());
-        let d = self.clone();
-        self.passw_box.connect_activate(move |_| d.b.get::<gtk::Button>("OKBtn").emit_clicked());
-        let d = self.clone();
-        self.confirm_box.connect_activate(move |_| d.b.get::<gtk::Button>("OKBtn").emit_clicked());
-        let d = self.clone();
-        self.b.get::<gtk::Button>("BrowseBtn").connect_clicked(move |_| d.browse());
-        let d = self.clone();
-        self.b.get::<gtk::Button>("CreateKeyFileBtn").connect_clicked(move |_| d.create_key_file());
-        let d = self.clone();
-        let esc = gtk::EventControllerKey::new();
-        esc.connect_key_pressed(move |_, key, _, _| {
-            if key == gtk::gdk::Key::Escape {
-                d.finish(EnterResult::Cancel);
-                glib::Propagation::Stop
-            } else {
-                glib::Propagation::Proceed
+        on("CreateKeyFileBtn", |d| {
+            let d = d.clone();
+            crate::runtime::spawn(async move { d.create_key_file().await });
+        });
+        let d = Rc::downgrade(self);
+        self.form.on_change("PasswBox", move |_| {
+            if let Some(d) = d.upgrade() {
+                d.passw_box_change();
             }
         });
-        self.win.add_controller(esc);
     }
 
     fn finish(&self, r: EnterResult) {
         self.result.set(r);
-        self.win.close();
+        windows::close(self.window.get());
+        if let Some(tx) = self.done.borrow_mut().take() {
+            let _ = tx.try_send(());
+        }
     }
 
-    fn key_file_filters() -> gtk::gio::ListStore {
-        let store = gtk::gio::ListStore::new::<gtk::FileFilter>();
-        let f = gtk::FileFilter::new();
-        f.set_name(Some(&format!("{} (*.key)", trl("Key files"))));
-        f.add_pattern("*.key");
-        store.append(&f);
-        let f = gtk::FileFilter::new();
-        f.set_name(Some(&format!("{} (*.*)", trl("All files"))));
-        f.add_pattern("*");
-        store.append(&f);
-        store
+    fn key_file_filters() -> [(String, &'static [&'static str]); 2] {
+        [(format!("{} (*.key)", trl("Key files")), &["key"]), (format!("{} (*.*)", trl("All files")), &["*"])]
     }
 
     fn select_key_file(&self, path: &str) {
-        let n = self.key_file_box.model().map(|m| m.iter_n_children(None)).unwrap_or(0);
-        let mut found = None;
-        for i in 1..n {
-            self.key_file_box.set_active(Some(i as u32));
-            if self.key_file_box.active_text().is_some_and(|t| t == path) {
-                found = Some(i as u32);
-                break;
-            }
-        }
-        match found {
-            Some(i) => self.key_file_box.set_active(Some(i)),
+        let mut items = self.f().items("KeyFileBox");
+        let i = match items.iter().skip(1).position(|t| t == path) {
+            Some(i) => i + 1,
             None => {
-                self.key_file_box.append_text(path);
-                self.key_file_box.set_active(Some(n as u32));
+                items.push(path.to_string());
+                self.f().set_items("KeyFileBox", items.clone());
+                items.len() - 1
             }
+        };
+        self.f().set_item_index("KeyFileBox", Some(i));
+    }
+
+    async fn browse(&self) {
+        let fl = Self::key_file_filters();
+        let filters: Vec<(&str, &[&str])> = fl.iter().map(|(n, e)| (n.as_str(), *e)).collect();
+        if let Some(p) = crate::vcl::dialogs::open_file(&trl("Select key file"), None, &filters).await {
+            self.select_key_file(&p.to_string_lossy());
         }
     }
 
-    fn browse(self: &Rc<Self>) {
-        let dlg = gtk::FileDialog::new();
-        dlg.set_filters(Some(&Self::key_file_filters()));
-        let d = self.clone();
-        dlg.open(Some(&self.win), gtk::gio::Cancellable::NONE, move |r| {
-            if let Ok(p) = r.map(|f| f.path()) {
-                if let Some(p) = p {
-                    d.select_key_file(&p.to_string_lossy());
-                }
+    async fn create_key_file(&self) {
+        let fl = Self::key_file_filters();
+        let filters: Vec<(&str, &[&str])> = fl.iter().map(|(n, e)| (n.as_str(), *e)).collect();
+        let Some(path) = crate::vcl::dialogs::save_file(&trl("Create key file"), None, None, &filters).await else { return };
+        let parent = self.window.get();
+        match pwtool_core::passw::database::create_key_file(&path) {
+            Ok(()) => {
+                msg(parent, &trl("Key file successfully created."), MsgIcon::Info);
+                self.select_key_file(&path.to_string_lossy());
             }
-        });
-    }
-
-    fn create_key_file(self: &Rc<Self>) {
-        let dlg = gtk::FileDialog::new();
-        dlg.set_filters(Some(&Self::key_file_filters()));
-        let d = self.clone();
-        dlg.save(Some(&self.win), gtk::gio::Cancellable::NONE, move |r| {
-            let Some(path) = r.ok().and_then(|f| f.path()) else { return };
-            match pwtool_core::passw::database::create_key_file(&path) {
-                Ok(()) => {
-                    msg(Some(&d.win), &trl("Key file successfully created."), MsgIcon::Info);
-                    d.select_key_file(&path.to_string_lossy());
-                }
-                Err(e) => msg(
-                    Some(&d.win),
-                    &trl_format("Error while creating key file:\n%1.", &[&e.to_string()]),
-                    MsgIcon::Error,
-                ),
-            }
-        });
+            Err(e) => msg(parent, &trl_format("Error while creating key file:\n%1.", &[&e.to_string()]), MsgIcon::Error),
+        }
     }
 
     fn toggle_passw(&self) {
-        let hide = self.b.get::<gtk::ToggleButton>("TogglePasswBtn").is_active();
-        self.suppress_change.set(true);
-        self.passw_box.set_visibility(!hide);
-        self.suppress_change.set(false);
-        self.confirm_box.set_visibility(!hide);
+        let hide = self.f().checked("TogglePasswBtn");
+        self.f().set_password_char("PasswBox", hide);
+        self.f().set_password_char("ConfirmPasswBox", hide);
     }
 
     fn remember_passw_check(&self) {
-        let on = self.check("RememberPasswCheck").is_active() && self.check("RememberPasswCheck").is_sensitive();
-        self.b.w("RememberPasswTimeBox").set_sensitive(on);
-        if let Some(u) = self.b.updowns.get("RememberPasswTimeSpinBtn") {
-            u.set_sensitive(on);
-        }
+        let on = self.f().checked("RememberPasswCheck") && self.f().enabled("RememberPasswCheck");
+        self.f().set_enabled("RememberPasswTimeBox", on);
+        self.f().set_enabled("RememberPasswTimeSpinBtn", on);
     }
 
     fn passw_quality_check(&self) {
-        let c = self.check("PasswQualityCheck");
-        let on = c.is_sensitive() && c.is_active();
+        let on = self.f().enabled("PasswQualityCheck") && self.f().checked("PasswQualityCheck");
         self.est_quality.set(on);
-        self.bar.area.set_sensitive(on);
+        self.f().set_enabled("PasswGauge", on);
         if !on {
             self.bar.clear();
         }
@@ -285,19 +229,15 @@ impl PasswEnterDlg {
 
     /// `PasswBoxChange()`.
     fn passw_box_change(&self) {
-        if self.flags.get() & (PASSWENTER_FLAG_PASSWQUALITY | PASSWENTER_FLAG_ENCRYPT) == 0
-            || self.suppress_change.get()
-            || !self.win.is_visible()
-        {
+        if self.flags.get() & (PASSWENTER_FLAG_PASSWQUALITY | PASSWENTER_FLAG_ENCRYPT) == 0 {
             return;
         }
-        let info: gtk::Label = self.b.get("PasswInfoLbl");
-        if self.passw_box.text_length() == 0 {
+        let passw = self.f().secret_text("PasswBox");
+        if passw.is_empty() {
             self.bar.clear();
-            info.set_text("");
+            self.f().set_text("PasswInfoLbl", "");
             return;
         }
-        let passw = Zeroizing::new(self.passw_box.text().to_string());
         let mut s = String::new();
         if self.est_quality.get() {
             let bits = if self.use_advanced_passw_est.get() {
@@ -309,16 +249,14 @@ impl PasswEnterDlg {
             s = format!("{} / ", floor_entropy_bits(bits));
         }
         s.push_str(&trl_format("%1 ch.", &[&passw.chars().count().to_string()]));
-        info.set_text(&s);
+        self.f().set_text("PasswInfoLbl", &s);
     }
 
     /// `ClearPasswCache()`.
     pub fn clear_passw_cache(&self) {
         if self.cache.borrow_mut().take().is_some() {
             self.expiry_countdown.set(0);
-            if let Some(t) = self.timer.borrow_mut().take() {
-                t.remove();
-            }
+            self.timer_gen.set(self.timer_gen.get() + 1);
         }
     }
 
@@ -334,32 +272,33 @@ impl PasswEnterDlg {
 
     async fn ok_clicked(self: &Rc<Self>) {
         let flags = self.flags.get();
+        let parent = self.window.get();
+        let passw_empty = self.f().secret_text("PasswBox").is_empty();
         let mut err = String::new();
         if flags & PASSWENTER_FLAG_ENABLEKEYFILE != 0 {
-            let kf = self.key_file_box.active().unwrap_or(0);
-            if self.passw_box.text_length() == 0 && kf == 0 {
+            let kf = self.f().item_index("KeyFileBox").unwrap_or(0);
+            if passw_empty && kf == 0 {
                 err = trl("Enter a password and/or select a key file.");
             } else if kf > 0 {
-                let name = self.key_file_box.active_text().map(|t| t.to_string()).unwrap_or_default();
+                let name = self.f().text("KeyFileBox");
                 if !std::path::Path::new(&name).is_file() {
                     err = trl_format("The selected key file does not exist:\n%1", &[&name]);
                 }
             }
-        } else if self.passw_box.text_length() == 0 {
+        } else if passw_empty {
             err = trl("Password is empty.");
         }
         if !err.is_empty() {
-            msg_box(Some(&self.win), &err, MsgIcon::Error, MsgButtons::Ok, false).await;
-            self.passw_box.grab_focus();
+            ask(parent, &err, MsgIcon::Error, MsgButtons::Ok, false).await;
+            self.f().focus("PasswBox");
             return;
         }
         if flags & PASSWENTER_FLAG_CONFIRMPASSW != 0 && *self.get_passw(0) != *self.get_passw(1) {
-            msg_box(Some(&self.win), &trl("Passwords are not identical."), MsgIcon::Error, MsgButtons::Ok, false)
-                .await;
-            self.passw_box.grab_focus();
+            ask(parent, &trl("Passwords are not identical."), MsgIcon::Error, MsgButtons::Ok, false).await;
+            self.f().focus("PasswBox");
             return;
         }
-        if flags & PASSWENTER_FLAG_ENABLEPASSWCACHE != 0 && self.check("RememberPasswCheck").is_active() {
+        if flags & PASSWENTER_FLAG_ENABLEPASSWCACHE != 0 && self.f().checked("RememberPasswCheck") {
             let passw = self.get_passw(0);
             let mut pad = Zeroizing::new(vec![0u8; passw.len()]);
             RandomPool::global().get_data(&mut pad);
@@ -375,29 +314,31 @@ impl PasswEnterDlg {
     }
 
     fn start_expiry_timer(self: &Rc<Self>) {
-        if let Some(t) = self.timer.borrow_mut().take() {
-            t.remove();
-        }
+        let tgen = self.timer_gen.get() + 1;
+        self.timer_gen.set(tgen);
         let weak = Rc::downgrade(self);
-        let id = glib::timeout_add_seconds_local(1, move || {
-            let Some(d) = weak.upgrade() else { return glib::ControlFlow::Break };
-            let c = d.expiry_countdown.get() - 1;
-            d.expiry_countdown.set(c);
-            if c <= 0 {
-                d.timer.borrow_mut().take();
-                d.cache.borrow_mut().take();
-                d.expiry_countdown.set(0);
-                return glib::ControlFlow::Break;
+        crate::runtime::spawn(async move {
+            loop {
+                pwtool_app::rt::sleep(Duration::from_secs(1)).await;
+                let Some(d) = weak.upgrade() else { return };
+                if d.timer_gen.get() != tgen {
+                    return;
+                }
+                let c = d.expiry_countdown.get() - 1;
+                d.expiry_countdown.set(c);
+                if c <= 0 {
+                    d.cache.borrow_mut().take();
+                    d.expiry_countdown.set(0);
+                    return;
+                }
             }
-            glib::ControlFlow::Continue
         });
-        *self.timer.borrow_mut() = Some(id);
     }
 
     /// `Execute()`: show the dialog modally. If a remembered password is
     /// available (and the cache is enabled), returns `Ok` immediately.
-    pub async fn execute(self: &Rc<Self>, flags: u32, title: &str, parent: Option<&gtk::Window>) -> EnterResult {
-        if self.passw_box.text_length() != 0 {
+    pub async fn execute(self: &Rc<Self>, flags: u32, title: &str, parent: ViewportId) -> EnterResult {
+        if !self.f().secret_text("PasswBox").is_empty() {
             self.clear();
         }
         let cache = flags & PASSWENTER_FLAG_ENABLEPASSWCACHE != 0;
@@ -418,44 +359,57 @@ impl PasswEnterDlg {
         } else {
             trl("Enter password")
         };
-        self.win.set_title(Some(&caption));
-        if let Some(p) = parent {
-            self.win.set_transient_for(Some(p));
-        }
+        let f = self.f();
         self.flags.set(flags);
-        self.check("PasswQualityCheck")
-            .set_sensitive(flags & (PASSWENTER_FLAG_PASSWQUALITY | PASSWENTER_FLAG_ENCRYPT) != 0);
+        f.set_enabled("PasswQualityCheck", flags & (PASSWENTER_FLAG_PASSWQUALITY | PASSWENTER_FLAG_ENCRYPT) != 0);
         self.bar.clear();
-        self.b.get::<gtk::Label>("PasswInfoLbl").set_text("");
-        let tb: gtk::ToggleButton = self.b.get("TogglePasswBtn");
-        tb.set_active(true);
+        f.set_text("PasswInfoLbl", "");
+        f.set_checked("TogglePasswBtn", true);
         self.toggle_passw();
         let confirm = flags & PASSWENTER_FLAG_CONFIRMPASSW != 0;
-        self.b.w("ConfirmPasswLbl").set_sensitive(confirm);
-        self.confirm_box.set_sensitive(confirm);
-        let old = self.check("OldVersionCheck");
-        old.set_active(false);
-        old.set_sensitive(flags & PASSWENTER_FLAG_ENABLEOLDVER != 0);
-        let rem = self.check("RememberPasswCheck");
-        rem.set_active(false);
-        rem.set_sensitive(cache);
+        f.set_enabled("ConfirmPasswLbl", confirm);
+        f.set_enabled("ConfirmPasswBox", confirm);
+        f.set_checked("OldVersionCheck", false);
+        f.set_enabled("OldVersionCheck", flags & PASSWENTER_FLAG_ENABLEOLDVER != 0);
+        f.set_checked("RememberPasswCheck", false);
+        f.set_enabled("RememberPasswCheck", cache);
         self.remember_passw_check();
         let kf = flags & PASSWENTER_FLAG_ENABLEKEYFILE != 0;
-        self.b.w("KeyFileLbl").set_sensitive(kf);
-        self.key_file_box.set_sensitive(kf);
-        self.b.w("BrowseBtn").set_sensitive(kf);
-        self.b
-            .w("CreateKeyFileBtn")
-            .set_sensitive(kf && flags & PASSWENTER_FLAG_ENABLEKEYFILECREATION != 0);
-        self.b.w("SkipBtn").set_visible(flags & PASSWENTER_FLAG_ALLOWSKIP != 0);
+        for n in ["KeyFileLbl", "KeyFileBox", "BrowseBtn"] {
+            f.set_enabled(n, kf);
+        }
+        f.set_enabled("CreateKeyFileBtn", kf && flags & PASSWENTER_FLAG_ENABLEKEYFILECREATION != 0);
+        f.set_visible("SkipBtn", flags & PASSWENTER_FLAG_ALLOWSKIP != 0);
         self.result.set(EnterResult::Cancel);
         let (tx, rx) = async_channel::bounded::<()>(1);
         *self.done.borrow_mut() = Some(tx);
-        self.win.set_default_widget(Some(&self.b.get::<gtk::Button>("OKBtn")));
-        self.win.present();
+        let mut win = form_window(WINDOW_ID, self.form.clone(), parent, true);
+        *win.title.borrow_mut() = caption;
+        let w = self.width.get();
+        if w > win.size.get().x {
+            win.size.set(egui::vec2(w, win.size.get().y));
+        }
+        let min = win.size.get();
+        win = win.resizable(true, min);
+        let d = Rc::downgrade(self);
+        *win.on_close.borrow_mut() = Some(Box::new(move || {
+            if let Some(d) = d.upgrade() {
+                d.result.set(EnterResult::Cancel);
+                if let Some(tx) = d.done.borrow_mut().take() {
+                    let _ = tx.try_send(());
+                }
+            }
+            true
+        }));
+        let win = Rc::new(win);
+        self.window.set(win.id);
+        windows::open(win.clone());
         self.passw_quality_check();
-        self.passw_box.grab_focus();
+        f.focus("PasswBox");
         let _ = rx.recv().await;
+        if let Some(s) = win.last_size.get() {
+            self.width.set(s.x);
+        }
         self.result.get()
     }
 
@@ -468,8 +422,7 @@ impl PasswEnterDlg {
                 return Zeroizing::new(String::from_utf8_lossy(&bytes).into_owned());
             }
         }
-        let e = if n == 0 { &self.passw_box } else { &self.confirm_box };
-        Zeroizing::new(e.text().to_string())
+        self.f().secret_text(if n == 0 { "PasswBox" } else { "ConfirmPasswBox" })
     }
 
     /// `GetPasswBinary()`: UTF-8 or UTF-16LE bytes of the password.
@@ -484,8 +437,8 @@ impl PasswEnterDlg {
 
     /// `GetKeyFileName()`.
     pub fn key_file_name(&self) -> Option<PathBuf> {
-        if self.flags.get() & PASSWENTER_FLAG_ENABLEKEYFILE != 0 && self.key_file_box.active().unwrap_or(0) > 0 {
-            self.key_file_box.active_text().map(|t| PathBuf::from(t.as_str()))
+        if self.flags.get() & PASSWENTER_FLAG_ENABLEKEYFILE != 0 && self.f().item_index("KeyFileBox").unwrap_or(0) > 0 {
+            Some(PathBuf::from(self.f().text("KeyFileBox")))
         } else {
             None
         }
@@ -493,18 +446,16 @@ impl PasswEnterDlg {
 
     /// "PWGen <2.3.0" checkbox.
     pub fn old_version(&self) -> bool {
-        self.check("OldVersionCheck").is_active()
+        self.f().checked("OldVersionCheck")
     }
 
     /// `Clear()`: wipe the entered passwords.
     pub fn clear(&self) {
-        self.suppress_change.set(true);
-        self.passw_box.set_text("");
-        self.suppress_change.set(false);
+        self.f().set_text("PasswBox", "");
         if self.flags.get() & PASSWENTER_FLAG_CONFIRMPASSW != 0 {
-            self.confirm_box.set_text("");
+            self.f().set_text("ConfirmPasswBox", "");
         }
-        self.key_file_box.set_active(Some(0));
+        self.f().set_item_index("KeyFileBox", Some(0));
     }
 
     /// `AutoClearPasswDlg::Clear()`.

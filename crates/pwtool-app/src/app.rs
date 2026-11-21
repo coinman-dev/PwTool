@@ -150,21 +150,19 @@ impl AppPaths {
         AppPaths { exe_dir, resources, ini_file: app_data.join(PROGRAM_INIFILE), data_dir: app_data }
     }
 
+    /// Data directory: `PWTOOL_DATA_DIR`, `share/pwtool` of an installation
+    /// or the program directory if they hold the data (own translations),
+    /// else the data embedded in the executable (`resources::extract`).
     fn find_resources(exe_dir: &Path) -> PathBuf {
         if let Some(d) = std::env::var_os("PWTOOL_DATA_DIR") {
             return PathBuf::from(d);
         }
-        let candidates = [
-            exe_dir.join("../share/pwtool"),
-            exe_dir.to_path_buf(),
-            PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets")),
-        ];
-        for c in &candidates {
+        for c in [exe_dir.join("../share/pwtool"), exe_dir.to_path_buf()] {
             if c.join("common_passwords.txt").is_file() {
-                return std::fs::canonicalize(c).unwrap_or_else(|_| c.clone());
+                return std::fs::canonicalize(&c).unwrap_or(c);
             }
         }
-        exe_dir.to_path_buf()
+        crate::resources::extract().unwrap_or_else(|| exe_dir.to_path_buf())
     }
 
     /// Resolve a file name without directory (`ExtractFilePath(…).IsEmpty()`

@@ -6,15 +6,37 @@
 
 ### Added
 
-- **Windows version** (Windows 10/11, x64) as a portable zip with GTK 4 included,
-  cross-compiled on Linux with llvm-mingw. Platform functions use the Win32 API like the
-  original Password Tech: tray icon with menu and balloon notifications, global hot keys
-  (`RegisterHotKey`), autotype (`SendInput`), clipboard excluded from clipboard history and
-  cloud sync, autostart via the `Run` registry key, Always on Top, single instance, file
-  locking of open databases, locked memory pages (`VirtualLock`), and dates in the regional
-  format. Settings are stored in `%APPDATA%\PwTool`; portable mode works as on Linux.
-- Release workflow builds `pwtool_<version>_windows_x64.zip` and runs the tests and the
+- **Windows version** (Windows 10/11, x64) as one `.exe` that needs nothing installed and
+  imports only the DLLs of Windows itself, cross-compiled on Linux with llvm-mingw.
+  Platform functions use the Win32 API like the original Password Tech: tray icon with
+  menu and balloon notifications, global hot keys (`RegisterHotKey`), autotype
+  (`SendInput`), clipboard excluded from clipboard history and cloud sync, autostart via
+  the `Run` registry key, Always on Top, single instance, file locking of open databases,
+  locked memory pages (`VirtualLock`), and dates in the regional format. Settings are
+  stored in `%APPDATA%\PwTool`; portable mode works as on Linux.
+- The open database and the settings are saved when the user session ends (Windows shut
+  down or log off; on Linux through the session monitor of `xdg-desktop-portal`).
+- Release workflow builds `pwtool_<version>_windows_x64.exe` and runs the tests and the
   console mode on a Windows runner before publishing.
+
+### Changed
+
+- **The interface no longer uses GTK.** The windows of the original are drawn with egui
+  from the original form descriptions, with the same layout. The Linux package depends only
+  on the C/C++ runtime, OpenGL (EGL) and xkbcommon instead of GTK 4.
+- Translations, the list of common passwords, script examples and the PDF manuals are
+  built into the program; own translations can still be placed in the settings folder.
+- Long translated captions take the free space next to them or use a slightly smaller
+  font instead of being cut off; a caption that still does not fit shows its full text as
+  a tooltip.
+- Screen readers get the text of labels, the names of icon buttons and the captions of
+  input fields in the main window.
+
+### Known limitations
+
+- Text cannot be dragged with the mouse from the program into other programs (copy and
+  paste works); PassCube has no user name autocompletion.
+- Screen readers see only the titles of windows other than the main window.
 
 ## 0.1.0-beta — 2026-11-20
 

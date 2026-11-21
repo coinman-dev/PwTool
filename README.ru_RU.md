@@ -15,8 +15,10 @@
 [![Лицензия](https://img.shields.io/badge/license-GPL--2.0--or--later-blue)](LICENSE)
 
 **Password Tool** (PwTool) — перенос [Password Tech](https://github.com/cthoeing/PasswordTech) 3.6.1
-на Rust и GTK4 для Linux и Windows с максимальным сохранением поведения оригинала: те же
-окна, криптографические алгоритмы и совместимые форматы файлов. Базы паролей (`.pwdb`),
+на Rust для Linux и Windows с максимальным сохранением поведения оригинала: те же
+окна, криптографические алгоритмы и совместимые форматы файлов. Окна рисуются с помощью
+[egui](https://github.com/emilk/egui) по описаниям форм оригинала, поэтому программа — один
+исполняемый файл, без набора библиотек интерфейса. Базы паролей (`.pwdb`),
 настройки (`PwTool.ini` / `PwTech.ini`), профили, списки слов, скрипты Lua и переводы
 совместимы с оригинальным Password Tech.
 
@@ -33,10 +35,12 @@
 
 | Вариант | Скачать | Как использовать |
 |---|---|---|
-| Пакет для Linux | [pwtool_0.1.0.beta_amd64.deb](https://github.com/coinman-dev/PwTool/releases/download/v0.1.0-beta/pwtool_0.1.0.beta_amd64.deb) | `sudo apt install ./pwtool_0.1.0.beta_amd64.deb` ставит Password Tool, значки, переводы, примеры скриптов и руководства в PDF. |
-| Windows, портативная версия | `pwtool_<версия>_windows_x64.zip` на [странице релизов](https://github.com/coinman-dev/PwTool/releases) (начиная со следующего релиза) | Распакуйте в любую папку и запустите `PwTool\bin\pwtool.exe`. GTK 4 и все библиотеки уже внутри, ничего не устанавливается. |
+| Пакет для Linux | [pwtool_0.1.0.beta_amd64.deb](https://github.com/coinman-dev/PwTool/releases/download/v0.1.0-beta/pwtool_0.1.0.beta_amd64.deb) | `sudo apt install ./pwtool_0.1.0.beta_amd64.deb` ставит Password Tool с пунктом меню и значками. |
+| Windows | `pwtool_<версия>_windows_x64.exe` на [странице релизов](https://github.com/coinman-dev/PwTool/releases) (начиная со следующего релиза) | Один файл: сохраните в любую папку и запустите. Ничего не устанавливается. |
 
-Linux: Ubuntu 24.04 и новее, Debian 13 и новее, amd64 (GTK 4.10+). Windows: 10 или 11, x64.
+Переводы, примеры скриптов и руководства в PDF встроены в программу.
+Linux: Ubuntu 24.04 и новее, Debian 13 и новее, amd64, Wayland или X11 с OpenGL.
+Windows: 10 или 11, x64.
 Рекламы и телеметрии нет.
 Проверка обновлений обращается только к GitHub и отключается в **«Настройки» → «Параметры»**.
 [Все релизы](https://github.com/coinman-dev/PwTool/releases) ·
@@ -45,9 +49,10 @@ Linux: Ubuntu 24.04 и новее, Debian 13 и новее, amd64 (GTK 4.10+). W
 ## Быстрый старт
 
 1. Linux: установите `.deb`-пакет командой `sudo apt install ./pwtool_0.1.0.beta_amd64.deb`.
-   Windows: распакуйте `.zip` в любую папку (например, `%LOCALAPPDATA%\Programs`).
+   Windows: сохраните `pwtool_<версия>_windows_x64.exe` в любую папку (например,
+   `%LOCALAPPDATA%\Programs\PwTool`), при желании переименовав в `pwtool.exe`.
 2. Откройте **Password Tool** из меню приложений (**Служебные**) или запустите `pwtool`;
-   в Windows запустите `PwTool\bin\pwtool.exe` (его можно закрепить в «Пуске» или на панели задач).
+   в Windows запустите `.exe` (его можно закрепить в «Пуске» или на панели задач).
 3. Выберите набор символов, список слов для парольной фразы, шаблон формата или скрипт Lua
    и нажмите **«Создать»** — 16-сегментная шкала покажет оценку энтропии в битах.
 4. Нажмите значок базы на панели инструментов (или **«Файл» → «Менеджер паролей»**), чтобы
@@ -78,8 +83,8 @@ Linux: Ubuntu 24.04 и новее, Debian 13 и новее, amd64 (GTK 4.10+). W
   паролей в окно или файл, создание файлов случайных данных и таблиц триграмм.
 - **Консольный режим**: генерация паролей, фраз и паролей по шаблону прямо из терминала без
   запуска графического окна.
-- **Встроенная документация**: руководства `manual.pdf` и `scripting.pdf` ставятся вместе с
-  программой и открываются из меню **«Справка»** или с панели инструментов.
+- **Встроенная документация**: руководства `manual.pdf` и `scripting.pdf` входят в
+  программу и открываются из меню **«Справка»** или с панели инструментов.
 
 ## Интеграция с рабочим столом
 
@@ -93,6 +98,8 @@ Linux:
 - **Безопасный буфер обмена**: скопированные пароли помечаются как секретные
   (`x-kde-passwordManagerHint`), чтобы менеджеры буфера вроде Klipper не сохраняли их в
   истории; поддерживается автоматическая очистка по таймеру.
+- **Завершение сеанса**: открытая база и настройки сохраняются при выходе из системы
+  (монитор сеанса `xdg-desktop-portal`).
 
 Windows (Win32 API, как в Password Tech):
 
@@ -104,16 +111,23 @@ Windows (Win32 API, как в Password Tech):
 - **Безопасный буфер обмена**: пароли не попадают в журнал буфера обмена (Win+V), облачную
   синхронизацию буфера и программы-мониторы буфера.
 - **Автозапуск** через ключ `Run` текущего пользователя; **«Поверх всех окон»**, единственный
-  экземпляр, стиль **«По умолчанию»** следует светлому/тёмному режиму приложений Windows.
+  экземпляр, стиль **«По умолчанию»** следует светлому/тёмному режиму приложений Windows;
+  база и настройки сохраняются при завершении работы Windows.
+
+По сравнению с Password Tech недоступно: перетаскивание текста мышью из программы в другие
+(копирование и вставка работают) и автодополнение имени пользователя в PassCube. Экранный
+диктор читает главное окно; остальные окна видны ему только по заголовку (ограничение
+связки egui с окнами системы).
 
 ## Настройки и данные
 
 | Что | Linux | Windows |
 |---|---|---|
-| Исполняемый файл | `/usr/bin/pwtool` | `PwTool\bin\pwtool.exe` |
-| Ресурсы (переводы, словари, примеры скриптов, руководства PDF) | `/usr/share/pwtool/` | `PwTool\share\pwtool\` |
+| Программа | `/usr/bin/pwtool` | `pwtool.exe` там, куда вы его сохранили |
+| Встроенные данные (переводы, список распространённых паролей, примеры скриптов, руководства PDF) | внутри программы; при работе записываются в `$XDG_RUNTIME_DIR/pwtool/` | внутри программы; при работе записываются в `%TEMP%\PwTool\` |
+| Свои переводы (`.po`, `.lng`) | `~/.config/pwtool/` | `%APPDATA%\PwTool\` (в переносном режиме — рядом с `pwtool.exe`) |
 | Настройки, профили и файл случайного зерна | `~/.config/pwtool/PwTool.ini`, `randseed.dat` | `%APPDATA%\PwTool\PwTool.ini`, `randseed.dat` |
-| Переносной режим | Положите `PwTool.ini` рядом с исполняемым файлом `pwtool` | Положите `PwTool.ini` рядом с `pwtool.exe` (в `bin`) |
+| Переносной режим | Положите `PwTool.ini` рядом с исполняемым файлом `pwtool` | Положите `PwTool.ini` рядом с `pwtool.exe` |
 | Базы паролей (`.pwdb`) | Там, куда вы их сохраните | Там, куда вы их сохраните |
 
 Пункт **«Восстановить настройки из резервной копии»** принимает также резервные копии
@@ -135,12 +149,14 @@ pwtool --silent
 
 ## Сборка
 
-Нужны Rust 1.90+, компилятор C/C++ (`build-essential`), `pkg-config` и `libgtk-4-dev`
-(GTK 4.10 или новее). LibreOffice (`libreoffice-writer-nogui`) необязателен — используется
-для сборки `manual.pdf` и `scripting.pdf` из `doc/manual/*.odt`.
+Нужны Rust 1.90+ и компилятор C/C++ (`build-essential`); системные библиотеки для сборки
+ставить не нужно. LibreOffice (`libreoffice-writer-nogui`) необязателен: он собирает
+`manual.pdf` и `scripting.pdf` из `doc/manual/*.odt`, и они встраиваются в программу
+(запустите `packaging/manuals.sh` перед `cargo build`).
 
 ```bash
 cargo test --workspace --locked
+packaging/manuals.sh               # необязательно: руководства PDF в target/manuals
 cargo build --release --locked -p pwtool
 
 packaging/install.sh /usr/local    # установка в PREFIX
@@ -151,22 +167,23 @@ packaging/build-deb.sh             # сборка target/pwtool_<версия>_<
 
 Версия для Windows собирается кросс-компиляцией на Linux (инструменты Windows не нужны)
 для цели Rust `x86_64-pc-windows-gnullvm` с помощью [llvm-mingw](https://github.com/mstorsjo/llvm-mingw)
-(UCRT). GTK 4 и зависимости берутся из репозитория MSYS2 CLANG64, собранного таким же
-набором инструментов; `packaging/windows/fetch-gtk.py` скачивает их (со сверкой SHA-256 по
-базе репозитория) в `~/.cache/pwtool-win/sysroot`.
+(UCRT). Библиотека C подключается статически: получается один `.exe`, которому нужны только
+DLL самой Windows (сценарий сборки это проверяет).
 
 ```bash
 rustup target add x86_64-pc-windows-gnullvm
 # llvm-mingw распакован в ~/.local/opt/llvm-mingw-<версия>-ucrt-ubuntu-22.04-x86_64
-# (или задайте LLVM_MINGW); нужны python3 с zstd и glib-compile-schemas
-packaging/windows/build.sh            # target/pwtool_<версия>_windows_x64.zip
+# (или задайте LLVM_MINGW); нужен python3
+packaging/manuals.sh                  # необязательно: руководства для встраивания
+packaging/windows/build.sh            # target/pwtool_<версия>_windows_x64.exe
 packaging/windows/build.sh --tests    # плюс target/windows/tests/*.exe для запуска в Windows
 ```
 
-Автоматизированная проверка интерфейса в виртуальной сессии:
+Автоматизированная проверка интерфейса в виртуальной сессии и проверка форм:
 
 ```bash
 tools/headless.sh env PWTOOL_AUTOMATE="click GenerateBtn;wait 400;print PasswBox;quit" ./target/debug/pwtool
+./target/debug/pwtool --forms /tmp/forms --lang Russian --fit   # снимки всех окон, подписи, которые не помещаются
 ```
 
 ## Автоматические релизы
@@ -175,7 +192,7 @@ tools/headless.sh env PWTOOL_AUTOMATE="click GenerateBtn;wait 400;print PasswBox
 [сборку релиза](.github/workflows/release.yml). Тег должен совпадать с `version` в
 `Cargo.toml`. GitHub прогоняет тесты на Ubuntu 24.04, собирает PDF-руководства,
 упаковывает и проверяет `pwtool_<версия>_amd64.deb`, кросс-компилирует
-`pwtool_<версия>_windows_x64.zip`, запускает тесты и консольный режим Windows-сборки на
+`pwtool_<версия>_windows_x64.exe`, запускает тесты и консольный режим Windows-сборки на
 Windows-машине, считает `SHA256SUMS.txt` и публикует релиз. Теги с суффиксом через дефис автоматически помечаются как предварительные (prerelease).
 
 ## Лицензия
@@ -183,7 +200,7 @@ Windows-машине, считает `SHA256SUMS.txt` и публикует ре
 GNU General Public License v2 или более поздняя версия — см. [LICENSE](LICENSE).
 
 Основано на **Password Tech** (Copyright © 2002–2026 Christian Thöing). Сторонние
-компоненты сохраняют свои лицензии: miniLZO (GPL v2+), miniz (MIT), zxcvbn-c (MIT) и Lua
-(MIT, через crate `mlua`). Сборка для Windows содержит GTK 4 и его зависимости в виде
-неизменённых пакетов MSYS2 (в основном LGPL и MIT); их названия и версии перечислены в
-`GTK-PACKAGES.txt` внутри архива, исходники доступны в [MSYS2](https://packages.msys2.org/).
+компоненты сохраняют свои лицензии: miniLZO (GPL v2+), miniz (MIT), zxcvbn-c (MIT), Lua
+(MIT, через crate `mlua`) и crates Rust, из которых собрана программа (egui, winit и другие,
+MIT или Apache-2.0), включая запасные шрифты egui (Hack, Ubuntu Light, Noto Emoji,
+emoji-icon-font) под их собственными свободными лицензиями.

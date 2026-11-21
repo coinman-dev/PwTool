@@ -22,7 +22,6 @@ pub enum MsgIcon {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum MsgButtons {
     Ok,
-    OkCancel,
     YesNo,
     YesNoCancel,
 }
@@ -125,7 +124,6 @@ pub async fn msg_box(ctx: &egui::Context, parent: ViewportId, text: &str, icon: 
     }
     let list: Vec<(String, MsgResult)> = match buttons {
         MsgButtons::Ok => vec![(trl("OK"), Ok)],
-        MsgButtons::OkCancel => vec![(trl("OK"), Ok), (trl("Cancel"), Cancel)],
         MsgButtons::YesNo => vec![(format!("&{}", trl("Yes")), Yes), (format!("&{}", trl("No")), No)],
         MsgButtons::YesNoCancel => vec![(format!("&{}", trl("Yes")), Yes), (format!("&{}", trl("No")), No), (trl("Cancel"), Cancel)],
     };

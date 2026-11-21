@@ -2,21 +2,19 @@
 //! Configuration.cpp`) and `TMainForm::ApplyConfig()`. Child module of
 //! `main_window`.
 
-#![allow(deprecated)]
-
 use std::path::Path;
 
+use pwtool_app::app::LanguageEntry;
+use pwtool_app::app_config::*;
+use pwtool_app::shortcut::shortcut_to_text;
 use pwtool_core::language_file::LanguageFile;
 use pwtool_core::random::pool::PoolCipherType;
 use pwtool_core::text_file::CharEncoding;
 
 use super::*;
-use crate::app::LanguageEntry;
-use crate::app_config::*;
-use crate::ui::builder::{accel_to_shortcut, shortcut_to_text};
-use crate::ui::util::FontSpec;
+use crate::vcl::fonts::FontSpec;
 
-const CONFIG_ID: &str = "ConfigWin";
+const WINDOW_ID: &str = "ConfigWin";
 
 const RANDOM_POOL_CIPHER_NAMES: [&str; 3] = ["AES-CTR", "ChaCha20", "ChaCha8"];
 const RANDOM_POOL_CIPHER_INFO: [(u32, u32); 3] = [(256, 128), (256, 512), (256, 512)];
@@ -32,408 +30,367 @@ pub const APP_ICON_NAMES: [(&str, &str); 6] = [
 ];
 
 /// User interface styles of the port ("Windows" of the original = default).
-const UI_STYLES: [&str; 3] = ["Default", "Light", "Dark"];
+pub const UI_STYLES: [&str; 3] = ["Default", "Light", "Dark"];
+
+fn win_id() -> ViewportId {
+    ViewportId::from_hash_of(WINDOW_ID)
+}
+
+/// Rows of the hot key list (`HotKeyView`) and their selection.
+#[derive(Default)]
+struct HotKeyRows {
+    rows: Vec<(u16, String, String)>,
+    selected: Vec<bool>,
+    anchor: Option<usize>,
+    changed: bool,
+}
 
 pub(super) struct ConfigDlg {
-    b: Built,
-    win: gtk::Window,
+    form: Rc<Form>,
     hot_keys: RefCell<HotKeyList>,
     hot_key: Cell<u16>,
-    hot_key_list: gtk::ListBox,
+    rows: Rc<RefCell<HotKeyRows>>,
     font: RefCell<String>,
     result: Cell<bool>,
     done: RefCell<Option<async_channel::Sender<()>>>,
-    main: std::rc::Weak<MainWindow>,
+    main: Weak<MainWindow>,
+}
+
+/// The dialog's window content: the form plus the hot key capture.
+struct ConfigContent(Rc<ConfigDlg>);
+
+impl Content for ConfigContent {
+    fn ui(&self, ui: &mut Ui) {
+        let d = &self.0;
+        Content::ui(&*d.form, ui);
+        if d.form.has_focus("HotKeyBox") {
+            let keys: Vec<(egui::Key, egui::Modifiers)> = ui.input(|i| {
+                i.events
+                    .iter()
+                    .filter_map(|e| match e {
+                        egui::Event::Key { key, pressed: true, modifiers, .. } => Some((*key, *modifiers)),
+                        _ => None,
+                    })
+                    .collect()
+            });
+            for (key, mods) in keys {
+                if key == egui::Key::Tab {
+                    continue;
+                }
+                if key == egui::Key::Backspace && mods.is_none() {
+                    d.set_hot_key(0);
+                    continue;
+                }
+                if let Some(vk) = crate::vcl::render::key_to_vk(key) {
+                    let mut code = vk;
+                    if mods.shift {
+                        code |= 0x2000;
+                    }
+                    if mods.ctrl {
+                        code |= 0x4000;
+                    }
+                    if mods.alt {
+                        code |= 0x8000;
+                    }
+                    d.set_hot_key(code);
+                }
+            }
+        }
+        let changed = std::mem::take(&mut d.rows.borrow_mut().changed);
+        if changed {
+            let any = d.rows.borrow().selected.iter().any(|x| *x);
+            d.form.set_enabled("RemoveBtn", any);
+        }
+    }
 }
 
 impl ConfigDlg {
     fn new(main: &Rc<MainWindow>) -> Rc<Self> {
-        let b = build_form(load_form("Configuration"), "Configuration");
-        let win = super::super::dialogs::form_window(&b, Some(&main.win()), true);
-        win.set_hide_on_close(true);
-        // fixed lists
-        let combo = |n: &str| b.get::<gtk::ComboBoxText>(n);
-        set_combo_items(&combo("UiStylesList"), &UI_STYLES.iter().map(|s| trl(s)).collect::<Vec<_>>());
-        set_combo_items(&combo("AppIconList"), &APP_ICON_NAMES.iter().map(|(n, _)| trl(n)).collect::<Vec<_>>());
+        let form = dialogs::load("Configuration");
+        let f = &form;
+        f.set_items("UiStylesList", UI_STYLES.iter().map(|s| trl(s)).collect());
+        f.set_items("AppIconList", APP_ICON_NAMES.iter().map(|(n, _)| trl(n)).collect());
         let ciphers: Vec<String> = (0..3)
             .map(|i| {
                 trl_format(
                     "%1 (%2-bit key, operates on %3-bit blocks)",
-                    &[
-                        RANDOM_POOL_CIPHER_NAMES[i],
-                        &RANDOM_POOL_CIPHER_INFO[i].0.to_string(),
-                        &RANDOM_POOL_CIPHER_INFO[i].1.to_string(),
-                    ],
+                    &[RANDOM_POOL_CIPHER_NAMES[i], &RANDOM_POOL_CIPHER_INFO[i].0.to_string(), &RANDOM_POOL_CIPHER_INFO[i].1.to_string()],
                 )
             })
             .collect();
-        set_combo_items(&combo("RandomPoolCipherList"), &ciphers);
-        set_combo_items(&combo("BenchmarkMemList"), &(0..=10).map(|i| format!("{} MB", 1 << i)).collect::<Vec<_>>());
-        combo("BenchmarkMemList").set_active(Some(6));
+        f.set_items("RandomPoolCipherList", ciphers);
+        f.set_items("BenchmarkMemList", (0..=10).map(|i| format!("{} MB", 1 << i)).collect());
+        f.set_item_index("BenchmarkMemList", Some(6));
         for name in ["HotKeyActionsList", "AutoSaveList"] {
-            let items: Vec<String> =
-                b.obj(name).map(|o| o.strings("Items.Strings")).unwrap_or_default().iter().map(|s| trl(s)).collect();
-            set_combo_items(&combo(name), &items);
+            let items: Vec<String> = f.items(name).iter().map(|s| trl(s)).collect();
+            f.set_items(name, items);
         }
-        for u in [("AutoClearClipTimeSpinBtn", AUTOCLEARCLIPTIME_MIN, AUTOCLEARCLIPTIME_MAX), ("AutoClearPasswTimeSpinBtn", AUTOCLEARPASSWTIME_MIN, AUTOCLEARPASSWTIME_MAX)] {
-            if let Some(ud) = b.updowns.get(u.0) {
-                ud.set_min(u.1 as i64);
-                ud.set_max(u.2 as i64);
-            }
-        }
-        b.get::<gtk::CheckButton>("UseAdvancedPasswEst")
-            .set_label(Some(&trl_format("Use advanced password strength estimation (%1)", &["zxcvbn"])));
-        // hot key list (TListView with two columns)
-        let sw: gtk::ScrolledWindow = b.get("HotKeyView");
-        let hot_key_list = gtk::ListBox::new();
-        hot_key_list.set_selection_mode(gtk::SelectionMode::Multiple);
-        let header = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        let cols: Vec<String> = b
-            .obj("HotKeyView")
-            .map(|o| {
-                o.collection("Columns")
-                    .iter()
-                    .map(|c| c.get("Caption").and_then(|v| v.as_str()).unwrap_or("").to_string())
-                    .collect()
-            })
-            .unwrap_or_default();
-        for i in 0..2 {
-            let col = cols.get(i).cloned().unwrap_or_default();
-            let l = gtk::Label::new(Some(&trl(&col)));
-            l.set_xalign(0.0);
-            l.add_css_class("heading");
-            if i == 0 {
-                l.set_width_chars(18);
-            } else {
-                l.set_hexpand(true);
-            }
-            l.set_margin_start(6);
-            header.append(&l);
-        }
-        let vb = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        vb.append(&header);
-        vb.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
-        vb.append(&hot_key_list);
-        sw.set_child(Some(&vb));
-
+        f.set_range("AutoClearClipTimeSpinBtn", AUTOCLEARCLIPTIME_MIN as i64, AUTOCLEARCLIPTIME_MAX as i64);
+        f.set_range("AutoClearPasswTimeSpinBtn", AUTOCLEARPASSWTIME_MIN as i64, AUTOCLEARPASSWTIME_MAX as i64);
+        f.set_control_caption("UseAdvancedPasswEst", &trl_format("Use advanced password strength estimation (%1)", &["zxcvbn"]));
+        f.set_read_only("HotKeyBox", true);
+        f.set_popup_menu("SelectFontBtn", "SelectFontMenu");
         let d = Rc::new(ConfigDlg {
-            b,
-            win,
+            form,
             hot_keys: RefCell::new(HotKeyList::new()),
             hot_key: Cell::new(0),
-            hot_key_list,
+            rows: Rc::new(RefCell::new(HotKeyRows::default())),
             font: RefCell::new(String::new()),
             result: Cell::new(false),
             done: RefCell::new(None),
             main: Rc::downgrade(main),
         });
+        d.setup_hot_key_view();
         d.connect();
-        main.attach_entropy_events(&d.win);
         d
     }
 
-    fn check(&self, n: &str) -> gtk::CheckButton {
-        self.b.get(n)
-    }
-
-    fn combo(&self, n: &str) -> gtk::ComboBoxText {
-        self.b.get(n)
-    }
-
-    fn ud(&self, n: &str) -> &Rc<crate::ui::builder::UpDown> {
-        &self.b.updowns[n]
-    }
-
-    fn radio_index(&self, group: &str) -> i32 {
-        for i in 0..16 {
-            match self.b.try_get::<gtk::CheckButton>(&format!("{group}.item{i}")) {
-                Some(c) if c.is_active() => return i,
-                Some(_) => {}
-                None => break,
-            }
-        }
-        -1
-    }
-
-    fn set_radio_index(&self, group: &str, idx: i32) {
-        if let Some(c) = self.b.try_get::<gtk::CheckButton>(&format!("{group}.item{idx}")) {
-            c.set_active(true);
-        }
+    fn f(&self) -> &Form {
+        &self.form
     }
 
     fn enable(&self, names: &[&str], on: bool) {
         for n in names {
-            if let Some(u) = self.b.updowns.get(*n) {
-                u.set_sensitive(on);
-            } else if let Some(w) = self.b.widgets.get(*n) {
-                w.set_sensitive(on);
-            }
+            self.f().set_enabled(n, on);
         }
     }
 
+    /// `HotKeyView`: a list with the columns "Shortcut" and "Action".
+    fn setup_hot_key_view(&self) {
+        let cols: Vec<(String, i64)> = self
+            .f()
+            .obj
+            .find("HotKeyView")
+            .map(|o| {
+                o.collection("Columns")
+                    .iter()
+                    .map(|c| {
+                        (
+                            trl(c.get("Caption").and_then(|v| v.as_str()).unwrap_or("")),
+                            c.get("Width").and_then(|v| v.as_i64()).unwrap_or(120),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let scale = self.f().scale();
+        let rows = self.rows.clone();
+        self.f().set_painter("HotKeyView", move |ui, rect| {
+            let stroke = ui.visuals().widgets.noninteractive.bg_stroke;
+            ui.painter().rect_filled(rect, 2.0, ui.visuals().extreme_bg_color);
+            ui.painter().rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
+            let w0 = cols.first().map_or(125.0, |c| c.1 as f32 * scale);
+            let inner = rect.shrink(2.0);
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::top_down(egui::Align::Min)));
+            let ui = &mut child;
+            ui.set_clip_rect(inner);
+            let row_h = ui.text_style_height(&egui::TextStyle::Body) + 4.0;
+            // header
+            let head = egui::Rect::from_min_size(inner.min, egui::vec2(inner.width(), row_h));
+            ui.painter().rect_filled(head, 0.0, ui.visuals().faint_bg_color);
+            let font = egui::TextStyle::Body.resolve(ui.style());
+            let color = ui.visuals().text_color();
+            for (i, (c, _)) in cols.iter().take(2).enumerate() {
+                let x = if i == 0 { head.min.x + 4.0 } else { head.min.x + w0 + 4.0 };
+                ui.painter().text(egui::pos2(x, head.center().y), egui::Align2::LEFT_CENTER, c, font.clone(), color);
+            }
+            ui.painter().vline(head.min.x + w0, head.y_range(), stroke);
+            ui.painter().hline(head.x_range(), head.max.y, stroke);
+            let body = egui::Rect::from_min_max(egui::pos2(inner.min.x, head.max.y + 1.0), inner.max);
+            let mut r = rows.borrow_mut();
+            let HotKeyRows { rows, selected, anchor, changed } = &mut *r;
+            let mut body_ui = ui.new_child(egui::UiBuilder::new().max_rect(body).layout(egui::Layout::top_down(egui::Align::Min)));
+            egui::ScrollArea::vertical().id_salt("hotkeys").auto_shrink(false).show(&mut body_ui, |ui| {
+                for (i, (_, key, action)) in rows.iter().enumerate() {
+                    let (rr, resp) = ui.allocate_exact_size(egui::vec2(body.width(), row_h), egui::Sense::click());
+                    if selected[i] {
+                        ui.painter().rect_filled(rr, 0.0, ui.visuals().selection.bg_fill);
+                    } else if resp.hovered() {
+                        ui.painter().rect_filled(rr, 0.0, ui.visuals().widgets.hovered.weak_bg_fill);
+                    }
+                    let tc = if selected[i] { ui.visuals().selection.stroke.color } else { color };
+                    ui.painter().text(egui::pos2(rr.min.x + 4.0, rr.center().y), egui::Align2::LEFT_CENTER, key, font.clone(), tc);
+                    let clip = egui::Rect::from_min_max(egui::pos2(rr.min.x + w0, rr.min.y), rr.max);
+                    ui.painter().with_clip_rect(clip).text(egui::pos2(rr.min.x + w0 + 4.0, rr.center().y), egui::Align2::LEFT_CENTER, action, font.clone(), tc);
+                    if resp.clicked() {
+                        let mods = ui.input(|i| i.modifiers);
+                        if mods.command {
+                            selected[i] = !selected[i];
+                        } else if let (true, Some(a)) = (mods.shift, *anchor) {
+                            let (lo, hi) = (a.min(i), a.max(i));
+                            for (j, s) in selected.iter_mut().enumerate() {
+                                *s = (lo..=hi).contains(&j);
+                            }
+                        } else {
+                            selected.iter_mut().for_each(|s| *s = false);
+                            selected[i] = true;
+                        }
+                        if !mods.shift {
+                            *anchor = Some(i);
+                        }
+                        *changed = true;
+                    }
+                }
+            });
+        });
+    }
+
     fn connect(self: &Rc<Self>) {
-        let pairs: [(&str, &[&str]); 6] = [
+        let dd = Rc::downgrade(self);
+        self.form.on_any(move |e| {
+            let Some(d) = dd.upgrade() else { return };
+            use crate::vcl::Event::*;
+            match e {
+                Click(n) => d.click(n),
+                Change(n) if n == "LanguageList" => d.language_list_select(),
+                Menu(n) if n == "SelectFontMenu_RestoreDefault" => {
+                    d.font.borrow_mut().clear();
+                    d.show_font_sample();
+                }
+                _ => {}
+            }
+        });
+    }
+
+    fn click(self: &Rc<Self>, n: &str) {
+        let pairs: [(&str, &[&str]); 5] = [
             ("AutoClearClipCheck", &["AutoClearClipTimeBox", "AutoClearClipTimeSpinBtn"]),
             ("AutoClearPasswCheck", &["AutoClearPasswTimeBox", "AutoClearPasswTimeSpinBtn"]),
             ("LoadProfileStartupCheck", &["LoadProfileBox"]),
             ("LockIdleCheck", &["LockIdleTimeBox", "LockIdleTimeSpinBtn"]),
             ("AutoSaveCheck", &["AutoSaveList"]),
-            ("WarnEntriesExpireSoonCheck", &[]),
         ];
-        for (check, deps) in pairs {
-            let d = Rc::downgrade(self);
-            let deps: Vec<String> = deps.iter().map(|s| s.to_string()).collect();
-            self.check(check).connect_toggled(move |c| {
-                if let Some(d) = d.upgrade() {
-                    let v: Vec<&str> = deps.iter().map(|s| s.as_str()).collect();
-                    d.enable(&v, c.is_active());
-                }
-            });
+        if let Some((c, deps)) = pairs.iter().find(|(c, _)| *c == n) {
+            self.enable(deps, self.f().checked(c));
+            return;
         }
-        let d = Rc::downgrade(self);
-        let f = move || {
-            if let Some(d) = d.upgrade() {
-                let cb = d.check("CreateBackupCheck").is_active();
-                d.check("NumberBackupsCheck").set_sensitive(cb);
-                let on = cb && d.check("NumberBackupsCheck").is_active();
-                d.enable(&["MaxNumBackupsBox", "MaxNumBackupsSpinBtn"], on);
+        match n {
+            "CreateBackupCheck" | "NumberBackupsCheck" => self.backup_checks(),
+            "OKBtn" => {
+                let d = self.clone();
+                spawn(async move { d.ok_clicked().await });
             }
-        };
-        let f2 = f.clone();
-        self.check("CreateBackupCheck").connect_toggled(move |_| f2());
-        self.check("NumberBackupsCheck").connect_toggled(move |_| f());
-
-        // OK / Cancel
-        let d = Rc::downgrade(self);
-        self.b.get::<gtk::Button>("OKBtn").connect_clicked(move |_| {
-            if let Some(d) = d.upgrade() {
-                glib::spawn_future_local(async move { d.ok_clicked().await });
+            "CancelBtn" => self.close(),
+            "SelectFontBtn" => {
+                let d = self.clone();
+                spawn(async move {
+                    let cur = FontSpec::parse(&d.font.borrow());
+                    if let Some(f) = crate::ui::font_dialog::choose_font(win_id(), cur.as_ref(), false).await {
+                        *d.font.borrow_mut() = f.to_font_string();
+                        d.show_font_sample();
+                    }
+                });
             }
-        });
-        let w = self.win.clone();
-        self.b.get::<gtk::Button>("CancelBtn").connect_clicked(move |_| w.close());
-        let d = Rc::downgrade(self);
-        self.win.connect_close_request(move |_| {
-            if let Some(d) = d.upgrade() {
-                if let Some(tx) = d.done.borrow_mut().take() {
-                    let _ = tx.try_send(());
+            "DefaultFontBtn" => {
+                self.font.borrow_mut().clear();
+                self.show_font_sample();
+            }
+            "AddBtn" => {
+                let d = self.clone();
+                spawn(async move { d.add_hot_key().await });
+            }
+            "RemoveBtn" => {
+                {
+                    let r = self.rows.borrow();
+                    let mut keys = self.hot_keys.borrow_mut();
+                    for (i, (k, _, _)) in r.rows.iter().enumerate() {
+                        if r.selected[i] {
+                            keys.remove(k);
+                        }
+                    }
                 }
+                self.update_hot_key_list();
             }
-            glib::Propagation::Proceed
-        });
-
-        // font selection (split button with "Restore default")
-        let d = Rc::downgrade(self);
-        self.b.get::<gtk::Button>("SelectFontBtn").connect_clicked(move |_| {
-            let Some(d) = d.upgrade() else { return };
-            let dlg = gtk::FontDialog::new();
-            let cur = FontSpec::parse(&d.font.borrow()).map(|f| f.to_pango());
-            let d2 = d.clone();
-            dlg.choose_font(Some(&d.win), cur.as_ref(), gio::Cancellable::NONE, move |r| {
-                if let Ok(desc) = r {
-                    let f = FontSpec::from_pango(&desc);
-                    *d2.font.borrow_mut() = f.to_font_string();
-                    d2.show_font_sample();
-                }
-            });
-        });
-        if let Some(m) = self.b.menus.get("SelectFontMenu") {
-            super::super::builder::attach_context_menu(&self.b.get::<gtk::Button>("SelectFontBtn"), m);
+            "BenchmarkBtn" => self.benchmark(),
+            "InstallLanguageBtn" => {
+                let d = self.clone();
+                spawn(async move { d.install_language().await });
+            }
+            "RemoveLanguageBtn" => {
+                let d = self.clone();
+                spawn(async move { d.remove_language().await });
+            }
+            "ConvertLangFileBtn" => {
+                let d = self.clone();
+                spawn(async move { d.convert_lang_file().await });
+            }
+            _ => {}
         }
-        let d = Rc::downgrade(self);
-        self.b.action("SelectFontMenu_RestoreDefault").connect_activate(move |_, _| {
-            if let Some(d) = d.upgrade() {
-                d.font.borrow_mut().clear();
-                d.show_font_sample();
-            }
-        });
-        let d = Rc::downgrade(self);
-        self.b.get::<gtk::Button>("DefaultFontBtn").connect_clicked(move |_| {
-            if let Some(d) = d.upgrade() {
-                d.font.borrow_mut().clear();
-                d.show_font_sample();
-            }
-        });
+    }
 
-        // hot keys
-        let hk: gtk::Entry = self.b.get("HotKeyBox");
-        hk.set_editable(false);
-        hk.set_text(&trl("None"));
-        let key = gtk::EventControllerKey::new();
-        key.set_propagation_phase(gtk::PropagationPhase::Capture);
-        let d = Rc::downgrade(self);
-        key.connect_key_pressed(move |_, k, _, mods| {
-            let Some(d) = d.upgrade() else { return glib::Propagation::Proceed };
-            if k == gdk::Key::Tab || k == gdk::Key::ISO_Left_Tab {
-                return glib::Propagation::Proceed;
-            }
-            if k == gdk::Key::BackSpace && mods.is_empty() {
-                d.set_hot_key(0);
-                return glib::Propagation::Stop;
-            }
-            if let Some(code) = accel_to_shortcut(k, mods) {
-                d.set_hot_key(code);
-            }
-            glib::Propagation::Stop
-        });
-        hk.add_controller(key);
-        self.b.get::<gtk::Button>("AddBtn").set_sensitive(false);
-        let d = Rc::downgrade(self);
-        self.b.get::<gtk::Button>("AddBtn").connect_clicked(move |_| {
-            if let Some(d) = d.upgrade() {
-                glib::spawn_future_local(async move { d.add_hot_key().await });
-            }
-        });
-        self.b.get::<gtk::Button>("RemoveBtn").set_sensitive(false);
-        let d = Rc::downgrade(self);
-        self.b.get::<gtk::Button>("RemoveBtn").connect_clicked(move |_| {
-            if let Some(d) = d.upgrade() {
-                let rows = d.hot_key_list.selected_rows();
-                let mut keys = d.hot_keys.borrow_mut();
-                for r in rows {
-                    let k = r.widget_name().parse::<u16>().unwrap_or(0);
-                    keys.remove(&k);
-                }
-                drop(keys);
-                d.update_hot_key_list();
-            }
-        });
-        let d = Rc::downgrade(self);
-        self.hot_key_list.connect_selected_rows_changed(move |l| {
-            if let Some(d) = d.upgrade() {
-                d.b.w("RemoveBtn").set_sensitive(!l.selected_rows().is_empty());
-            }
-        });
+    fn backup_checks(&self) {
+        let cb = self.f().checked("CreateBackupCheck");
+        self.f().set_enabled("NumberBackupsCheck", cb);
+        let on = cb && self.f().checked("NumberBackupsCheck");
+        self.enable(&["MaxNumBackupsBox", "MaxNumBackupsSpinBtn"], on);
+    }
 
-        // security
-        let d = Rc::downgrade(self);
-        self.b.get::<gtk::Button>("BenchmarkBtn").connect_clicked(move |_| {
-            if let Some(d) = d.upgrade() {
-                d.benchmark();
-            }
-        });
-
-        // language
-        let d = Rc::downgrade(self);
-        self.combo("LanguageList").connect_changed(move |_| {
-            if let Some(d) = d.upgrade() {
-                d.language_list_select();
-            }
-        });
-        let d = Rc::downgrade(self);
-        self.b.get::<gtk::Button>("InstallLanguageBtn").connect_clicked(move |_| {
-            if let Some(d) = d.upgrade() {
-                d.install_language();
-            }
-        });
-        let d = Rc::downgrade(self);
-        self.b.get::<gtk::Button>("RemoveLanguageBtn").connect_clicked(move |_| {
-            if let Some(d) = d.upgrade() {
-                glib::spawn_future_local(async move { d.remove_language().await });
-            }
-        });
-        let d = Rc::downgrade(self);
-        self.b.get::<gtk::Button>("ConvertLangFileBtn").connect_clicked(move |_| {
-            if let Some(d) = d.upgrade() {
-                d.convert_lang_file();
-            }
-        });
+    fn close(&self) {
+        if let Some(m) = self.main.upgrade() {
+            m.close_tool(WINDOW_ID);
+        }
+        if let Some(tx) = self.done.borrow_mut().take() {
+            let _ = tx.try_send(());
+        }
     }
 
     fn show_font_sample(&self) {
-        let l: gtk::Label = self.b.get("FontSampleLbl");
-        let f = FontSpec::parse(&self.font.borrow());
-        match f {
-            Some(f) => {
-                l.set_text(&format!("{}, {}pt", f.name, f.size));
-                let attrs = gtk::pango::AttrList::new();
-                attrs.insert(gtk::pango::AttrFontDesc::new(&f.to_pango()));
-                l.set_attributes(Some(&attrs));
-            }
+        let text = match FontSpec::parse(&self.font.borrow()) {
+            Some(f) => format!("{}, {}pt", f.name, f.size.abs()),
             None => {
-                let desc = gtk::Settings::default()
-                    .and_then(|s| s.gtk_font_name())
-                    .map(|n| gtk::pango::FontDescription::from_string(&n))
-                    .unwrap_or_else(|| l.pango_context().font_description().unwrap_or_default());
-                let f = FontSpec::from_pango(&desc);
-                l.set_text(&format!("{}, {}pt", f.name, f.size));
-                let attrs = gtk::pango::AttrList::new();
-                attrs.insert(gtk::pango::AttrFontDesc::new(&desc));
-                l.set_attributes(Some(&attrs));
+                let size = (crate::vcl::fonts::DEFAULT_SIZE * 0.75).round();
+                format!("{}, {size}pt", trl("Default"))
             }
-        }
+        };
+        self.f().set_text("FontSampleLbl", &text);
     }
 
     fn set_hot_key(&self, code: u16) {
         self.hot_key.set(code);
-        self.b
-            .get::<gtk::Entry>("HotKeyBox")
-            .set_text(&if code == 0 { trl("None") } else { shortcut_to_text(code) });
-        self.b.w("AddBtn").set_sensitive(code != 0);
+        self.f().set_text("HotKeyBox", &if code == 0 { trl("None") } else { shortcut_to_text(code) });
+        self.f().set_enabled("AddBtn", code != 0);
     }
 
     fn update_hot_key_list(&self) {
-        while let Some(c) = self.hot_key_list.first_child() {
-            self.hot_key_list.remove(&c);
-        }
-        let show_caption = super::super::builder::strip_mnemonic(&self.check("HotKeyShowMainWinCheck").label().unwrap_or_default());
-        let actions = self.combo("HotKeyActionsList");
-        let n_actions = actions.model().map(|m| m.iter_n_children(None)).unwrap_or(0);
-        let action_names: Vec<String> = (0..n_actions)
-            .map(|i| {
-                let m = actions.model().unwrap();
-                let it = m.iter_nth_child(None, i).unwrap();
-                m.get::<String>(&it, 0)
+        let show_caption = crate::vcl::render::strip_amp(&self.f().control_caption("HotKeyShowMainWinCheck"));
+        let action_names = self.f().items("HotKeyActionsList");
+        let rows: Vec<(u16, String, String)> = self
+            .hot_keys
+            .borrow()
+            .iter()
+            .map(|(k, e)| {
+                let mut action = String::new();
+                if e.show_main_win {
+                    action = show_caption.clone();
+                }
+                if e.action != hot_key_action::NONE {
+                    if !action.is_empty() {
+                        action.push_str(", ");
+                    }
+                    action.push_str(action_names.get(e.action as usize).map(|s| s.as_str()).unwrap_or(""));
+                }
+                (*k, shortcut_to_text(*k), action)
             })
             .collect();
-        for (k, e) in self.hot_keys.borrow().iter() {
-            let row = gtk::ListBoxRow::new();
-            row.set_widget_name(&k.to_string());
-            let bx = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-            let l1 = gtk::Label::new(Some(&shortcut_to_text(*k)));
-            l1.set_xalign(0.0);
-            l1.set_width_chars(18);
-            l1.set_margin_start(6);
-            let mut action = String::new();
-            if e.show_main_win {
-                action = show_caption.clone();
-            }
-            if e.action != hot_key_action::NONE {
-                if !action.is_empty() {
-                    action.push_str(", ");
-                }
-                action.push_str(action_names.get(e.action as usize).map(|s| s.as_str()).unwrap_or(""));
-            }
-            let l2 = gtk::Label::new(Some(&action));
-            l2.set_xalign(0.0);
-            l2.set_hexpand(true);
-            l2.set_margin_start(6);
-            l2.set_ellipsize(gtk::pango::EllipsizeMode::End);
-            bx.append(&l1);
-            bx.append(&l2);
-            row.set_child(Some(&bx));
-            self.hot_key_list.append(&row);
-        }
-        self.b.w("RemoveBtn").set_sensitive(false);
+        let mut r = self.rows.borrow_mut();
+        r.selected = vec![false; rows.len()];
+        r.rows = rows;
+        r.anchor = None;
+        r.changed = false;
+        drop(r);
+        self.f().set_enabled("RemoveBtn", false);
     }
 
     async fn add_hot_key(&self) {
         if self.hot_keys.borrow().len() >= HOTKEYS_MAX_NUM {
-            msg_box(
-                Some(&self.win),
-                &trl_format("Maximum number of hot keys (%1) reached.", &[&HOTKEYS_MAX_NUM.to_string()]),
-                MsgIcon::Warning,
-                MsgButtons::Ok,
-                false,
-            )
-            .await;
+            dialogs::ask(win_id(), &trl_format("Maximum number of hot keys (%1) reached.", &[&HOTKEYS_MAX_NUM.to_string()]), MsgIcon::Warning, MsgButtons::Ok, false)
+                .await;
             return;
         }
-        let action = self.combo("HotKeyActionsList").active().map(|i| i as i32).unwrap_or(-1);
-        let show = self.check("HotKeyShowMainWinCheck").is_active();
+        let action = self.f().item_index("HotKeyActionsList").map(|i| i as i32).unwrap_or(-1);
+        let show = self.f().checked("HotKeyShowMainWinCheck");
         if !show && action <= 0 {
-            msg_box(Some(&self.win), &trl("Please select a hot key action."), MsgIcon::Warning, MsgButtons::Ok, false)
-                .await;
+            dialogs::ask(win_id(), &trl("Please select a hot key action."), MsgIcon::Warning, MsgButtons::Ok, false).await;
             return;
         }
         let key = self.hot_key.get();
@@ -449,13 +406,12 @@ impl ConfigDlg {
         if inserted {
             self.update_hot_key_list();
         } else {
-            msg_box(Some(&self.win), &trl("This hot key has already been assigned."), MsgIcon::Warning, MsgButtons::Ok, false)
-                .await;
+            dialogs::ask(win_id(), &trl("This hot key has already been assigned."), MsgIcon::Warning, MsgButtons::Ok, false).await;
         }
     }
 
     fn benchmark(&self) {
-        let mb: usize = 1 << self.combo("BenchmarkMemList").active().unwrap_or(0).min(10);
+        let mb: usize = 1 << self.f().item_index("BenchmarkMemList").unwrap_or(0).min(10);
         let mut buf = vec![0u8; mb << 20];
         let mut rp = RandomPool::new(PoolCipherType::AesCtr, None, false);
         rp.randomize_system();
@@ -469,11 +425,7 @@ impl ConfigDlg {
             let rate = mb as f64 / t.elapsed().as_secs_f64();
             result.push_str(&format!("\n{name}: {rate:.2} MB/s"));
         }
-        msg(
-            Some(&self.win),
-            &(trl_format("Benchmark results (data size: %1 MB):", &[&mb.to_string()]) + &result),
-            MsgIcon::Info,
-        );
+        msg(win_id(), &(trl_format("Benchmark results (data size: %1 MB):", &[&mb.to_string()]) + &result), MsgIcon::Info);
     }
 
     fn languages(&self) -> Vec<LanguageEntry> {
@@ -483,49 +435,30 @@ impl ConfigDlg {
     fn load_languages(&self) {
         // names only, without the version of the language file
         let items: Vec<String> = self.languages().iter().map(|e| e.name.clone()).collect();
-        set_combo_items(&self.combo("LanguageList"), &items);
+        self.f().set_items("LanguageList", items);
     }
 
     fn language_list_select(&self) {
-        let idx = self.combo("LanguageList").active().map(|i| i as usize).unwrap_or(0);
+        let idx = self.f().item_index("LanguageList").unwrap_or(0);
         let langs = self.languages();
         let lng = idx > 0
-            && langs.get(idx).and_then(|e| e.file_name.as_ref()).is_some_and(|f| {
-                f.extension().is_some_and(|e| e.eq_ignore_ascii_case("lng"))
-            });
-        self.b.w("ConvertLangFileBtn").set_sensitive(lng);
-        self.b.w("RemoveLanguageBtn").set_sensitive(idx > 0);
+            && langs.get(idx).and_then(|e| e.file_name.as_ref()).is_some_and(|f| f.extension().is_some_and(|e| e.eq_ignore_ascii_case("lng")));
+        self.f().set_enabled("ConvertLangFileBtn", lng);
+        self.f().set_enabled("RemoveLanguageBtn", idx > 0);
     }
 
-    fn lang_filters() -> gio::ListStore {
-        let store = gio::ListStore::new::<gtk::FileFilter>();
-        let f = gtk::FileFilter::new();
-        f.set_name(Some(&format!("{} (*.po)", trl("Language files"))));
-        f.add_pattern("*.po");
-        store.append(&f);
-        let f = gtk::FileFilter::new();
-        f.set_name(Some(&format!("{} (*.*)", trl("All files"))));
-        f.add_pattern("*");
-        store.append(&f);
-        store
+    fn lang_filters() -> [(String, &'static [&'static str]); 2] {
+        [(format!("{} (*.po)", trl("Language files")), &["po"]), (format!("{} (*.*)", trl("All files")), &["*"])]
     }
 
-    fn install_language(self: &Rc<Self>) {
-        let dlg = gtk::FileDialog::new();
-        dlg.set_title(&trl("Select language file to install"));
-        dlg.set_filters(Some(&Self::lang_filters()));
-        let d = self.clone();
-        dlg.open(Some(&self.win), gio::Cancellable::NONE, move |r| {
-            let Some(src) = r.ok().and_then(|f| f.path()) else { return };
-            let m = match d.install_language_file(&src) {
-                Ok(name) => {
-                    msg(Some(&d.win), &trl_format("Language \"%1\" installed successfully.", &[&name]), MsgIcon::Info);
-                    return;
-                }
-                Err(e) => e,
-            };
-            msg(Some(&d.win), &trl_format("Could not install language:\n%1.", &[&m]), MsgIcon::Error);
-        });
+    async fn install_language(&self) {
+        let fl = Self::lang_filters();
+        let filters: Vec<(&str, &[&str])> = fl.iter().map(|(n, e)| (n.as_str(), *e)).collect();
+        let Some(src) = crate::vcl::dialogs::open_file(&trl("Select language file to install"), None, &filters).await else { return };
+        match self.install_language_file(&src) {
+            Ok(name) => msg(win_id(), &trl_format("Language \"%1\" installed successfully.", &[&name]), MsgIcon::Info),
+            Err(e) => msg(win_id(), &trl_format("Could not install language:\n%1.", &[&e]), MsgIcon::Error),
+        }
     }
 
     fn install_language_file(&self, src: &Path) -> Result<String, String> {
@@ -540,38 +473,24 @@ impl ConfigDlg {
             return Err(trl_format("Language file already exists:\n\"%1\"", &[&dest.to_string_lossy()]));
         }
         let _ = std::fs::create_dir_all(&data_dir);
-        std::fs::copy(src, &dest).map_err(|_| {
-            trl_format("Could not copy file \"%1\" to\n\"%2\"", &[&src.to_string_lossy(), &dest.to_string_lossy()])
-        })?;
+        std::fs::copy(src, &dest).map_err(|_| trl_format("Could not copy file \"%1\" to\n\"%2\"", &[&src.to_string_lossy(), &dest.to_string_lossy()]))?;
         // deliberate fix: the original records the source file here (and
         // "Remove" would then delete the source)
-        main.core.borrow_mut().languages.push(LanguageEntry {
-            code: lf.code,
-            name: lf.name.clone(),
-            version: lf.version,
-            file_name: Some(dest),
-        });
-        let idx = self.combo("LanguageList").active();
+        main.core.borrow_mut().languages.push(LanguageEntry { code: lf.code, name: lf.name.clone(), version: lf.version, file_name: Some(dest) });
+        let idx = self.f().item_index("LanguageList");
         self.load_languages();
-        self.combo("LanguageList").set_active(idx);
+        self.f().set_item_index("LanguageList", idx);
         Ok(lf.name)
     }
 
     async fn remove_language(&self) {
         let Some(main) = self.main.upgrade() else { return };
-        let idx = self.combo("LanguageList").active().map(|i| i as usize).unwrap_or(0);
+        let idx = self.f().item_index("LanguageList").unwrap_or(0);
         let Some(e) = main.core.borrow().languages.get(idx).cloned() else { return };
         if idx == 0 {
             return;
         }
-        if msg_box(
-            Some(&self.win),
-            &trl_format("Are you sure you want to remove\n\"%1\"?", &[&e.name]),
-            MsgIcon::Question,
-            MsgButtons::YesNo,
-            true,
-        )
-        .await
+        if dialogs::ask(win_id(), &trl_format("Are you sure you want to remove\n\"%1\"?", &[&e.name]), MsgIcon::Question, MsgButtons::YesNo, true).await
             != MsgResult::Yes
         {
             return;
@@ -588,174 +507,146 @@ impl ConfigDlg {
                 }
             }
             self.load_languages();
-            self.combo("LanguageList").set_active(Some(0));
-            msg_box(
-                Some(&self.win),
-                &trl_format("Language \"%1\" successfully removed.", &[&e.name]),
-                MsgIcon::Info,
-                MsgButtons::Ok,
-                false,
-            )
-            .await;
+            self.f().set_item_index("LanguageList", Some(0));
+            self.language_list_select();
+            dialogs::ask(win_id(), &trl_format("Language \"%1\" successfully removed.", &[&e.name]), MsgIcon::Info, MsgButtons::Ok, false).await;
         } else {
-            msg_box(
-                Some(&self.win),
-                &trl_format("Could not delete file\n\"%1\".", &[&file.to_string_lossy()]),
-                MsgIcon::Error,
-                MsgButtons::Ok,
-                false,
-            )
-            .await;
+            dialogs::ask(win_id(), &trl_format("Could not delete file\n\"%1\".", &[&file.to_string_lossy()]), MsgIcon::Error, MsgButtons::Ok, false).await;
         }
     }
 
-    fn convert_lang_file(self: &Rc<Self>) {
-        let idx = self.combo("LanguageList").active().map(|i| i as usize).unwrap_or(0);
+    async fn convert_lang_file(&self) {
+        let idx = self.f().item_index("LanguageList").unwrap_or(0);
         let langs = self.languages();
         let Some(file) = langs.get(idx).and_then(|e| e.file_name.clone()) else { return };
         if idx == 0 {
             return;
         }
         let enc = self.main.upgrade().map(|m| m.core.borrow().config.file_encoding).unwrap_or(CharEncoding::Utf8);
-        let dlg = gtk::FileDialog::new();
-        dlg.set_title(&trl("Save converted language file"));
-        dlg.set_filters(Some(&Self::lang_filters()));
-        let d = self.clone();
-        dlg.save(Some(&self.win), gio::Cancellable::NONE, move |r| {
-            let Some(dest) = r.ok().and_then(|f| f.path()) else { return };
-            let res = LanguageFile::load(&file, false).and_then(|lf| {
-                lf.save_to_po(
-                    &dest,
-                    if enc == CharEncoding::Ansi { CharEncoding::Utf8 } else { enc },
-                    PROGRAM_NAME,
-                    PROGRAM_VERSION,
-                )
-            });
-            match res {
-                Ok(()) => msg(Some(&d.win), "File successfully converted.", MsgIcon::Info),
-                Err(e) => msg(Some(&d.win), &format!("{e}."), MsgIcon::Error),
-            }
-        });
+        let fl = Self::lang_filters();
+        let filters: Vec<(&str, &[&str])> = fl.iter().map(|(n, e)| (n.as_str(), *e)).collect();
+        let Some(dest) = crate::vcl::dialogs::save_file(&trl("Save converted language file"), None, None, &filters).await else { return };
+        let res = LanguageFile::load(&file, false)
+            .and_then(|lf| lf.save_to_po(&dest, if enc == CharEncoding::Ansi { CharEncoding::Utf8 } else { enc }, PROGRAM_NAME, PROGRAM_VERSION));
+        match res {
+            Ok(()) => msg(win_id(), "File successfully converted.", MsgIcon::Info),
+            Err(e) => msg(win_id(), &format!("{e}."), MsgIcon::Error),
+        }
     }
 
     /// `SetOptions()`.
     fn set_options(&self, c: &Configuration) {
         let main = self.main.upgrade();
+        let f = self.f();
         // profile list (`UpdateProfileList()`)
         if let Some(m) = &main {
             let names: Vec<String> = m.core.borrow().profiles.iter().map(|p| p.profile_name.clone()).collect();
-            let cb = self.combo("LoadProfileBox");
-            set_combo_items(&cb, &names);
-            cb.set_active(names.iter().position(|n| *n == c.load_profile_name).map(|i| i as u32));
+            f.set_items("LoadProfileBox", names);
+            f.set_text("LoadProfileBox", &c.load_profile_name);
         }
-        let style = UI_STYLES.iter().position(|s| *s == c.ui_style_name).unwrap_or(0);
-        self.combo("UiStylesList").set_active(Some(style as u32));
-        let icon = APP_ICON_NAMES.iter().position(|(n, _)| *n == c.app_icon_name).unwrap_or(0);
-        self.combo("AppIconList").set_active(Some(icon as u32));
+        f.set_item_index("UiStylesList", Some(UI_STYLES.iter().position(|s| *s == c.ui_style_name).unwrap_or(0)));
+        f.set_item_index("AppIconList", Some(APP_ICON_NAMES.iter().position(|(n, _)| *n == c.app_icon_name).unwrap_or(0)));
         *self.font.borrow_mut() = c.gui_font_string.clone();
         self.show_font_sample();
-        self.combo("RandomPoolCipherList").set_active(Some(c.random_pool_cipher.clamp(0, 2) as u32));
-        self.check("TestCommonPasswCheck").set_active(c.test_common_passw);
-        self.check("UseAdvancedPasswEst").set_active(c.use_advanced_passw_est);
-        self.check("AutoClearClipCheck").set_active(c.auto_clear_clip);
-        self.ud("AutoClearClipTimeSpinBtn").set_position(c.auto_clear_clip_time as i64);
+        f.set_item_index("RandomPoolCipherList", Some(c.random_pool_cipher.clamp(0, 2) as usize));
+        f.set_checked("TestCommonPasswCheck", c.test_common_passw);
+        f.set_checked("UseAdvancedPasswEst", c.use_advanced_passw_est);
+        f.set_checked("AutoClearClipCheck", c.auto_clear_clip);
+        f.set_position("AutoClearClipTimeSpinBtn", c.auto_clear_clip_time as i64);
         self.enable(&["AutoClearClipTimeBox", "AutoClearClipTimeSpinBtn"], c.auto_clear_clip);
-        self.check("AutoClearPasswCheck").set_active(c.auto_clear_passw);
-        self.ud("AutoClearPasswTimeSpinBtn").set_position(c.auto_clear_passw_time as i64);
+        f.set_checked("AutoClearPasswCheck", c.auto_clear_passw);
+        f.set_position("AutoClearPasswTimeSpinBtn", c.auto_clear_passw_time as i64);
         self.enable(&["AutoClearPasswTimeBox", "AutoClearPasswTimeSpinBtn"], c.auto_clear_passw);
-        self.check("MinimizeAutotypeCheck").set_active(c.minimize_autotype);
-        self.ud("AutotypeDelaySpinBtn").set_position(c.autotype_delay as i64);
-        self.check("ShowSysTrayIconConstCheck").set_active(c.show_sys_tray_icon_const);
-        self.check("MinimizeToSysTrayCheck").set_active(c.minimize_to_sys_tray);
-        self.check("AskBeforeExitCheck").set_active(c.confirm_exit);
-        self.check("LoadProfileStartupCheck").set_active(c.load_profile_startup);
+        f.set_checked("MinimizeAutotypeCheck", c.minimize_autotype);
+        f.set_position("AutotypeDelaySpinBtn", c.autotype_delay as i64);
+        f.set_checked("ShowSysTrayIconConstCheck", c.show_sys_tray_icon_const);
+        f.set_checked("MinimizeToSysTrayCheck", c.minimize_to_sys_tray);
+        f.set_checked("AskBeforeExitCheck", c.confirm_exit);
+        f.set_checked("LoadProfileStartupCheck", c.load_profile_startup);
         self.enable(&["LoadProfileBox"], c.load_profile_startup);
-        self.check("LaunchSystemStartupCheck").set_active(c.launch_system_startup);
-        self.set_radio_index("UpdateCheckGroup", c.auto_check_updates as i32);
-        self.set_radio_index("CharEncodingGroup", c.file_encoding as i32);
-        self.set_radio_index("NewlineCharGroup", c.file_newline_char);
+        f.set_checked("LaunchSystemStartupCheck", c.launch_system_startup);
+        f.set_item_index("UpdateCheckGroup", Some(c.auto_check_updates as usize));
+        f.set_item_index("CharEncodingGroup", Some(c.file_encoding as usize));
+        f.set_item_index("NewlineCharGroup", Some(c.file_newline_char.clamp(0, 1) as usize));
         self.load_languages();
-        let lang = main
-            .as_ref()
-            .and_then(|m| m.core.borrow().languages.iter().position(|l| l.code == c.language_code))
-            .unwrap_or(0);
-        self.combo("LanguageList").set_active(Some(lang as u32));
+        let lang = main.as_ref().and_then(|m| m.core.borrow().languages.iter().position(|l| l.code == c.language_code)).unwrap_or(0);
+        f.set_item_index("LanguageList", Some(lang));
         self.language_list_select();
         *self.hot_keys.borrow_mut() = c.hot_keys.clone();
         self.update_hot_key_list();
         self.set_hot_key(0);
         let db = &c.database;
-        self.check("ClearClipCloseLockCheck").set_active(db.clear_clip_close_lock);
-        self.check("LockMinimizeCheck").set_active(db.lock_minimize);
-        self.check("LockIdleCheck").set_active(db.lock_idle);
+        f.set_checked("ClearClipCloseLockCheck", db.clear_clip_close_lock);
+        f.set_checked("LockMinimizeCheck", db.lock_minimize);
+        f.set_checked("LockIdleCheck", db.lock_idle);
         self.enable(&["LockIdleTimeBox", "LockIdleTimeSpinBtn"], db.lock_idle);
-        self.ud("LockIdleTimeSpinBtn").set_position(db.lock_idle_time as i64);
-        self.check("LockAutoSaveCheck").set_active(db.lock_auto_save);
-        self.check("CreateBackupCheck").set_active(db.create_backup);
-        self.check("NumberBackupsCheck").set_active(db.number_backups);
-        self.check("NumberBackupsCheck").set_sensitive(db.create_backup);
-        self.enable(&["MaxNumBackupsBox", "MaxNumBackupsSpinBtn"], db.create_backup && db.number_backups);
-        self.ud("MaxNumBackupsSpinBtn").set_position(db.max_num_backups as i64);
-        self.check("OpenWindowOnStartupCheck").set_active(db.open_window_on_startup);
-        self.check("OpenDbOnStartupCheck").set_active(db.open_last_db_on_startup);
-        self.check("KeepRecentFilesCheck").set_active(db.keep_recent_files);
-        self.check("WarnExpiredEntriesCheck").set_active(db.warn_expired_entries);
-        self.check("WarnEntriesExpireSoonCheck").set_active(db.warn_entries_expire_soon);
-        self.ud("WarnExpireNumDaysSpinBtn").set_position(db.warn_expire_num_days as i64);
-        self.check("AutoSaveCheck").set_active(db.auto_save);
-        self.combo("AutoSaveList").set_active(Some(db.auto_save_option.clamp(0, 1) as u32));
+        f.set_position("LockIdleTimeSpinBtn", db.lock_idle_time as i64);
+        f.set_checked("LockAutoSaveCheck", db.lock_auto_save);
+        f.set_checked("CreateBackupCheck", db.create_backup);
+        f.set_checked("NumberBackupsCheck", db.number_backups);
+        self.backup_checks();
+        f.set_position("MaxNumBackupsSpinBtn", db.max_num_backups as i64);
+        f.set_checked("OpenWindowOnStartupCheck", db.open_window_on_startup);
+        f.set_checked("OpenDbOnStartupCheck", db.open_last_db_on_startup);
+        f.set_checked("KeepRecentFilesCheck", db.keep_recent_files);
+        f.set_checked("WarnExpiredEntriesCheck", db.warn_expired_entries);
+        f.set_checked("WarnEntriesExpireSoonCheck", db.warn_entries_expire_soon);
+        f.set_position("WarnExpireNumDaysSpinBtn", db.warn_expire_num_days as i64);
+        f.set_checked("AutoSaveCheck", db.auto_save);
+        f.set_item_index("AutoSaveList", Some(db.auto_save_option.clamp(0, 1) as usize));
         self.enable(&["AutoSaveList"], db.auto_save);
-        self.b.get::<gtk::Entry>("DefaultAutotypeSeqBox").set_text(&db.default_autotype_sequence);
+        f.set_text("DefaultAutotypeSeqBox", &db.default_autotype_sequence);
     }
 
     /// `GetOptions()`.
     fn get_options(&self, old: &Configuration) -> Configuration {
+        let f = self.f();
         let mut c = old.clone();
-        c.ui_style_name = UI_STYLES[self.combo("UiStylesList").active().unwrap_or(0).min(2) as usize].to_string();
-        c.app_icon_name = APP_ICON_NAMES[self.combo("AppIconList").active().unwrap_or(0).min(5) as usize].0.to_string();
+        c.ui_style_name = UI_STYLES[f.item_index("UiStylesList").unwrap_or(0).min(2)].to_string();
+        c.app_icon_name = APP_ICON_NAMES[f.item_index("AppIconList").unwrap_or(0).min(5)].0.to_string();
         c.gui_font_string = self.font.borrow().clone();
-        c.auto_clear_clip = self.check("AutoClearClipCheck").is_active();
-        c.auto_clear_clip_time = self.ud("AutoClearClipTimeSpinBtn").position() as i32;
-        c.auto_clear_passw = self.check("AutoClearPasswCheck").is_active();
-        c.auto_clear_passw_time = self.ud("AutoClearPasswTimeSpinBtn").position() as i32;
-        c.minimize_autotype = self.check("MinimizeAutotypeCheck").is_active();
-        c.autotype_delay = self.ud("AutotypeDelaySpinBtn").position() as i32;
-        c.confirm_exit = self.check("AskBeforeExitCheck").is_active();
-        c.load_profile_startup = self.check("LoadProfileStartupCheck").is_active();
-        c.load_profile_name = combo_text(&self.combo("LoadProfileBox"));
-        c.launch_system_startup = self.check("LaunchSystemStartupCheck").is_active();
-        c.random_pool_cipher = self.combo("RandomPoolCipherList").active().map(|i| i as i32).unwrap_or(1);
-        c.test_common_passw = self.check("TestCommonPasswCheck").is_active();
-        c.use_advanced_passw_est = self.check("UseAdvancedPasswEst").is_active();
-        c.show_sys_tray_icon_const = self.check("ShowSysTrayIconConstCheck").is_active();
-        c.minimize_to_sys_tray = self.check("MinimizeToSysTrayCheck").is_active();
-        c.auto_check_updates =
-            AutoCheckUpdates::from_index(self.radio_index("UpdateCheckGroup")).unwrap_or(AutoCheckUpdates::Weekly);
-        c.file_encoding = CharEncoding::from_index(self.radio_index("CharEncodingGroup")).unwrap_or(CharEncoding::Utf8);
-        c.file_newline_char = self.radio_index("NewlineCharGroup").clamp(0, 1);
+        c.auto_clear_clip = f.checked("AutoClearClipCheck");
+        c.auto_clear_clip_time = f.position("AutoClearClipTimeSpinBtn") as i32;
+        c.auto_clear_passw = f.checked("AutoClearPasswCheck");
+        c.auto_clear_passw_time = f.position("AutoClearPasswTimeSpinBtn") as i32;
+        c.minimize_autotype = f.checked("MinimizeAutotypeCheck");
+        c.autotype_delay = f.position("AutotypeDelaySpinBtn") as i32;
+        c.confirm_exit = f.checked("AskBeforeExitCheck");
+        c.load_profile_startup = f.checked("LoadProfileStartupCheck");
+        c.load_profile_name = f.text("LoadProfileBox");
+        c.launch_system_startup = f.checked("LaunchSystemStartupCheck");
+        c.random_pool_cipher = f.item_index("RandomPoolCipherList").map(|i| i as i32).unwrap_or(1);
+        c.test_common_passw = f.checked("TestCommonPasswCheck");
+        c.use_advanced_passw_est = f.checked("UseAdvancedPasswEst");
+        c.show_sys_tray_icon_const = f.checked("ShowSysTrayIconConstCheck");
+        c.minimize_to_sys_tray = f.checked("MinimizeToSysTrayCheck");
+        let idx = |n: &str| f.item_index(n).map(|i| i as i32).unwrap_or(-1);
+        c.auto_check_updates = AutoCheckUpdates::from_index(idx("UpdateCheckGroup")).unwrap_or(AutoCheckUpdates::Weekly);
+        c.file_encoding = CharEncoding::from_index(idx("CharEncodingGroup")).unwrap_or(CharEncoding::Utf8);
+        c.file_newline_char = idx("NewlineCharGroup").clamp(0, 1);
         c.hot_keys = self.hot_keys.borrow().clone();
-        let idx = self.combo("LanguageList").active().map(|i| i as usize).unwrap_or(0);
-        if let Some(l) = self.languages().get(idx) {
+        let li = f.item_index("LanguageList").unwrap_or(0);
+        if let Some(l) = self.languages().get(li) {
             c.language_code = l.code.clone();
         }
         let db = &mut c.database;
-        db.clear_clip_close_lock = self.check("ClearClipCloseLockCheck").is_active();
-        db.lock_minimize = self.check("LockMinimizeCheck").is_active();
-        db.lock_idle = self.check("LockIdleCheck").is_active();
-        db.lock_idle_time = self.ud("LockIdleTimeSpinBtn").position() as i32;
-        db.lock_auto_save = self.check("LockAutoSaveCheck").is_active();
-        db.create_backup = self.check("CreateBackupCheck").is_active();
-        db.number_backups = self.check("NumberBackupsCheck").is_active();
-        db.max_num_backups = self.ud("MaxNumBackupsSpinBtn").position() as i32;
-        db.open_window_on_startup = self.check("OpenWindowOnStartupCheck").is_active();
-        db.open_last_db_on_startup = self.check("OpenDbOnStartupCheck").is_active();
-        db.warn_expired_entries = self.check("WarnExpiredEntriesCheck").is_active();
-        db.warn_entries_expire_soon = self.check("WarnEntriesExpireSoonCheck").is_active();
-        db.warn_expire_num_days = self.ud("WarnExpireNumDaysSpinBtn").position() as i32;
-        db.auto_save = self.check("AutoSaveCheck").is_active();
-        db.auto_save_option = self.combo("AutoSaveList").active().map(|i| i as i32).unwrap_or(0);
-        db.default_autotype_sequence = self.b.get::<gtk::Entry>("DefaultAutotypeSeqBox").text().to_string();
-        db.keep_recent_files = self.check("KeepRecentFilesCheck").is_active();
+        db.clear_clip_close_lock = f.checked("ClearClipCloseLockCheck");
+        db.lock_minimize = f.checked("LockMinimizeCheck");
+        db.lock_idle = f.checked("LockIdleCheck");
+        db.lock_idle_time = f.position("LockIdleTimeSpinBtn") as i32;
+        db.lock_auto_save = f.checked("LockAutoSaveCheck");
+        db.create_backup = f.checked("CreateBackupCheck");
+        db.number_backups = f.checked("NumberBackupsCheck");
+        db.max_num_backups = f.position("MaxNumBackupsSpinBtn") as i32;
+        db.open_window_on_startup = f.checked("OpenWindowOnStartupCheck");
+        db.open_last_db_on_startup = f.checked("OpenDbOnStartupCheck");
+        db.warn_expired_entries = f.checked("WarnExpiredEntriesCheck");
+        db.warn_entries_expire_soon = f.checked("WarnEntriesExpireSoonCheck");
+        db.warn_expire_num_days = f.position("WarnExpireNumDaysSpinBtn") as i32;
+        db.auto_save = f.checked("AutoSaveCheck");
+        db.auto_save_option = f.item_index("AutoSaveList").map(|i| i as i32).unwrap_or(0);
+        db.default_autotype_sequence = f.text("DefaultAutotypeSeqBox");
+        db.keep_recent_files = f.checked("KeepRecentFilesCheck");
         c
     }
 
@@ -763,68 +654,67 @@ impl ConfigDlg {
         let Some(main) = self.main.upgrade() else { return };
         let old = main.core.borrow().config.clone();
         let c = self.get_options(&old);
-        if main.apply_config(c, &self.win).await {
+        if main.apply_config(c, win_id()).await {
             self.result.set(true);
-            self.win.close();
+            self.close();
         }
-    }
-
-    fn save_config(&self, ini: &mut pwtool_core::config::IniFile) {
-        ini.write_integer(CONFIG_ID, "WindowHeight", self.win.default_height() as i64);
-        ini.write_integer(CONFIG_ID, "WindowWidth", self.win.default_width() as i64);
     }
 }
 
 impl MainWindow {
     /// `MainMenu_Options_ConfigClick()`.
     pub(super) async fn configuration(self: &Rc<Self>) {
-        let existing = self.config_dlg.borrow().clone();
+        if windows::is_open(win_id()) {
+            windows::focus(win_id());
+            return;
+        }
+        let existing = self.tools.config_dlg.borrow().clone();
         let dlg = match existing {
             Some(d) => d,
             None => {
                 let d = ConfigDlg::new(self);
-                *self.config_dlg.borrow_mut() = Some(d.clone());
+                *self.tools.config_dlg.borrow_mut() = Some(d.clone());
                 d
             }
         };
         let config = self.core.borrow().config.clone();
         dlg.set_options(&config);
-        if let Some(nb) = dlg.b.try_get::<gtk::Notebook>("ConfigPages") {
-            nb.set_current_page(Some(0));
-        }
+        dlg.f().set_item_index("ConfigPages", Some(0));
         dlg.result.set(false);
         let (tx, rx) = async_channel::bounded(1);
-        *dlg.done.borrow_mut() = Some(tx);
-        dlg.win.set_default_widget(Some(&dlg.b.get::<gtk::Button>("OKBtn")));
-        dlg.win.present();
-        let _ = rx.recv().await;
-        if dlg.result.get() && crate::app::restart_requested() {
-            self.window.close();
+        *dlg.done.borrow_mut() = Some(tx.clone());
+        let w = dialogs::form_window(WINDOW_ID, dlg.form.clone(), ROOT, true);
+        let min = w.size.get();
+        if let Some(s) = self.tool_size(WINDOW_ID, WINDOW_ID, true) {
+            w.size.set(s.max(min));
         }
-    }
-
-    pub(super) fn save_config_dlg_config(&self, ini: &mut pwtool_core::config::IniFile) {
-        if let Some(d) = self.config_dlg.borrow().as_ref() {
-            d.save_config(ini);
+        let w = Rc::new(w.resizable(true, min).with_content(Rc::new(ConfigContent(dlg.clone()))));
+        let ww = self.weak();
+        let wid = Rc::downgrade(&w);
+        *w.on_close.borrow_mut() = Some(Box::new(move || {
+            if let (Some(m), Some(win)) = (ww.upgrade(), wid.upgrade()) {
+                m.remember_size(WINDOW_ID, &win);
+            }
+            let _ = tx.try_send(());
+            true
+        }));
+        windows::open(w);
+        let _ = rx.recv().await;
+        if dlg.result.get() && pwtool_app::app::restart_requested() {
+            windows::ctx().send_viewport_cmd(ViewportCommand::Close);
         }
     }
 
     /// `ApplyConfig()`: returns false if the configuration was rejected.
-    pub(super) async fn apply_config(self: &Rc<Self>, c: Configuration, parent: &gtk::Window) -> bool {
+    pub(super) async fn apply_config(self: &Rc<Self>, c: Configuration, parent: ViewportId) -> bool {
         let old = self.core.borrow().config.clone();
-        let mut lang_changed = false;
+        let mut restart_needed = false;
         if c.language_code != old.language_code {
-            let version = self
-                .core
-                .borrow()
-                .languages
-                .iter()
-                .find(|l| l.code == c.language_code)
-                .map(|l| l.version.clone())
-                .unwrap_or_default();
-            if crate::app::compare_versions(&version, PROGRAM_LANGVER_MIN) < 0 {
-                if msg_box(
-                    Some(parent),
+            let version =
+                self.core.borrow().languages.iter().find(|l| l.code == c.language_code).map(|l| l.version.clone()).unwrap_or_default();
+            if pwtool_app::app::compare_versions(&version, PROGRAM_LANGVER_MIN) < 0 {
+                if dialogs::ask(
+                    parent,
                     &trl_format(
                         "The version of this language (%1) is not\ncompatible with this program version.\nThis version of %2 requires a language\nversion of at least %3.\n\nDo you want to use it anyway?",
                         &[&version, PROGRAM_NAME, PROGRAM_LANGVER_MIN],
@@ -838,9 +728,9 @@ impl MainWindow {
                 {
                     return false;
                 }
-            } else if crate::app::compare_versions(&version, PROGRAM_VERSION) > 0
-                && msg_box(
-                    Some(parent),
+            } else if pwtool_app::app::compare_versions(&version, PROGRAM_VERSION) > 0
+                && dialogs::ask(
+                    parent,
                     &trl_format(
                         "The version of this language (%1) is higher\nthan the version of this program (%2).\nTherefore, version incompatibilities may occur.\n\nDo you want to use it anyway?",
                         &[&version, PROGRAM_VERSION],
@@ -854,28 +744,26 @@ impl MainWindow {
             {
                 return false;
             }
-            lang_changed = true;
+            restart_needed = true;
         }
-
         if c.hot_keys != old.hot_keys {
             self.activate_hot_keys(&c.hot_keys);
         }
+        // the forms are laid out for the font at start-up
         if c.gui_font_string != old.gui_font_string {
-            super::super::util::set_gui_font(&c.gui_font_string);
+            restart_needed = true;
         }
         if c.ui_style_name != old.ui_style_name {
-            super::super::util::set_ui_style(&c.ui_style_name);
+            apply_ui_style(&windows::ctx(), &c.ui_style_name);
+        }
+        if c.app_icon_name != old.app_icon_name {
+            if let Some(icon) = app_icon(&c.app_icon_name) {
+                windows::ctx().send_viewport_cmd(ViewportCommand::Icon(Some(Arc::new(icon))));
+            }
         }
         if c.launch_system_startup != old.launch_system_startup {
-            if let Err(e) = set_autostart(c.launch_system_startup) {
-                msg_box(
-                    Some(parent),
-                    &trl_format("Could not access registry key\n%1.", &[&e]),
-                    MsgIcon::Error,
-                    MsgButtons::Ok,
-                    false,
-                )
-                .await;
+            if let Err(e) = pwtool_app::platform::autostart::set_autostart(c.launch_system_startup) {
+                dialogs::ask(parent, &trl_format("Could not access registry key\n%1.", &[&e]), MsgIcon::Error, MsgButtons::Ok, false).await;
             }
         }
         if let Some(cipher) = PoolCipherType::from_index(c.random_pool_cipher) {
@@ -884,13 +772,12 @@ impl MainWindow {
         if !c.auto_clear_clip {
             self.auto_clear_clip_cnt.set(0);
         }
-        let style_changed = false;
+        let mut common_errs = Vec::new();
         {
             let mut core = self.core.borrow_mut();
             core.file_encoding = c.file_encoding;
             core.newline = c.newline().to_string();
             core.use_advanced_passw_est = c.use_advanced_passw_est;
-            let mut common_errs = Vec::new();
             if c.test_common_passw != core.test_common_passw {
                 core.test_common_passw = c.test_common_passw;
                 if c.test_common_passw && core.common_passw.is_none() {
@@ -900,15 +787,14 @@ impl MainWindow {
                 }
             }
             core.config = c;
-            drop(core);
-            for e in common_errs {
-                msg_box(Some(parent), &e, MsgIcon::Error, MsgButtons::Ok, false).await;
-            }
+        }
+        for e in common_errs {
+            dialogs::ask(parent, &e, MsgIcon::Error, MsgButtons::Ok, false).await;
         }
         self.update_tray_icon();
-        if (lang_changed || style_changed)
-            && msg_box(
-                Some(parent),
+        if restart_needed
+            && dialogs::ask(
+                parent,
                 &trl("The program has to be restarted in order\nfor the changes to take effect.\n\nDo you want to restart now?"),
                 MsgIcon::Question,
                 MsgButtons::YesNo,
@@ -917,144 +803,25 @@ impl MainWindow {
             .await
                 == MsgResult::Yes
         {
-            crate::app::request_restart();
+            pwtool_app::app::request_restart();
         }
         true
     }
-
-    /// `ActivateHotKeys()`: registers the global hot keys (see `hotkeys`).
-    pub(super) fn activate_hot_keys(self: &Rc<Self>, keys: &HotKeyList) {
-        *self.hot_keys_active.borrow_mut() = keys.clone();
-        if keys.is_empty() {
-            crate::ui::hotkeys::deactivate();
-            return;
-        }
-        let show = trl("Show/restore main window");
-        let actions: Vec<String> = self
-            .b
-            .form
-            .find("HotKeyActionsList")
-            .map(|o| o.strings("Items.Strings"))
-            .or_else(|| {
-                crate::ui::form::try_load_form("Configuration")
-                    .and_then(|f| f.find("HotKeyActionsList").map(|o| o.strings("Items.Strings")))
-            })
-            .unwrap_or_default();
-        let list: Vec<(u16, String)> = keys
-            .iter()
-            .map(|(k, e)| {
-                let mut d = String::new();
-                if e.show_main_win {
-                    d.push_str(&show);
-                }
-                if e.action != hot_key_action::NONE {
-                    if !d.is_empty() {
-                        d.push_str(", ");
-                    }
-                    d.push_str(&trl(actions.get(e.action as usize).map(|s| s.as_str()).unwrap_or("")));
-                }
-                (*k, d)
-            })
-            .collect();
-        let w = Rc::downgrade(self);
-        let parent = self.win();
-        glib::spawn_future_local(async move {
-            let cb: Rc<dyn Fn(u16)> = Rc::new(move |code| {
-                if let Some(w) = w.upgrade() {
-                    w.on_hot_key(code);
-                }
-            });
-            let visible = parent.is_visible();
-            let key_names: Vec<String> = list.iter().map(|(k, _)| crate::ui::builder::shortcut_to_text(*k)).collect();
-            if let Err(e) = crate::ui::hotkeys::activate(if visible { Some(&parent) } else { None }, list, cb).await {
-                eprintln!("pwtool: global hot keys: {e}");
-                if visible {
-                    let m = format!(
-                        "{}\n{}",
-                        trl("Could not register the following hot keys:"),
-                        key_names.join("\n")
-                    );
-                    msg_box(Some(&parent), &m, MsgIcon::Warning, MsgButtons::Ok, false).await;
-                }
-            }
-        });
-    }
-
-    /// `OnHotKey()`.
-    fn on_hot_key(self: &Rc<Self>, code: u16) {
-        let Some(hke) = self.hot_keys_active.borrow().get(&code).copied() else { return };
-        if self.generating.get() {
-            return;
-        }
-        // no hot keys while a modal dialog is open
-        let modal_open = gtk::Window::list_toplevels()
-            .into_iter()
-            .filter_map(|x| x.downcast::<gtk::Window>().ok())
-            .any(|x| x.is_visible() && x.is_modal());
-        if modal_open {
-            return;
-        }
-        let was_hidden = self.tray.hidden.get() || !self.window.is_visible();
-        let show_main = |force: bool| {
-            if force || hke.show_main_win {
-                if was_hidden {
-                    self.restore_from_tray();
-                }
-                self.window.present();
-            }
-        };
-        let dest = match hke.action {
-            hot_key_action::SHOW_MPPG => {
-                show_main(true);
-                self.mp_passw_gen();
-                None
-            }
-            hot_key_action::SHOW_PASSW_MANAGER => {
-                show_main(true);
-                self.show_passw_manager();
-                None
-            }
-            hot_key_action::SEARCH_DATABASE | hot_key_action::SEARCH_DATABASE_AUTOTYPE => {
-                self.search_db_for_keyword(hke.action == hot_key_action::SEARCH_DATABASE_AUTOTYPE);
-                show_main(false);
-                None
-            }
-            hot_key_action::SINGLE_PASSW => {
-                show_main(false);
-                Some(GenDest::GuiSingle)
-            }
-            hot_key_action::PASSW_LIST => {
-                show_main(false);
-                Some(GenDest::GuiList)
-            }
-            hot_key_action::PASSW_CLIPBOARD => {
-                show_main(false);
-                Some(GenDest::Clipboard)
-            }
-            hot_key_action::PASSW_MSGBOX => {
-                let rehide = was_hidden && !hke.show_main_win;
-                show_main(true);
-                if rehide {
-                    self.generate_passw_and_rehide(GenDest::MsgBox);
-                    None
-                } else {
-                    Some(GenDest::MsgBox)
-                }
-            }
-            hot_key_action::PASSW_AUTOTYPE => {
-                show_main(false);
-                Some(GenDest::Autotype)
-            }
-            _ => {
-                show_main(true);
-                None
-            }
-        };
-        if let Some(d) = dest {
-            self.generate_passw(d);
-        }
-    }
-
 }
 
-pub use pwtool_app::platform::autostart::set_autostart;
+/// User interface style: "Light"/"Dark" force the colour scheme, "Default"
+/// follows the system.
+pub fn apply_ui_style(ctx: &egui::Context, name: &str) {
+    let pref = match name {
+        "Light" => egui::ThemePreference::Light,
+        "Dark" => egui::ThemePreference::Dark,
+        _ => egui::ThemePreference::System,
+    };
+    ctx.options_mut(|o| o.theme_preference = pref);
+}
+
+/// Window icon for `Configuration::AppIconName`.
+pub fn app_icon(name: &str) -> Option<egui::IconData> {
+    let img = pwtool_app::icons::decode_png(pwtool_app::icons::app_icon_pngs(name)[2])?;
+    Some(egui::IconData { rgba: img.pixels, width: img.width, height: img.height })
+}

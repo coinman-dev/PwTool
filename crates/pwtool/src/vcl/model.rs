@@ -133,7 +133,6 @@ pub struct Control {
     pub enabled: bool,
     pub font: FontStyle,
     pub popup_menu: Option<String>,
-    pub tab_order: i64,
     pub state: State,
     /// Rectangle on screen after the last layout.
     pub rect: Rect,
@@ -498,7 +497,6 @@ impl Builder<'_> {
             enabled: o.bool_or("Enabled", true),
             font: font_of(o, self.form_font_height),
             popup_menu: o.ident("PopupMenu").map(String::from),
-            tab_order: o.int("TabOrder").map(|t| t + 1).unwrap_or(0),
             state,
             rect: Rect::NOTHING,
             fit: 1.0,
@@ -767,6 +765,7 @@ impl Form {
     }
 
     /// Names of all controls (in creation order).
+    #[cfg(test)]
     pub fn control_names(&self) -> Vec<String> {
         self.data.borrow().controls.iter().map(|c| c.name.clone()).collect()
     }
@@ -778,6 +777,7 @@ impl Form {
     }
 
     /// Class of a control (`"TEdit"`…).
+    #[cfg(test)]
     pub fn class(&self, name: &str) -> String {
         self.with(name, |c| c.class.clone())
     }
@@ -991,11 +991,6 @@ impl Form {
         self.with(name, |c| c.font.mono = mono);
     }
 
-    /// Relative font size of a control.
-    pub fn set_font_scale(&self, name: &str, scale: f32) {
-        self.with(name, |c| c.font.scale = scale);
-    }
-
     /// Alignment of a label: horizontal (0 left ... 1 right), vertically centred.
     pub fn set_label_align(&self, name: &str, h: f32, v_center: bool) {
         self.with(name, |c| {
@@ -1154,16 +1149,6 @@ impl Form {
         });
     }
 
-    /// Active page of a page control by the name of the sheet.
-    pub fn set_active_page(&self, pages: &str, sheet: &str) {
-        let idx = {
-            let d = self.data.borrow();
-            let p = d.by_name[pages];
-            d.controls[p].children.iter().position(|&c| d.controls[c].name == sheet)
-        };
-        self.set_item_index(pages, idx);
-    }
-
     // ----------------------------------------------------------- numbers
 
     /// Position of an up-down button (read from the associated edit), track
@@ -1270,10 +1255,6 @@ impl Form {
         self.item(name, |i| i.enabled = on);
     }
 
-    pub fn set_menu_visible(&self, name: &str, on: bool) {
-        self.item(name, |i| i.visible = on);
-    }
-
     pub fn menu_checked(&self, name: &str) -> bool {
         self.item(name, |i| i.checked.unwrap_or(false))
     }
@@ -1286,10 +1267,6 @@ impl Form {
 
     pub fn set_menu_caption(&self, name: &str, caption: &str) {
         self.item(name, |i| i.caption = caption.to_string());
-    }
-
-    pub fn menu_caption(&self, name: &str) -> String {
-        self.item(name, |i| i.caption.clone())
     }
 
     /// Shortcut of a menu item (`TShortCut`).
@@ -1353,12 +1330,6 @@ impl Form {
             }
             children.splice(at..at, dynamic);
         }
-    }
-
-    /// Whether a popup menu has (visible) items.
-    pub fn menu_has_items(&self, menu: &str) -> bool {
-        let d = self.data.borrow();
-        d.menus.get(menu).is_some_and(|m| m.iter().any(|n| !n.separator))
     }
 
     /// Image `index` of the image list `list` of the form.
