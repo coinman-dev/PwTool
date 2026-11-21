@@ -110,6 +110,17 @@ impl Window {
 thread_local! {
     static WINDOWS: RefCell<Vec<Rc<Window>>> = const { RefCell::new(Vec::new()) };
     static CTX: RefCell<Option<Context>> = const { RefCell::new(None) };
+    /// Windows enlarged for a dialog drawn inside them.
+    static GROWN: RefCell<Vec<Grown>> = const { RefCell::new(Vec::new()) };
+}
+
+struct Grown {
+    dialog: ViewportId,
+    host: ViewportId,
+    /// Size of the host before the dialog was opened.
+    old: Vec2,
+    /// Size asked for last (asked again only when it changes).
+    asked: Vec2,
 }
 
 /// The egui context of the program.
@@ -142,8 +153,63 @@ pub fn open(w: Rc<Window>) {
 /// Close a window (without asking `on_close`).
 pub fn close(id: ViewportId) {
     WINDOWS.with(|ws| ws.borrow_mut().retain(|x| x.id != id));
+    let grown = GROWN.with(|g| {
+        let mut g = g.borrow_mut();
+        g.iter().position(|e| e.dialog == id).map(|i| g.remove(i))
+    });
+    if let (Some(e), Some(ctx)) = (grown, CTX.with(|c| c.borrow().clone())) {
+        set_host_size(&ctx, e.host, e.old);
+    }
     repaint();
 }
+
+/// Resize a window from the program. The main window and the dialogs
+/// that are not resizable have their minimum and maximum sizes fixed at
+/// their size (Wayland), so these move with it.
+fn set_host_size(ctx: &Context, host: ViewportId, size: Vec2) {
+    // the main window is not resizable (`ui::run`)
+    let fixed = host == ViewportId::ROOT || WINDOWS.with(|ws| ws.borrow().iter().any(|x| x.id == host && !x.resizable));
+    if fixed {
+        ctx.send_viewport_cmd_to(host, ViewportCommand::MaxInnerSize(size));
+        ctx.send_viewport_cmd_to(host, ViewportCommand::MinInnerSize(size));
+    }
+    ctx.send_viewport_cmd_to(host, ViewportCommand::InnerSize(size));
+}
+
+/// A dialog drawn inside its parent and larger than the parent: enlarge
+/// the parent until the dialog closes.
+fn grow_host(ctx: &Context, dialog: ViewportId) {
+    let Some(r) = ctx.memory(|m| m.area_rect(egui::Id::new(dialog))) else { return };
+    let host = ctx.viewport_id();
+    let have = ctx.content_rect().size();
+    let mut need = (r.size() + Vec2::splat(2.0 * GROW_MARGIN)).ceil().max(have);
+    if let Some(m) = ctx.input(|i| i.viewport().monitor_size) {
+        need = need.min(m.max(have));
+    }
+    if need.x <= have.x + 0.5 && need.y <= have.y + 0.5 {
+        return;
+    }
+    let ask = GROWN.with(|g| {
+        let mut g = g.borrow_mut();
+        match g.iter_mut().find(|e| e.dialog == dialog) {
+            Some(e) if (e.asked - need).abs().max_elem() < 0.5 => false,
+            Some(e) => {
+                e.asked = need;
+                true
+            }
+            None => {
+                g.push(Grown { dialog, host, old: have, asked: need });
+                true
+            }
+        }
+    });
+    if ask {
+        set_host_size(ctx, host, need);
+    }
+}
+
+/// Free space around a dialog drawn inside its parent.
+const GROW_MARGIN: f32 = 8.0;
 
 pub fn is_open(id: ViewportId) -> bool {
     WINDOWS.with(|ws| ws.borrow().iter().any(|x| x.id == id))
@@ -271,6 +337,7 @@ fn show_window(ctx: &Context, w: &Rc<Window>) {
     });
     if embed {
         ctx.set_embed_viewports(false);
+        grow_host(ctx, w.id);
     }
     w.shown.set(true);
     if let Some(r) = ctx.input_for(w.id, |i| i.viewport().inner_rect) {
