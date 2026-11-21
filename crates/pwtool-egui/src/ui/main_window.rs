@@ -37,6 +37,9 @@ use crate::vcl::Form;
 use crate::vcl::dialogs::{MsgButtons, MsgIcon, MsgResult};
 use crate::windows::{self, Content};
 
+#[path = "main_integration.rs"]
+mod integration;
+
 const ENTROPY_SYSTEM: u32 = 24;
 const ENTROPY_MOUSECLICK: u32 = 2;
 const ENTROPY_MOUSEMOVE: u32 = 2;
@@ -119,6 +122,7 @@ pub struct MainWindow {
     last_pointer: Cell<Option<egui::Pos2>>,
     /// Edit receiving the next single password instead of `PasswBox`.
     pub gen_target: RefCell<Option<(Rc<Form>, String)>>,
+    integ: integration::Integration,
 }
 
 impl MainWindow {
@@ -152,6 +156,7 @@ impl MainWindow {
             profile_list_guard: Cell::new(false),
             last_pointer: Cell::new(None),
             gen_target: RefCell::new(None),
+            integ: integration::Integration::new(),
         });
         w.setup();
         w
@@ -250,6 +255,7 @@ impl MainWindow {
         self.startup_profile();
         self.connect_events();
         self.setup_timer();
+        self.setup_integration();
         self.update_entropy_progress(true);
         self.set_advanced_btn_caption();
         let w = self.weak();
@@ -715,7 +721,9 @@ impl MainWindow {
     fn clear_clip_btn_click(&self) {
         let ok = clipboard::clear_data(true);
         let m = trl(if ok { "Clipboard cleared." } else { "Could not open clipboard." });
-        if ok {
+        if self.is_hidden() {
+            self.show_tray_info(&m, !ok);
+        } else if ok {
             info_box(ROOT, &m);
         } else {
             msg(ROOT, &m, MsgIcon::Error);
@@ -1446,7 +1454,13 @@ impl MainWindow {
                 }
                 GenDest::Clipboard => {
                     clipboard::set_data(&out.single);
-                    msg(ROOT, &trl("Password copied to clipboard."), MsgIcon::Info);
+                    self.show_tray_info(&trl("Password copied to clipboard."), false);
+                }
+                GenDest::Autotype => {
+                    let delay = self.core.borrow().config.autotype_delay.clamp(0, 10000) as u32;
+                    let mut strokes = Vec::new();
+                    pwtool_app::autotype::string_sequence(&out.single, delay, &mut strokes);
+                    self.send_keys(strokes, false);
                 }
                 GenDest::MsgBox => {
                     let len = out.single.chars().count();
@@ -1595,6 +1609,7 @@ impl MainWindow {
             c[3] = 0;
         }
         self.timer_cnt.set(c);
+        self.tray_timer();
         let n = self.auto_clear_clip_cnt.get();
         if n > 0 {
             self.auto_clear_clip_cnt.set(n - 1);
@@ -1727,6 +1742,9 @@ impl MainWindow {
 
     /// `FormClose()`.
     pub fn on_close(&self) {
+        self.abort_autotype();
+        pwtool_app::autotype::close_session();
+        pwtool_app::platform::hotkeys::deactivate();
         if (self.f().menu_checked("MainMenu_Options_SaveSettingsOnExit") && !self.core.borrow().cmd.config_readonly)
             || pwtool_app::app::restart_requested()
         {

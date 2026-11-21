@@ -22,6 +22,17 @@ struct App {
 }
 
 impl eframe::App for App {
+    /// Also called while the main window is minimized or hidden (then
+    /// `ui` is not): tasks (tray commands, hot keys, timers) keep running.
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        crate::runtime::poll();
+        if let Some(m) = &self.main {
+            m.watch_window(ctx);
+        }
+        // keep the timer tasks going while no frames are drawn
+        ctx.request_repaint_after(std::time::Duration::from_millis(250));
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         windows::set_root_window(frame);
@@ -35,12 +46,17 @@ impl eframe::App for App {
                 if let Ok(script) = std::env::var("PWTOOL_AUTOMATE") {
                     automate::start(w.clone(), script);
                 }
+                if self.cmd.silent {
+                    w.start_hidden();
+                }
                 w
             })
             .clone();
         automate::save_screenshots(&ctx);
         windows::show(ui, ViewportId::ROOT, &MainContent(main.clone()));
-        main.show_startup_errors();
+        if !main.is_hidden() {
+            main.show_startup_errors();
+        }
         if ctx.input(|i| i.viewport().close_requested()) && !self.closed {
             if main.close_query() {
                 main.on_close();

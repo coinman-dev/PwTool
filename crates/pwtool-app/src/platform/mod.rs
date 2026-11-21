@@ -28,6 +28,7 @@ pub mod clipboard;
 pub mod single_instance;
 
 pub mod autostart;
+pub mod notify;
 pub mod sys;
 
 /// The window a portal request or an owned window belongs to.

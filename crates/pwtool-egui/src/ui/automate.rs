@@ -37,6 +37,12 @@ pub fn start(w: Rc<MainWindow>, script: String) {
                 }
                 "wait" => pwtool_app::rt::sleep(Duration::from_millis(rest.parse().unwrap_or(100))).await,
                 "print" => println!("{rest}={}", f.text(rest)),
+                "minimize" => crate::windows::ctx().send_viewport_cmd(ViewportCommand::Minimized(true)),
+                "state" => {
+                    let ctx = crate::windows::ctx();
+                    let (min, vis, foc) = ctx.input(|i| (i.viewport().minimized, i.viewport().inner_rect.is_some(), i.viewport().focused));
+                    println!("hidden={} hotkeys={} minimized={min:?} rect={vis} focused={foc:?}", w.is_hidden(), w.hot_key_count());
+                }
                 "snap" => {
                     let (tx, rx) = async_channel::bounded(1);
                     SNAP_DONE.with(|s| *s.borrow_mut() = Some(tx));
