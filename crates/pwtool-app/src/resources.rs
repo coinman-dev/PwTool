@@ -9,20 +9,31 @@
 //! disk (`share/pwtool` next to the program, `PWTOOL_DATA_DIR`) takes
 //! precedence, see `AppPaths`.
 
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
-/// Embedded files: path relative to the data directory, contents.
-pub static FILES: &[(&str, &[u8])] = include!(concat!(env!("OUT_DIR"), "/resources.rs"));
+/// Embedded files: path relative to the data directory, whether the
+/// contents are deflate-compressed (see build.rs), contents.
+pub static FILES: &[(&str, bool, &[u8])] = include!(concat!(env!("OUT_DIR"), "/resources.rs"));
+
+/// Contents of an embedded table entry: unpacked if compressed.
+pub fn unpack(compressed: bool, data: &'static [u8]) -> Cow<'static, [u8]> {
+    if compressed {
+        Cow::Owned(miniz_oxide::inflate::decompress_to_vec(data).expect("embedded data"))
+    } else {
+        Cow::Borrowed(data)
+    }
+}
 
 /// Contents of an embedded file (`"languages/Russian.po"`, `"manual.pdf"`…).
-pub fn file(rel: &str) -> Option<&'static [u8]> {
-    FILES.iter().find(|(n, _)| *n == rel).map(|(_, d)| *d)
+pub fn file(rel: &str) -> Option<Cow<'static, [u8]>> {
+    FILES.iter().find(|(n, _, _)| *n == rel).map(|(_, z, d)| unpack(*z, d))
 }
 
 /// FNV-1a over the names and contents: different data, different directory.
 fn hash() -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for (name, data) in FILES {
+    for (name, _, data) in FILES {
         for b in name.bytes().chain([0]).chain(data.iter().copied()) {
             h ^= b as u64;
             h = h.wrapping_mul(0x0100_0000_01b3);
@@ -66,12 +77,12 @@ pub fn extract() -> Option<PathBuf> {
     let tmp = base.join(format!("{name}.{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
     let written = (|| -> std::io::Result<()> {
-        for (rel, data) in FILES {
+        for (rel, z, data) in FILES {
             let p = tmp.join(rel);
             if let Some(parent) = p.parent() {
                 std::fs::create_dir_all(parent)?;
             }
-            std::fs::write(&p, data)?;
+            std::fs::write(&p, unpack(*z, data))?;
         }
         std::fs::write(tmp.join(".complete"), b"")
     })();
@@ -128,5 +139,15 @@ mod tests {
         assert!(file("languages/port/ru.po").is_some());
         assert!(file("script_examples/leetspeak.lua").is_some());
         assert!(file("license.txt").is_some());
+    }
+
+    /// Text is stored compressed and unpacks to the original.
+    #[test]
+    fn embedded_data_compressed() {
+        let (_, z, d) = FILES.iter().find(|(n, _, _)| *n == "languages/Russian.po").unwrap();
+        assert!(*z);
+        let text = file("languages/Russian.po").unwrap();
+        assert!(d.len() * 2 < text.len());
+        assert!(std::str::from_utf8(&text).unwrap().contains("msgid"));
     }
 }

@@ -27,7 +27,11 @@
   from the original form descriptions, with the same layout. The Linux package depends only
   on the C/C++ runtime, OpenGL (EGL) and xkbcommon instead of GTK 4.
 - Translations, the list of common passwords, script examples and the PDF manuals are
-  built into the program; own translations can still be placed in the settings folder.
+  built into the program (compressed); own translations can still be placed in the
+  settings folder.
+- All windows share one style: the windows built in code (font dialog, message boxes) use
+  the sizes of the controls of the original forms; combo boxes are as tall as the edits and
+  buttons, spin buttons have larger arrows. The font dialog is translated.
 - Long translated captions take the free space next to them or use a slightly smaller
   font instead of being cut off; a caption that still does not fit shows its full text as
   a tooltip.

@@ -57,11 +57,15 @@ impl MsgBox {
 const ICON_SIZE: f32 = 36.0;
 const MARGIN: f32 = 16.0;
 const TEXT_WIDTH: f32 = 460.0;
-const BUTTON: Vec2 = vec2(88.0, 26.0);
+/// Size of the buttons: the standard dialog button of all windows.
+fn button_size(ctx: &egui::Context) -> Vec2 {
+    super::style::metrics(ctx).button
+}
 
 impl Content for MsgBox {
     fn ui(&self, ui: &mut Ui) {
         let rect = ui.max_rect();
+        let button = button_size(ui.ctx());
         ui.painter().rect_filled(rect, 0.0, ui.visuals().panel_fill);
         let (glyph, color) = match self.icon {
             MsgIcon::Info => ("i", Color32::from_rgb(0x1e, 0x88, 0xe5)),
@@ -74,17 +78,17 @@ impl Content for MsgBox {
         ui.painter().text(c, Align2::CENTER_CENTER, glyph, FontId::proportional(ICON_SIZE * 0.7), Color32::WHITE);
         let text_rect = egui::Rect::from_min_max(
             rect.min + vec2(2.0 * MARGIN + ICON_SIZE, MARGIN),
-            rect.max - vec2(MARGIN, 2.0 * MARGIN + BUTTON.y),
+            rect.max - vec2(MARGIN, 2.0 * MARGIN + button.y),
         );
         ui.scope_builder(egui::UiBuilder::new().max_rect(text_rect), |ui| {
             ui.add(egui::Label::new(&self.text).wrap().selectable(true));
         });
         // buttons, right-aligned
         let n = self.buttons.len() as f32;
-        let mut x = rect.max.x - MARGIN - n * BUTTON.x - (n - 1.0) * 8.0;
-        let y = rect.max.y - MARGIN - BUTTON.y;
+        let mut x = rect.max.x - MARGIN - n * button.x - (n - 1.0) * 8.0;
+        let y = rect.max.y - MARGIN - button.y;
         for (i, (label, r)) in self.buttons.iter().enumerate() {
-            let br = egui::Rect::from_min_size(egui::pos2(x, y), BUTTON);
+            let br = egui::Rect::from_min_size(egui::pos2(x, y), button);
             let b = ui.put(br, egui::Button::new(RichText::new(crate::vcl::render::strip_amp(label))));
             if i == self.default && !ui.memory(|m| m.focused().is_some()) {
                 b.request_focus();
@@ -92,7 +96,7 @@ impl Content for MsgBox {
             if b.clicked() {
                 self.finish(*r);
             }
-            x += BUTTON.x + 8.0;
+            x += button.x + 8.0;
         }
         let (enter, esc) = ui.input(|i| (i.key_pressed(Key::Enter), i.key_pressed(Key::Escape)));
         if esc {
@@ -142,9 +146,10 @@ pub async fn msg_box(ctx: &egui::Context, parent: ViewportId, text: &str, icon: 
     let font = egui::TextStyle::Body.resolve(&ctx.global_style());
     let galley = ctx.fonts_mut(|f| f.layout(text.to_string(), font, Color32::WHITE, TEXT_WIDTH));
     let text_size = galley.size();
-    let buttons_w = list.len() as f32 * (BUTTON.x + 8.0) + 2.0 * MARGIN;
+    let button = button_size(ctx);
+    let buttons_w = list.len() as f32 * (button.x + 8.0) + 2.0 * MARGIN;
     let w = (3.0 * MARGIN + ICON_SIZE + text_size.x.max(120.0)).max(buttons_w);
-    let h = MARGIN + text_size.y.max(ICON_SIZE) + MARGIN + BUTTON.y + MARGIN;
+    let h = MARGIN + text_size.y.max(ICON_SIZE) + MARGIN + button.y + MARGIN;
     let (tx, rx) = async_channel::bounded::<()>(1);
     let result = Rc::new(Cell::new(None));
     let content = Rc::new(MsgBox {

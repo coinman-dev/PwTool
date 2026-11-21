@@ -10,6 +10,7 @@ pub mod list_view;
 pub mod model;
 pub mod render;
 pub mod snapshot;
+pub mod style;
 pub mod text;
 
 pub use model::{Event, Form, Icon};

@@ -87,6 +87,10 @@ impl FormObj {
     }
 }
 
+/// Embedded form descriptions (`assets/forms/*.json`): name, whether
+/// compressed, JSON (see build.rs).
+static FORMS: &[(&str, bool, &[u8])] = include!(concat!(env!("OUT_DIR"), "/forms.rs"));
+
 /// Load one of the embedded forms by name (e.g. `"Main"`).
 pub fn load_form(name: &str) -> FormObj {
     try_load_form(name).unwrap_or_else(|| panic!("unknown form {name}"))
@@ -94,30 +98,9 @@ pub fn load_form(name: &str) -> FormObj {
 
 /// Load an embedded form, `None` if there is no such form.
 pub fn try_load_form(name: &str) -> Option<FormObj> {
-    let json = match name {
-        "About" => include_str!("../../../assets/forms/About.json"),
-        "CharSetBuilder" => include_str!("../../../assets/forms/CharSetBuilder.json"),
-        "Configuration" => include_str!("../../../assets/forms/Configuration.json"),
-        "CreateRandDataFile" => include_str!("../../../assets/forms/CreateRandDataFile.json"),
-        "CreateTrigramFile" => include_str!("../../../assets/forms/CreateTrigramFile.json"),
-        "InfoBox" => include_str!("../../../assets/forms/InfoBox.json"),
-        "MPPasswGen" => include_str!("../../../assets/forms/MPPasswGen.json"),
-        "Main" => include_str!("../../../assets/forms/Main.json"),
-        "PasswEnter" => include_str!("../../../assets/forms/PasswEnter.json"),
-        "PasswList" => include_str!("../../../assets/forms/PasswList.json"),
-        "PasswManager" => include_str!("../../../assets/forms/PasswManager.json"),
-        "PasswMngColSelect" => include_str!("../../../assets/forms/PasswMngColSelect.json"),
-        "PasswMngDbProp" => include_str!("../../../assets/forms/PasswMngDbProp.json"),
-        "PasswMngDbSettings" => include_str!("../../../assets/forms/PasswMngDbSettings.json"),
-        "PasswMngKeyValEdit" => include_str!("../../../assets/forms/PasswMngKeyValEdit.json"),
-        "PasswMngPwHistory" => include_str!("../../../assets/forms/PasswMngPwHistory.json"),
-        "PasswOptions" => include_str!("../../../assets/forms/PasswOptions.json"),
-        "ProfileEditor" => include_str!("../../../assets/forms/ProfileEditor.json"),
-        "Progress" => include_str!("../../../assets/forms/Progress.json"),
-        "ProvideEntropy" => include_str!("../../../assets/forms/ProvideEntropy.json"),
-        "QuickHelp" => include_str!("../../../assets/forms/QuickHelp.json"),
-        _ => return None,
-    };
+    let (_, z, data) = FORMS.iter().find(|(n, _, _)| *n == name)?;
+    let bytes = crate::resources::unpack(*z, data);
+    let json = std::str::from_utf8(&bytes).expect("form JSON");
     let v: Value = serde_json::from_str(json).expect("form JSON");
     Some(FormObj::from_json(&v))
 }

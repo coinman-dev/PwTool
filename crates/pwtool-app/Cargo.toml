@@ -11,9 +11,14 @@ pwtool-core = { path = "../pwtool-core" }
 async-channel = "2"
 async-io = "2"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
+# embedded data is stored deflate-compressed (build.rs)
+miniz_oxide = { version = "0.9", features = ["with-alloc"] }
 png = "0.18"
 serde_json = "1"
 zeroize = "1.9"
+
+[build-dependencies]
+miniz_oxide = { version = "0.9", features = ["with-alloc"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

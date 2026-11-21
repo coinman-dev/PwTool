@@ -114,3 +114,24 @@ msgstr "Сообщество"
 
 msgid "Reset to default"
 msgstr "Установить по умолчанию"
+
+msgid "Font"
+msgstr "Шрифт"
+
+msgid "Filter:"
+msgstr "Фильтр:"
+
+msgid "Monospaced fonts only"
+msgstr "Только моноширинные шрифты"
+
+msgid "Size:"
+msgstr "Размер:"
+
+msgid "Bold"
+msgstr "Полужирный"
+
+msgid "Italic"
+msgstr "Курсив"
+
+msgid "Sample"
+msgstr "Образец"

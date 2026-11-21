@@ -1,8 +1,10 @@
 // Embeds into the library the icons extracted from the original forms
-// (assets/icons, `icons::icon_bytes`) and the program data
-// (`resources::FILES`): translations, common passwords, script examples,
-// license and, if they have been built, the PDF manuals (target/manuals or
-// $PWTOOL_MANUALS_DIR; see packaging/manuals.sh).
+// (assets/icons, `icons::icon_bytes`), the form descriptions
+// (`form::try_load_form`) and the program data (`resources::FILES`):
+// translations, common passwords, script examples, license and, if they
+// have been built, the PDF manuals (target/manuals or $PWTOOL_MANUALS_DIR;
+// see packaging/manuals.sh). Forms and data are stored deflate-compressed
+// (files that do not get at least 5 % smaller, like the PDFs, as they are).
 use std::fmt::Write;
 use std::path::Path;
 
@@ -43,9 +45,40 @@ fn main() {
     code.push_str("        _ => None,\n    }\n}\n");
     std::fs::write(Path::new(&std::env::var("OUT_DIR").unwrap()).join("icons.rs"), code).unwrap();
     resources(Path::new(&manifest));
+    forms(Path::new(&manifest));
 }
 
-/// `resources.rs`: `&[(path relative to the data directory, contents)]`.
+/// Compress `src` into OUT_DIR/packed/<key>; returns the table entry
+/// `(compressed, include_bytes!(…))` as code.
+fn pack(src: &Path, key: &str) -> String {
+    println!("cargo:rerun-if-changed={}", src.display());
+    let data = std::fs::read(src).unwrap_or_else(|e| panic!("{}: {e}", src.display()));
+    let z = miniz_oxide::deflate::compress_to_vec(&data, 10);
+    let packed = z.len() * 100 < data.len() * 95;
+    let dir = Path::new(&std::env::var("OUT_DIR").unwrap()).join("packed");
+    std::fs::create_dir_all(&dir).unwrap();
+    let out = dir.join(key.replace(['/', '\\', ' '], "_"));
+    std::fs::write(&out, if packed { &z[..] } else { &data[..] }).unwrap();
+    format!("{packed}, include_bytes!({:?})", out.display().to_string())
+}
+
+/// `forms.rs`: `&[(form name, compressed, JSON)]`.
+fn forms(manifest: &Path) {
+    let dir = manifest.join("../../assets/forms");
+    println!("cargo:rerun-if-changed={}", dir.display());
+    let mut found: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "json")).collect();
+    found.sort();
+    let mut code = String::from("&[\n");
+    for p in found {
+        let name = p.file_stem().unwrap().to_string_lossy().to_string();
+        writeln!(code, "    ({name:?}, {}),", pack(&p, &format!("form-{name}.json"))).unwrap();
+    }
+    code.push_str("]\n");
+    std::fs::write(Path::new(&std::env::var("OUT_DIR").unwrap()).join("forms.rs"), code).unwrap();
+}
+
+/// `resources.rs`: `&[(path relative to the data directory, compressed,
+/// contents)]`.
 fn resources(manifest: &Path) {
     let assets = manifest.join("../../assets");
     let mut files: Vec<(String, std::path::PathBuf)> = Vec::new();
@@ -83,9 +116,7 @@ fn resources(manifest: &Path) {
     }
     let mut code = String::from("&[\n");
     for (rel, p) in &files {
-        println!("cargo:rerun-if-changed={}", p.display());
-        let abs = p.canonicalize().unwrap_or_else(|e| panic!("{}: {e}", p.display()));
-        writeln!(code, "    ({rel:?}, include_bytes!({:?})),", abs.display().to_string()).unwrap();
+        writeln!(code, "    ({rel:?}, {}),", pack(p, &format!("data-{rel}"))).unwrap();
     }
     code.push_str("]\n");
     std::fs::write(Path::new(&std::env::var("OUT_DIR").unwrap()).join("resources.rs"), code).unwrap();

@@ -8,9 +8,10 @@ use egui::{Key, Ui, ViewportId, vec2};
 use pwtool_core::language::trl;
 
 use crate::vcl::fonts::{self, FontSpec};
+use crate::vcl::style;
 use crate::windows::{self, Content, Window};
 
-const SIZES: [i32; 16] = [6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 28, 32, 36];
+const SIZES: [i32; 18] = [6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 28, 32, 36, 48, 72];
 const SAMPLE: &str = "AaBbYyZz 0123456789\nIl1| O0Q !@#$%&*";
 
 struct State {
@@ -47,26 +48,36 @@ impl Content for FontDialog {
         {
             let mut st = self.state.borrow_mut();
             let st = &mut *st;
-            egui::Frame::central_panel(ui.style()).show(ui, |ui| {
+            egui::Frame::central_panel(ui.style()).inner_margin(style::metrics(&ctx).margin).show(ui, |ui| {
+                // sizes of the standard controls, as in the other windows
+                let m = style::apply(ui);
+                let row_h = style::list_row_height(ui);
                 ui.horizontal(|ui| {
                     ui.label(trl("Filter:"));
-                    ui.add(egui::TextEdit::singleline(&mut st.filter).desired_width(160.0));
+                    ui.add(egui::TextEdit::singleline(&mut st.filter).desired_width(150.0 * m.scale).min_size(vec2(150.0 * m.scale, m.control_h)).vertical_align(egui::Align::Center));
                     ui.checkbox(&mut st.mono_only, trl("Monospaced fonts only"));
                 });
-                ui.add_space(4.0);
-                let list_h = ui.available_height() - 150.0;
+                ui.add_space(m.gap / 2.0);
+                let list_h = ui.available_height() - 4.0 * m.control_h - 70.0 * m.scale;
                 ui.horizontal_top(|ui| {
                     ui.vertical(|ui| {
-                        ui.set_width(250.0);
-                        egui::Frame::group(ui.style()).show(ui, |ui| {
+                        // the size column: its combo box (text, arrow, padding) and a gap
+                        let right = 110.0 * m.scale + ui.spacing().icon_width + 2.0 * ui.spacing().button_padding.x + 2.0 * m.gap;
+                        ui.set_width((ui.available_width() - right).max(160.0));
+                        egui::Frame::group(ui.style()).inner_margin(2.0).show(ui, |ui| {
                             egui::ScrollArea::vertical().id_salt("families").max_height(list_h.max(80.0)).auto_shrink(false).show(ui, |ui| {
                                 let filter = st.filter.to_lowercase();
+                                let w = ui.available_width();
+                                // compact rows like a list box (not button height)
+                                ui.spacing_mut().button_padding.y = 2.0;
+                                ui.spacing_mut().interact_size.y = row_h;
+                                ui.spacing_mut().item_spacing.y = 0.0;
                                 for (name, mono) in &st.families {
                                     if (st.mono_only && !mono) || (!filter.is_empty() && !name.to_lowercase().contains(&filter)) {
                                         continue;
                                     }
                                     let sel = *name == st.family;
-                                    let r = ui.selectable_label(sel, name);
+                                    let r = ui.add(egui::Button::selectable(sel, name.as_str()).min_size(vec2(w, row_h)));
                                     if sel && st.scroll_to_selection {
                                         r.scroll_to_me(Some(egui::Align::Center));
                                     }
@@ -83,31 +94,34 @@ impl Content for FontDialog {
                     });
                     ui.vertical(|ui| {
                         ui.label(trl("Size:"));
-                        egui::ComboBox::from_id_salt("size").selected_text(st.size.to_string()).width(70.0).show_ui(ui, |ui| {
+                        let size_w = 110.0 * m.scale;
+                        egui::ComboBox::from_id_salt("size").selected_text(st.size.to_string()).width(size_w).show_ui(ui, |ui| {
+                            ui.spacing_mut().interact_size.y = row_h;
+                            ui.spacing_mut().button_padding.y = 2.0;
                             for s in SIZES {
                                 ui.selectable_value(&mut st.size, s, s.to_string());
                             }
                         });
-                        ui.add(egui::DragValue::new(&mut st.size).range(4..=72).suffix(" pt"));
-                        ui.add_space(8.0);
+                        ui.add_space(m.gap);
                         ui.checkbox(&mut st.bold, trl("Bold"));
                         ui.checkbox(&mut st.italic, trl("Italic"));
                     });
                 });
-                ui.add_space(6.0);
+                ui.add_space(m.gap / 2.0);
                 ui.label(trl("Sample"));
                 fonts::set_preview_font(&ctx, (!st.family.is_empty()).then_some((st.family.as_str(), st.bold, st.italic)));
                 egui::Frame::group(ui.style()).show(ui, |ui| {
-                    ui.set_min_size(vec2(ui.available_width(), 70.0));
+                    ui.set_min_height(70.0 * m.scale);
+                    ui.set_width(ui.available_width());
                     let pt = st.size.max(4) as f32 * 4.0 / 3.0;
                     ui.label(egui::RichText::new(SAMPLE).font(egui::FontId::new(pt.min(40.0), egui::FontFamily::Name(fonts::PREVIEW.into()))));
                 });
-                ui.add_space(6.0);
+                ui.add_space(m.gap);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button(format!("  {}  ", trl("Cancel"))).clicked() {
+                    if style::button(ui, trl("Cancel")).clicked() {
                         cancel = true;
                     }
-                    if ui.add_enabled(!st.family.is_empty(), egui::Button::new(format!("  {}  ", trl("OK")))).clicked() {
+                    if style::button_enabled(ui, !st.family.is_empty(), &trl("OK")).clicked() {
                         ok = true;
                     }
                 });
@@ -148,7 +162,7 @@ pub async fn choose_font(parent: ViewportId, current: Option<&FontSpec>, mono_on
         scroll_to_selection: true,
     };
     let dlg = Rc::new(FontDialog { id, state: RefCell::new(st), done: tx.clone() });
-    let w = Window::new("FontDialog", &trl("Font"), dlg.clone(), parent, vec2(480.0, 470.0)).modal(true).resizable(true, vec2(400.0, 380.0));
+    let w = Window::new("FontDialog", &trl("Font"), dlg.clone(), parent, vec2(520.0, 500.0) * style::metrics(&windows::ctx()).scale.max(1.0)).modal(true).resizable(true, vec2(420.0, 400.0));
     *w.on_close.borrow_mut() = Some(Box::new(move || {
         let _ = tx.try_send(());
         true

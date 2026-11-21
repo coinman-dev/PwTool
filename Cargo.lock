@@ -2785,6 +2785,7 @@ dependencies = [
  "futures-util",
  "ksni",
  "libc",
+ "miniz_oxide 0.9.1",
  "png",
  "pwtool-core",
  "serde",
