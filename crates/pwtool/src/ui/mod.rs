@@ -109,6 +109,10 @@ pub fn run(cmd: CmdLineOptions) -> i32 {
         .with_title(pwtool_app::program::PROGRAM_NAME)
         .with_app_id(pwtool_app::program::APP_ID)
         .with_inner_size(initial_size)
+        // eframe would clamp the size to the monitor, whose size winit gives
+        // with an integer scale on Wayland (2 for 125 %: 2560x1440 is taken
+        // as 1280x720), cutting the window off at the status bar
+        .with_clamp_size_to_monitor_size(false)
         .with_resizable(false)
         .with_maximize_button(false);
     if let Some(icon) = app_icon(&core.config.app_icon_name) {
