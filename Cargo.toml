@@ -11,3 +11,8 @@ rust-version = "1.90"
 [profile.release]
 lto = "thin"
 codegen-units = 4
+
+# eframe 0.36.2 with AccessKit for every window, not only the main one
+# (screen readers in PassCube and the dialogs); see vendor/eframe/PWTOOL-PATCH.md.
+[patch.crates-io]
+eframe = { path = "vendor/eframe" }

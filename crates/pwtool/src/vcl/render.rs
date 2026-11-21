@@ -963,6 +963,7 @@ fn draw_one(ui: &mut Ui, controls: &mut [Control], idx: usize, enabled: bool, f:
         State::Splitter => {
             let vertical = matches!(c.align, Align::Left | Align::Right);
             let resp = ui.interact(rect, ui.id().with(("split", &name)), Sense::drag());
+            a11y_hide(ui, &resp);
             let resp = resp.on_hover_cursor(if vertical { egui::CursorIcon::ResizeHorizontal } else { egui::CursorIcon::ResizeVertical });
             let d = resp.drag_delta();
             let delta = if vertical { d.x } else { d.y };

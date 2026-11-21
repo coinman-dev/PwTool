@@ -190,6 +190,13 @@ pub fn show(ui: &mut Ui, id: ViewportId, content: &dyn Content) {
     if let Some(h) = INPUT_HOOK.with(|h| h.borrow().clone()) {
         h(&ctx);
     }
+    // screen readers: the window is named by its title (not for a dialog
+    // drawn inside its parent, which would rename the parent)
+    if ctx.viewport_id() == id {
+        if let Some(title) = ctx.input(|i| i.viewport().title.clone()) {
+            ctx.accesskit_node_builder(egui::accesskit_root_id(), |b| b.set_label(title));
+        }
+    }
     ui.add_enabled_ui(blocker.is_none(), |ui| content.ui(ui));
     crate::ui::automate::save_screenshots(&ctx);
     if let Some(b) = blocker {

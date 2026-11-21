@@ -3174,7 +3174,7 @@ msgstr "További karakterek:"
 
 #. Character set builder, check box
 msgid "At least"
-msgstr "%d legalább 100.000 utas szállításáért"
+msgstr "Legalább"
 
 #. Character set builder, edit box
 msgid "From:"

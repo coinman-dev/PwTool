@@ -113,9 +113,8 @@ Windows (Win32 API, as in Password Tech):
   settings are saved when Windows shuts down.
 
 Not available compared with Password Tech: dragging text out of the program with the mouse
-(copy and paste works), and user name autocompletion in PassCube. Screen readers can read
-the main window; the other windows show only their titles to them (a limitation of the
-egui window integration).
+(copy and paste works), and user name autocompletion in PassCube. Screen readers (Narrator,
+NVDA, Orca) can read all windows, including the PassCube entry list.
 
 ## Settings and data
 
@@ -200,5 +199,6 @@ GNU General Public License v2 or later — see [LICENSE](LICENSE).
 Based on **Password Tech** (Copyright © 2002–2026 Christian Thöing). Third-party components
 retain their own licenses: miniLZO (GPL v2+), miniz (MIT), zxcvbn-c (MIT), Lua (MIT, via
 `mlua`), and the Rust crates the program is built from (egui, winit and others, MIT or
-Apache-2.0), including the fallback fonts bundled with egui (Hack, Ubuntu Light, Noto Emoji,
+Apache-2.0; `vendor/eframe` is eframe 0.36.2 with a small accessibility patch, see
+`vendor/eframe/PWTOOL-PATCH.md`), including the fallback fonts bundled with egui (Hack, Ubuntu Light, Noto Emoji,
 emoji-icon-font) under their own free licenses.

@@ -32,13 +32,15 @@
   font instead of being cut off; a caption that still does not fit shows its full text as
   a tooltip.
 - Screen readers get the text of labels, the names of icon buttons and the captions of
-  input fields in the main window.
+  input fields in all windows; the PassCube entry list is a list with its entries and the
+  selected one (eframe is patched to expose windows other than the main one).
+- Hungarian translation: the "At least" check boxes of the Character Set Builder showed a
+  wrong text taken over from the original translation.
 
 ### Known limitations
 
 - Text cannot be dragged with the mouse from the program into other programs (copy and
   paste works); PassCube has no user name autocompletion.
-- Screen readers see only the titles of windows other than the main window.
 
 ## 0.1.0-beta — 2026-11-20
 

@@ -328,6 +328,11 @@ impl<K: Clone + PartialEq + 'static> ListView<K> {
         }
         let has_focus = focus_resp.has_focus();
         st.has_focus = has_focus;
+        // screen readers: a list box; its active descendant (set below) is
+        // the current row, announced when it changes
+        let current_row = st.cursor.or_else(|| st.selected.iter().position(|&x| x));
+        let mut current_id: Option<egui::Id> = None;
+        ui.ctx().accesskit_node_builder(focus_resp.id, |b| b.set_role(egui::accesskit::Role::ListBox));
         if has_focus {
             ui.memory_mut(|m| {
                 m.set_focus_lock_filter(
@@ -357,7 +362,8 @@ impl<K: Clone + PartialEq + 'static> ListView<K> {
             ui.set_min_width(total_w);
             // header
             if head_h > 0.0 {
-                let (hr, _) = ui.allocate_exact_size(vec2(total_w, head_h), Sense::hover());
+                let (hr, hresp) = ui.allocate_exact_size(vec2(total_w, head_h), Sense::hover());
+                a11y_hide(ui, &hresp);
                 ui.painter().rect_filled(hr, 0.0, visuals.faint_bg_color);
                 let mut x = hr.min.x;
                 let hfont = egui::TextStyle::Body.resolve(ui.style());
@@ -371,6 +377,8 @@ impl<K: Clone + PartialEq + 'static> ListView<K> {
                     if resp.clicked() {
                         header_click = Some(ci);
                     }
+                    let col = st.columns[ci].0.clone();
+                    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, &col));
                     let mut title = st.columns[ci].0.clone();
                     if let Some((sc, asc)) = st.sort {
                         if sc == ci {
@@ -388,6 +396,7 @@ impl<K: Clone + PartialEq + 'static> ListView<K> {
                     // width by dragging the right edge
                     let edge = Rect::from_center_size(pos2(cr.max.x, cr.center().y), vec2(6.0, head_h));
                     let er = ui.interact(edge, self.id.with(("edge", ci)), Sense::drag());
+                    a11y_hide(ui, &er);
                     if er.hovered() || er.dragged() {
                         ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
                     }
@@ -415,6 +424,15 @@ impl<K: Clone + PartialEq + 'static> ListView<K> {
                 for i in range {
                     let (rr, resp) = ui.allocate_exact_size(vec2(row_w, row_h), Sense::click_and_drag());
                     let sel = st.selected[i];
+                    let label = row_label(&st.rows[i]);
+                    ui.ctx().accesskit_node_builder(resp.id, |b| {
+                        b.set_role(egui::accesskit::Role::ListBoxOption);
+                        b.set_label(label);
+                        b.set_selected(sel);
+                    });
+                    if current_row == Some(i) {
+                        current_id = Some(resp.id);
+                    }
                     if sel {
                         let fill = if has_focus { visuals.selection.bg_fill } else { visuals.selection.bg_fill.gamma_multiply(0.6) };
                         ui.painter().rect_filled(rr, 0.0, fill);
@@ -479,6 +497,7 @@ impl<K: Clone + PartialEq + 'static> ListView<K> {
                 let rest = ui.available_rect_before_wrap();
                 if rest.height() > 0.0 && enabled {
                     let r = ui.interact(rest, self.id.with("empty"), Sense::click());
+                    a11y_hide(ui, &r);
                     if r.secondary_clicked() {
                         context = Some((None, ui.input(|inp| inp.pointer.interact_pos()).unwrap_or(rest.center())));
                     }
@@ -486,6 +505,9 @@ impl<K: Clone + PartialEq + 'static> ListView<K> {
             });
             ui.ctx().data_mut(|d| d.insert_temp(self.id.with("voff"), out.state.offset.y));
         });
+        if let Some(id) = current_id {
+            ui.ctx().accesskit_node_builder(focus_resp.id, |b| b.set_active_descendant(id.accesskit_id()));
+        }
         if clicked_row.is_some() || context.is_some() || header_click.is_some() {
             focus_resp.request_focus();
         }
@@ -523,4 +545,14 @@ impl<K: Clone + PartialEq + 'static> ListView<K> {
             ui.painter().rect_stroke(rect, 2.0, Stroke::new(1.0, visuals.selection.bg_fill), StrokeKind::Inside);
         }
     }
+}
+
+/// Text of a row for screen readers: the non-empty cells.
+fn row_label<K>(row: &LvRow<K>) -> String {
+    row.cells.iter().map(|c| c.replace(['\r', '\n'], " ")).filter(|c| !c.trim().is_empty()).collect::<Vec<_>>().join(", ")
+}
+
+/// Screen readers: leave out an area that is not a control of its own.
+fn a11y_hide(ui: &Ui, resp: &egui::Response) {
+    ui.ctx().accesskit_node_builder(resp.id, |b| b.set_hidden());
 }
