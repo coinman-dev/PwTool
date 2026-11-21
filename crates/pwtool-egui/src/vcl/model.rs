@@ -14,6 +14,10 @@ use zeroize::Zeroizing;
 
 use super::text::TextBuf;
 
+fn byte_of(s: &str, char_index: usize) -> usize {
+    s.char_indices().nth(char_index).map_or(s.len(), |(i, _)| i)
+}
+
 pub const AK_LEFT: u8 = 1;
 pub const AK_TOP: u8 = 2;
 pub const AK_RIGHT: u8 = 4;
@@ -130,6 +134,20 @@ pub struct Control {
     /// Text field needs the focus at the next frame.
     pub focus_request: bool,
     pub has_focus: bool,
+    /// Selection of an edit or memo after the last frame (character
+    /// indices, start <= end; equal = cursor position).
+    pub selection: Option<(usize, usize)>,
+    /// Changes of the cursor/selection to apply at the next frame.
+    pub edit_ops: Vec<EditOp>,
+}
+
+/// Operation on the selection of an edit control.
+#[derive(Clone, Debug, PartialEq)]
+pub enum EditOp {
+    SelectAll,
+    /// Place the cursor at a character index.
+    Cursor(usize),
+    Undo,
 }
 
 /// One entry of a menu tree.
@@ -414,6 +432,8 @@ impl Builder<'_> {
             rect: Rect::NOTHING,
             focus_request: false,
             has_focus: false,
+            selection: None,
+            edit_ops: Vec::new(),
         });
         if let Some(p) = parent {
             self.controls[p].children.push(idx);
@@ -810,6 +830,102 @@ impl Form {
         });
     }
 
+    /// Selected range of an edit or memo (character indices), if not empty.
+    pub fn selection(&self, name: &str) -> Option<(usize, usize)> {
+        self.with(name, |c| c.selection.filter(|(a, b)| a != b))
+    }
+
+    /// Selected text of an edit or memo.
+    pub fn selected_text(&self, name: &str) -> Zeroizing<String> {
+        let sel = self.selection(name);
+        self.with(name, |c| {
+            let (State::Edit { text, .. } | State::Memo { text, .. } | State::Combo { text, .. }) = &c.state else {
+                return Zeroizing::new(String::new());
+            };
+            match sel {
+                Some((a, b)) => Zeroizing::new(text.as_str().chars().skip(a).take(b - a).collect()),
+                None => Zeroizing::new(String::new()),
+            }
+        })
+    }
+
+    pub fn select_all(&self, name: &str) {
+        self.with(name, |c| {
+            c.edit_ops.push(EditOp::SelectAll);
+            c.focus_request = true;
+        });
+    }
+
+    /// Undo the last change of an edit (not for secret text: it keeps no
+    /// history).
+    pub fn undo(&self, name: &str) {
+        self.with(name, |c| c.edit_ops.push(EditOp::Undo));
+    }
+
+    /// Delete the selected text. Returns whether something was deleted.
+    pub fn delete_selection(&self, name: &str) -> bool {
+        let Some((a, b)) = self.selection(name) else { return false };
+        self.with(name, |c| {
+            if let State::Edit { text, .. } | State::Memo { text, .. } | State::Combo { text, .. } = &mut c.state {
+                let s = text.as_str();
+                let (ba, bb) = (byte_of(s, a), byte_of(s, b));
+                let mut n = Zeroizing::new(String::with_capacity(s.len()));
+                n.push_str(&s[..ba]);
+                n.push_str(&s[bb..]);
+                text.set(&n);
+                c.selection = Some((a, a));
+                c.edit_ops.push(EditOp::Cursor(a));
+            }
+        });
+        self.push_event(Event::Change(name.to_string()));
+        true
+    }
+
+    /// Insert text at the cursor, replacing the selection (paste).
+    pub fn insert_text(&self, name: &str, ins: &str) {
+        self.delete_selection(name);
+        self.with(name, |c| {
+            let pos = c.selection.map_or(usize::MAX, |(a, _)| a);
+            if let State::Edit { text, .. } | State::Memo { text, .. } | State::Combo { text, .. } = &mut c.state {
+                let s = text.as_str();
+                let pos = pos.min(s.chars().count());
+                let b = byte_of(s, pos);
+                let mut n = Zeroizing::new(String::with_capacity(s.len() + ins.len()));
+                n.push_str(&s[..b]);
+                n.push_str(ins);
+                n.push_str(&s[b..]);
+                text.set(&n);
+                let cur = pos + ins.chars().count();
+                c.selection = Some((cur, cur));
+                c.edit_ops.push(EditOp::Cursor(cur));
+            }
+        });
+        self.push_event(Event::Change(name.to_string()));
+    }
+
+    /// Use a monospaced font for a control.
+    pub fn set_mono(&self, name: &str, mono: bool) {
+        self.with(name, |c| c.font.mono = mono);
+    }
+
+    /// Relative font size of a control.
+    pub fn set_font_scale(&self, name: &str, scale: f32) {
+        self.with(name, |c| c.font.scale = scale);
+    }
+
+    /// Alignment of a label: horizontal (0 left ... 1 right), vertically centred.
+    pub fn set_label_align(&self, name: &str, h: f32, v_center: bool) {
+        self.with(name, |c| {
+            if let State::Label { halign, vcenter, .. } = &mut c.state {
+                *halign = h;
+                *vcenter = v_center;
+            }
+            if c.autosize.is_some() {
+                c.autosize = Some(h);
+            }
+        });
+    }
+
     // ----------------------------------------------------------- check state
 
     /// Check box, radio button, speed/tool button (down), radio group item.
@@ -1063,7 +1179,7 @@ impl Form {
     /// Replace the sub-items of menu item `parent` with dynamic items
     /// (name, caption) placed before the items of the form description;
     /// they produce [`Event::Menu`] with the name `"dyn:<name>"`.
-    pub fn set_dynamic_items(&self, parent: &str, new: &[(String, String)]) {
+    pub fn set_dynamic_items(&self, parent: &str, new: &[(String, String, Option<u16>)]) {
         let mut d = self.data.borrow_mut();
         let FormData { menus, items, .. } = &mut *d;
         fn find<'a>(nodes: &'a mut [MenuNode], name: &str) -> Option<&'a mut MenuNode> {
@@ -1081,7 +1197,7 @@ impl Form {
             if let Some(node) = find(tree, parent) {
                 node.children.retain(|c| !c.name.starts_with("dyn:"));
                 let mut dynamic: Vec<MenuNode> = Vec::new();
-                for (n, caption) in new {
+                for (n, caption, shortcut) in new {
                     let key = format!("dyn:{n}");
                     items.insert(
                         key.clone(),
@@ -1091,7 +1207,7 @@ impl Form {
                             visible: true,
                             checked: None,
                             radio: false,
-                            shortcut: None,
+                            shortcut: *shortcut,
                             default: false,
                         },
                     );
@@ -1103,6 +1219,11 @@ impl Form {
                 node.children.splice(0..0, dynamic);
             }
         }
+    }
+
+    /// Attach a popup menu to a control (right click), like `PopupMenu`.
+    pub fn set_popup_menu(&self, name: &str, menu: &str) {
+        self.with(name, |c| c.popup_menu = Some(menu.to_string()));
     }
 
     /// Open a popup menu at `pos` (or the pointer).
@@ -1138,6 +1259,10 @@ impl Form {
     /// Handler for every event not handled by a specific handler.
     pub fn on_any(&self, f: impl Fn(&Event) + 'static) {
         self.handlers.borrow_mut().push((EventKey::Any, Rc::new(f)));
+    }
+
+    pub fn has_handlers(&self) -> bool {
+        !self.handlers.borrow().is_empty()
     }
 
     /// Call the handlers of the recorded events. Returns the events without

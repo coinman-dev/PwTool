@@ -443,8 +443,11 @@ fn draw_combo(ui: &mut Ui, c: &mut Control, enabled: bool, f: &mut Frame) {
                     }
                 });
             });
-            if te.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                f.events.push(Event::Enter(name.clone()));
+            if te.lost_focus() {
+                if ui.input(|i| i.key_pressed(Key::Enter)) {
+                    f.events.push(Event::Enter(name.clone()));
+                }
+                f.events.push(Event::Exit(name.clone()));
             }
             if changed {
                 f.events.push(Event::Change(name.clone()));
@@ -534,6 +537,42 @@ fn draw_edit(ui: &mut Ui, c: &mut Control, enabled: bool, f: &mut Frame) {
         resp.request_focus();
     }
     c.has_focus = resp.has_focus();
+    // selection: apply requested changes, remember the current one
+    if let Some(mut st) = egui::text_edit::TextEditState::load(&ctx, id) {
+        use egui::text::{CCursor, CCursorRange};
+        let mut changed_state = false;
+        for op in std::mem::take(&mut c.edit_ops) {
+            let len = match &c.state {
+                State::Edit { text, .. } | State::Memo { text, .. } => text.as_str().chars().count(),
+                _ => 0,
+            };
+            match op {
+                super::model::EditOp::SelectAll => {
+                    st.cursor.set_char_range(Some(CCursorRange::two(CCursor::new(0), CCursor::new(len))))
+                }
+                super::model::EditOp::Cursor(n) => st.cursor.set_char_range(Some(CCursorRange::one(CCursor::new(n.min(len))))),
+                super::model::EditOp::Undo => {
+                    if let State::Edit { text, .. } | State::Memo { text, .. } = &mut c.state {
+                        let cur = (st.cursor.char_range().unwrap_or_default(), text.as_str().to_string());
+                        let prev = st.undoer().undo(&cur).cloned();
+                        if let Some((range, t)) = prev {
+                            text.set(&t);
+                            st.cursor.set_char_range(Some(range));
+                            f.events.push(Event::Change(name.clone()));
+                        }
+                    }
+                }
+            }
+            changed_state = true;
+        }
+        if let Some(r) = st.cursor.char_range() {
+            let (a, b) = (r.primary.index.0, r.secondary.index.0);
+            c.selection = Some((a.min(b), a.max(b)));
+        }
+        if changed_state {
+            st.store(&ctx, id);
+        }
+    }
     if resp.changed() {
         f.events.push(Event::Change(name.clone()));
     }
@@ -888,15 +927,34 @@ impl Form {
         let popup_open = egui::Popup::is_any_open(ui.ctx());
         let mut d = self.data.borrow_mut();
         let order = draw_order(&d);
-        let FormData { controls, items, events, .. } = &mut *d;
-        // menu shortcuts (enabled, visible items of all menus)
-        let mut shortcuts: Vec<(&String, u16)> =
-            items.iter().filter(|(_, s)| s.enabled && s.visible).filter_map(|(n, s)| s.shortcut.filter(|&x| x != 0).map(|x| (n, x))).collect();
+        let FormData { controls, items, events, menus, main_menu, .. } = &mut *d;
+        // menu shortcuts: the main menu always, a popup menu while a control
+        // using it has the focus (VCL `IsShortCut`)
+        fn collect<'a>(nodes: &'a [MenuNode], out: &mut Vec<&'a str>) {
+            for n in nodes {
+                out.push(&n.name);
+                collect(&n.children, out);
+            }
+        }
+        let mut active: Vec<&str> = Vec::new();
+        for (m, nodes) in menus.iter() {
+            let focused = controls.iter().any(|c| c.has_focus && c.popup_menu.as_deref() == Some(m.as_str()));
+            if main_menu.as_deref() == Some(m.as_str()) || focused {
+                collect(nodes, &mut active);
+            }
+        }
+        let mut shortcuts: Vec<(String, u16)> = active
+            .iter()
+            .filter_map(|n| items.get(*n).map(|s| (n, s)))
+            .filter(|(_, s)| s.enabled && s.visible)
+            .filter_map(|(n, s)| s.shortcut.filter(|&x| x != 0).map(|x| (n.to_string(), x)))
+            .collect();
         shortcuts.sort();
+        shortcuts.dedup();
         for (name, sc) in shortcuts {
             if let Some((m, k)) = shortcut_key(sc) {
                 if ui.input_mut(|i| i.consume_key(m, k)) {
-                    events.push(Event::Menu(name.clone()));
+                    events.push(Event::Menu(name));
                 }
             }
         }

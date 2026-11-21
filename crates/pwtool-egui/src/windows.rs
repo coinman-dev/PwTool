@@ -21,7 +21,22 @@ impl Content for crate::vcl::Form {
         let fill = ui.visuals().panel_fill;
         ui.painter().rect_filled(ui.max_rect(), 0.0, fill);
         self.show(ui);
+        // forms with handlers handle their events right after drawing;
+        // the others are polled with `take_events()`
+        if self.has_handlers() {
+            let _ = self.dispatch();
+        }
     }
+}
+
+thread_local! {
+    static INPUT_HOOK: RefCell<Option<Rc<dyn Fn(&Context)>>> = const { RefCell::new(None) };
+}
+
+/// Function called for the input of every window in every frame (the
+/// original collects entropy from all keyboard and mouse messages).
+pub fn set_input_hook(f: impl Fn(&Context) + 'static) {
+    INPUT_HOOK.with(|h| *h.borrow_mut() = Some(Rc::new(f)));
 }
 
 /// A window other than the main window.
@@ -34,6 +49,7 @@ pub struct Window {
     pub size: Cell<Vec2>,
     pub min_size: Vec2,
     pub resizable: bool,
+    pub decorated: bool,
     /// Asked when the user closes the window; `false` keeps it open
     /// (`OnCloseQuery`).
     pub on_close: RefCell<Option<Box<dyn Fn() -> bool>>>,
@@ -53,6 +69,7 @@ impl Window {
             size: Cell::new(size),
             min_size: Vec2::ZERO,
             resizable: false,
+            decorated: true,
             on_close: RefCell::new(None),
             shown: Cell::new(false),
             #[cfg(windows)]
@@ -75,6 +92,11 @@ impl Window {
 thread_local! {
     static WINDOWS: RefCell<Vec<Rc<Window>>> = const { RefCell::new(Vec::new()) };
     static CTX: RefCell<Option<Context>> = const { RefCell::new(None) };
+}
+
+/// The egui context of the program.
+pub fn ctx() -> Context {
+    CTX.with(|c| c.borrow().clone()).expect("windows::set_context not called")
 }
 
 pub fn set_context(ctx: &Context) {
@@ -129,6 +151,9 @@ pub fn embed_modal() -> bool {
 pub fn show(ui: &mut Ui, id: ViewportId, content: &dyn Content) {
     let blocker = modal_child(id);
     let ctx = ui.ctx().clone();
+    if let Some(h) = INPUT_HOOK.with(|h| h.borrow().clone()) {
+        h(&ctx);
+    }
     ui.add_enabled_ui(blocker.is_none(), |ui| content.ui(ui));
     if let Some(b) = blocker {
         if !embed_modal() && ctx.input(|i| i.pointer.any_pressed()) {
@@ -153,7 +178,8 @@ fn show_window(ctx: &Context, w: &Rc<Window>) {
         .with_inner_size(w.size.get())
         .with_resizable(w.resizable)
         .with_maximize_button(w.resizable && !w.modal)
-        .with_minimize_button(!w.modal);
+        .with_minimize_button(!w.modal)
+        .with_decorations(w.decorated);
     if w.resizable && w.min_size != Vec2::ZERO {
         b = b.with_min_inner_size(w.min_size);
     }

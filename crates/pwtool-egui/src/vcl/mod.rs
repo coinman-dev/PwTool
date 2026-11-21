@@ -11,7 +11,7 @@ pub mod render;
 pub mod snapshot;
 pub mod text;
 
-pub use model::Form;
+pub use model::{Event, Form};
 pub use render::window_size;
 
 use egui::{FontId, TextStyle};

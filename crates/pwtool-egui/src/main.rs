@@ -12,6 +12,7 @@
 #![allow(dead_code)]
 
 mod runtime;
+mod ui;
 mod vcl;
 mod windows;
 
@@ -239,6 +240,23 @@ fn main() {
             std::process::exit(1);
         }
         return;
+    }
+    if !args.iter().any(|a| a == "--show") && std::env::var_os("PWTOOL_DEMO").is_none() {
+        // the program: console mode or GUI
+        pwtool_core::secure_mem::harden_process();
+        let cmd = pwtool_app::app::parse_cmdline(&args);
+        if cmd.gen_num_passw > 0 || cmd.show_help {
+            #[cfg(windows)]
+            pwtool_app::platform::sys::attach_parent_console();
+            std::process::exit(pwtool_app::cli::run(cmd));
+        }
+        let rc = ui::run(cmd);
+        if pwtool_app::app::restart_requested() {
+            if let Ok(exe) = std::env::current_exe() {
+                let _ = std::process::Command::new(exe).spawn();
+            }
+        }
+        std::process::exit(rc);
     }
     let name = arg(&args, "--show").unwrap_or_else(|| "Main".into());
     let dark = args.iter().any(|a| a == "--dark");
