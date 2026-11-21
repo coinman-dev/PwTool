@@ -559,7 +559,7 @@ fn draw_combo(ui: &mut Ui, c: &mut Control, enabled: bool, f: &mut Frame) {
             ui.spacing_mut().interact_size.y = rect.height();
             let row_h = rect.height();
             let ir = egui::ComboBox::from_id_salt(id)
-                .width(rect.width() - ui.spacing().icon_width - 8.0)
+                .width(rect.width()) // the whole width of the control (arrow included)
                 .selected_text(RichText::new(text.as_str()).font(fid.clone()))
                 .show_ui(ui, |ui| {
                     // list rows as tall as the field
